@@ -30,6 +30,7 @@ interface AgentWorkspacesIndex {
 }
 
 const INDEX_VERSION = 2
+const DEPRECATED_DEFAULT_SKILL_SLUGS = new Set(['proma-coach'])
 
 /** 读取工作区索引文件，自动执行版本迁移 */
 function readIndex(): AgentWorkspacesIndex {
@@ -351,6 +352,8 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
     const activeDir = getWorkspaceSkillsDir(workspace.slug)
     const inactiveDir = getInactiveSkillsDir(workspace.slug)
 
+    removeDeprecatedDefaultSkillsFromWorkspace(workspace.slug, activeDir, inactiveDir)
+
     for (const [slug, info] of defaultSkills) {
       const activePath = join(activeDir, slug)
       const inactivePath = join(inactiveDir, slug)
@@ -393,6 +396,22 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
         console.log(`[Agent 工作区] 已注入新默认 Skill: ${workspace.slug}/${slug} → active`)
       } catch (err) {
         console.warn(`[Agent 工作区] 注入默认 Skill 失败 (${workspace.slug}/${slug}):`, err)
+      }
+    }
+  }
+}
+
+function removeDeprecatedDefaultSkillsFromWorkspace(workspaceSlug: string, activeDir: string, inactiveDir: string): void {
+  for (const slug of DEPRECATED_DEFAULT_SKILL_SLUGS) {
+    for (const dir of [activeDir, inactiveDir]) {
+      const target = join(dir, slug)
+      if (!existsSync(target)) continue
+
+      try {
+        rmSync(target, { recursive: true, force: true })
+        console.log(`[Agent 工作区] 已移除废弃默认 Skill: ${workspaceSlug}/${slug}`)
+      } catch (err) {
+        console.warn(`[Agent 工作区] 移除废弃默认 Skill 失败 (${workspaceSlug}/${slug})，跳过:`, err)
       }
     }
   }

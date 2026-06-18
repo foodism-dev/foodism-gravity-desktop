@@ -29,10 +29,21 @@ import {
 } from '@/atoms/markdown-font-size'
 import { previewModePreferenceAtom, type PreviewModePreference } from '@/atoms/preview-atoms'
 import { cn } from '@/lib/utils'
+import { foodismDevFeaturesEnabled } from '@/lib/foodism-dev-features'
 import { detectIsWindows } from '@/lib/platform'
 import type { ThemeMode, ThemeStyle, MarkdownFontSize } from '../../../types'
 
+// ===== 主题预览图片导入 =====
+import themeCloudDancer from '@/assets/theme-previews/theme-cloud-dancer.webp'
+import themeOceanLight from '@/assets/theme-previews/theme-ocean-light.webp'
+import themeForestMorning from '@/assets/theme-previews/theme-forest-morning.webp'
+import themeOceanDark from '@/assets/theme-previews/theme-ocean-dark.webp'
+import themeForestNight from '@/assets/theme-previews/theme-forest-night.webp'
+import themeMorandiNight from '@/assets/theme-previews/theme-morandi-night.webp'
+import themeTerminalDark from '@/assets/theme-previews/theme-terminal-dark.png'
+
 // ===== Logo 资源导入（用于图标选择器） =====
+import foodismIcon from '@/assets/bots/proma-logos/proma-foodism.png'
 import promaBlackLogo from '@/assets/bots/proma-logos/proma-black.png'
 import promaWhiteLogo from '@/assets/bots/proma-logos/proma-white.png'
 import promaBlueLogo from '@/assets/bots/proma-logos/proma-blue.png'
@@ -46,15 +57,6 @@ import promaEmeraldLogo from '@/assets/bots/proma-logos/proma-emerald.png'
 import proma8bitLogo from '@/assets/bots/proma-logos/proma-8bit.png'
 import promaCyberpunkLogo from '@/assets/bots/proma-logos/proma-cyberpunk.png'
 import promaFuturisticLogo from '@/assets/bots/proma-logos/proma-futuristic.png'
-
-// ===== 主题预览图片导入 =====
-import themeCloudDancer from '@/assets/theme-previews/theme-cloud-dancer.webp'
-import themeOceanLight from '@/assets/theme-previews/theme-ocean-light.webp'
-import themeForestMorning from '@/assets/theme-previews/theme-forest-morning.webp'
-import themeOceanDark from '@/assets/theme-previews/theme-ocean-dark.webp'
-import themeForestNight from '@/assets/theme-previews/theme-forest-night.webp'
-import themeMorandiNight from '@/assets/theme-previews/theme-morandi-night.webp'
-import themeTerminalDark from '@/assets/theme-previews/theme-terminal-dark.png'
 
 /** 主题选项 */
 const THEME_OPTIONS = [
@@ -145,6 +147,12 @@ const SPECIAL_STYLES: readonly SpecialStyle[] = [
   },
 ]
 
+/** 根据平台返回缩放快捷键提示 */
+const isMac = navigator.userAgent.includes('Mac')
+const ZOOM_HINT = isMac
+  ? '使用 ⌘+ 放大、⌘- 缩小、⌘0 恢复默认大小'
+  : '使用 Ctrl++ 放大、Ctrl+- 缩小、Ctrl+0 恢复默认大小'
+
 /** 图标变体定义 */
 interface IconVariant {
   id: string
@@ -154,7 +162,7 @@ interface IconVariant {
 }
 
 const ICON_VARIANTS: readonly IconVariant[] = [
-  { id: 'default', name: '默认', src: '', previewBg: 'bg-neutral-900' },
+  { id: 'default', name: '万店引力', src: foodismIcon, previewBg: 'bg-neutral-900' },
   { id: 'black', name: '经典黑', src: promaBlackLogo, previewBg: 'bg-neutral-900' },
   { id: 'white', name: '纯白版', src: promaWhiteLogo, previewBg: 'bg-white' },
   { id: 'blue', name: '品牌蓝', src: promaBlueLogo, previewBg: 'bg-blue-900' },
@@ -169,12 +177,6 @@ const ICON_VARIANTS: readonly IconVariant[] = [
   { id: 'cyberpunk', name: '赛博朋克', src: promaCyberpunkLogo, previewBg: 'bg-[#0d0221]' },
   { id: 'futuristic', name: '未来质感', src: promaFuturisticLogo, previewBg: 'bg-[#4a4a4a]' },
 ] as const
-
-/** 根据平台返回缩放快捷键提示 */
-const isMac = navigator.userAgent.includes('Mac')
-const ZOOM_HINT = isMac
-  ? '使用 ⌘+ 放大、⌘- 缩小、⌘0 恢复默认大小'
-  : '使用 Ctrl++ 放大、Ctrl+- 缩小、Ctrl+0 恢复默认大小'
 
 export function AppearanceSettings(): React.ReactElement {
   const [themeMode, setThemeMode] = useAtom(themeModeAtom)
@@ -258,7 +260,7 @@ export function AppearanceSettings(): React.ReactElement {
           />
 
           <SettingsSegmentedControl
-            label="Agent 预览展开方式"
+            label="预览展开方式"
             description="点击文件、工具结果「预览」按钮时的默认展开位置；拖拽预览 Tab 出标签栏可即时切换为侧边分屏"
             value={previewModePref}
             onValueChange={(v) => setPreviewModePref(v as PreviewModePreference)}
@@ -267,7 +269,7 @@ export function AppearanceSettings(): React.ReactElement {
         </SettingsCard>
       </SettingsSection>
 
-      <AppIconPicker />
+      {foodismDevFeaturesEnabled && <AppIconPicker />}
     </div>
   )
 }
@@ -358,29 +360,12 @@ function IconCard({
           variant.previewBg,
         )}
       >
-        {variant.id === 'default' ? (
-          // 默认图标用 CSS 模拟 Proma logo 形状
-          <div className="flex items-end gap-[2px] -rotate-12">
-            {[1, 0.85, 0.7, 0.55, 0.4, 0.25].map((opacity, i) => (
-              <div
-                key={i}
-                className="rounded-[1px]"
-                style={{
-                  width: i === 0 ? 4 : 3,
-                  height: i === 0 ? 14 : 14 - i * 1.5,
-                  backgroundColor: `rgba(255,255,255,${opacity})`,
-                }}
-              />
-            ))}
-          </div>
-        ) : (
-          <img
-            src={variant.src}
-            alt={variant.name}
-            className="w-full h-full object-contain"
-            draggable={false}
-          />
-        )}
+        <img
+          src={variant.src}
+          alt={variant.name}
+          className="w-full h-full object-contain"
+          draggable={false}
+        />
       </div>
       <span className="text-[10px] font-medium text-muted-foreground leading-tight text-center">
         {variant.name}

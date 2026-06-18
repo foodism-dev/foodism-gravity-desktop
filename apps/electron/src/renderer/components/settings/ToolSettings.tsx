@@ -421,7 +421,7 @@ function CustomToolsSection(): React.ReactElement | null {
   return (
     <SettingsSection
       title="自定义工具"
-      description="通过 Agent 模式创建的 HTTP API 工具"
+      description="通过会话创建的 HTTP API 工具"
     >
       <SettingsCard divided>
         {customTools.map((tool) => (

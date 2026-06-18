@@ -74,7 +74,7 @@ export function MigrateToAgentButton({ conversationId }: MigrateToAgentButtonPro
       store.set(activeViewAtom, 'conversations')
 
       // 6. 打开 Agent 会话 Tab 并激活
-      const sessionTitle = session.title ?? '新 Agent 会话'
+      const sessionTitle = session.title ?? '新会话'
       const tabs = store.get(tabsAtom)
       const result = openTab(tabs, {
         type: 'agent',
@@ -86,12 +86,12 @@ export function MigrateToAgentButton({ conversationId }: MigrateToAgentButtonPro
       store.set(currentAgentSessionIdAtom, session.id)
 
       // 7. 通知用户
-      toast.success('已切换到 Agent 模式', {
-        description: '对话历史已迁移到新的 Agent 会话',
+      toast.success('已切换到会话', {
+        description: '对话历史已迁移到新的会话',
       })
     } catch (error) {
       console.error('[MigrateToAgentButton] 迁移失败:', error)
-      toast.error('切换到 Agent 模式失败')
+      toast.error('切换到会话失败')
     } finally {
       setMigrating(false)
     }
@@ -99,7 +99,7 @@ export function MigrateToAgentButton({ conversationId }: MigrateToAgentButtonPro
 
   return (
     <MessageAction
-      tooltip={migrating ? '切换中...' : '切换到 Agent 模式'}
+      tooltip={migrating ? '切换中...' : '切换到会话'}
       onClick={() => { void handleMigrate() }}
       disabled={migrating}
     >

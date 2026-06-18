@@ -26,6 +26,7 @@ import {
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
 import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
+import { getChannelDisplayName, getSelectableChannelModels } from '@/lib/foodism-default-channel'
 import { cn } from '@/lib/utils'
 import type { Channel, ModelOption } from '@proma/shared'
 
@@ -38,12 +39,12 @@ function buildModelOptions(channels: Channel[], filterChannelId?: string, filter
     if (filterChannelId && channel.id !== filterChannelId) continue
     if (filterChannelIds && filterChannelIds.length > 0 && !filterChannelIds.includes(channel.id)) continue
 
-    for (const model of channel.models) {
+    for (const model of getSelectableChannelModels(channel)) {
       if (!model.enabled) continue
 
       options.push({
         channelId: channel.id,
-        channelName: channel.name,
+        channelName: getChannelDisplayName(channel),
         modelId: model.id,
         modelName: model.name,
         provider: channel.provider,

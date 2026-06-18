@@ -84,7 +84,7 @@ export function TabBarItem({
   }, [])
 
   const handleMouseDown = (e: React.MouseEvent): void => {
-    // Scratch Pad 不可中键关闭
+    // 草稿页兼容入口不支持中键关闭。
     if (type === 'scratch') return
     if (e.button === 1) {
       e.preventDefault()
@@ -111,7 +111,7 @@ export function TabBarItem({
   // 当前 active Tab 不显示预览面板
   const showPreview = isHovered && !isActive
 
-  // Scratch Pad 是固定草稿入口
+  // 草稿页保留兼容展示，但不再作为常驻入口注入标签栏。
   if (isScratch) {
     return (
       <div

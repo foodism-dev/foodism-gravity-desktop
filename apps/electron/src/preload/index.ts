@@ -7,7 +7,7 @@
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, AUTH_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
   GitRepoStatus,
@@ -107,6 +107,8 @@ import type {
 } from '@proma/shared'
 import type {
   UserProfile,
+  AuthSession,
+  LoginInput,
   AppSettings,
   QuickTaskSubmitInput,
   QuickTaskOpenSessionData,
@@ -303,6 +305,15 @@ export interface ElectronAPI {
   extractAttachmentText: (localPath: string) => Promise<string>
 
   // ===== 用户档案相关 =====
+
+  /** 获取登录会话 */
+  getAuthSession: () => Promise<AuthSession>
+
+  /** mock 登录 */
+  login: (input: LoginInput) => Promise<AuthSession>
+
+  /** 退出登录 */
+  logout: () => Promise<AuthSession>
 
   /** 获取用户档案 */
   getUserProfile: () => Promise<UserProfile>
@@ -995,7 +1006,7 @@ export interface ElectronAPI {
   migrationParseImportFile: (filePath: string) => Promise<unknown>
   /** 确认导入 */
   migrationConfirmImport: (options: unknown) => Promise<{ success: boolean }>
-  /** 打开文件选择对话框（选择 .proma-backup 或 .proma-share） */
+  /** 打开文件选择对话框（选择 .foodism-backup 或 .foodism-share，兼容旧 .proma 文件） */
   migrationOpenFileDialog: () => Promise<string | null>
   /** 打开文件保存对话框（选择导出路径） */
   migrationSaveFileDialog: (mode: string) => Promise<string | null>
@@ -1264,6 +1275,18 @@ const electronAPI: ElectronAPI = {
   },
 
   // 用户档案
+  getAuthSession: () => {
+    return ipcRenderer.invoke(AUTH_IPC_CHANNELS.GET_SESSION)
+  },
+
+  login: (input: LoginInput) => {
+    return ipcRenderer.invoke(AUTH_IPC_CHANNELS.LOGIN, input)
+  },
+
+  logout: () => {
+    return ipcRenderer.invoke(AUTH_IPC_CHANNELS.LOGOUT)
+  },
+
   getUserProfile: () => {
     return ipcRenderer.invoke(USER_PROFILE_IPC_CHANNELS.GET)
   },

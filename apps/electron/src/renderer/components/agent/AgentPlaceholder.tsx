@@ -14,9 +14,9 @@ export function AgentPlaceholder(): React.ReactElement {
         <Bot size={32} className="text-muted-foreground/60" />
       </div>
       <div className="text-center space-y-2">
-        <h2 className="text-lg font-medium text-foreground">Agent 模式</h2>
+        <h2 className="text-lg font-medium text-foreground">会话模式</h2>
         <p className="text-sm max-w-[300px]">
-          使用 AI Agent 处理复杂任务，支持多步骤推理和工具调用
+          使用 AI 处理复杂任务，支持多步骤推理和工具调用
         </p>
       </div>
       <div className="mt-4 px-3 py-1.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs font-medium">

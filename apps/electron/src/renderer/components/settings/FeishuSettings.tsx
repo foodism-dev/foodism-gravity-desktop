@@ -332,7 +332,7 @@ lark-cli config init --new
 lark-cli auth login --domain all
 
 执行第 3 步时浏览器会弹出授权页面，引导用户完成应用创建并扫码授权；
-执行第 4 步时浏览器会再次弹出，引导用户一次性确认所有领域的权限——这一步是体验关键，跳过会导致后续 Agent 调用飞书文档/日历/邮件等能力时报权限不足。`
+执行第 4 步时浏览器会再次弹出，引导用户一次性确认所有领域的权限——这一步是体验关键，跳过会导致后续调用飞书文档/日历/邮件等能力时报权限不足。`
 
 /** 飞书 CLI 配置引导 */
 function FeishuCliSection(): React.ReactElement {
@@ -342,7 +342,7 @@ function FeishuCliSection(): React.ReactElement {
   const handleSendToAgent = React.useCallback(() => {
     navigator.clipboard.writeText(FEISHU_CLI_PROMPT).then(() => {
       setCopied(true)
-      toast.success('配置指令已复制，请在 Agent 对话中粘贴发送')
+      toast.success('配置指令已复制，请在会话中粘贴发送')
       setTimeout(() => setCopied(false), 2000)
     }).catch(() => {
       toast.error('复制失败')
@@ -352,11 +352,11 @@ function FeishuCliSection(): React.ReactElement {
   return (
     <SettingsSection
       title="配置飞书 CLI"
-      description="飞书官方开源的命令行工具，配置后 Proma Agent 将可以直接读消息、查日历、写文档、建多维表格、发邮件，把任务真正落到飞书里完成。"
+      description="飞书官方开源的命令行工具，配置后 Foodism 将可以直接读消息、查日历、写文档、建多维表格、发邮件，把任务真正落到飞书里完成。"
     >
       <SettingsCard divided={false}>
         <div className="px-4 py-4 space-y-2 text-sm text-muted-foreground">
-          <p className="text-xs">复制配置提示词，并前往飞书Bot日常绑定的<strong>工作区</strong>，创建新的 Proma Agent 对话并发送即可让 Proma 协助完成配置。</p>
+          <p className="text-xs">复制配置提示词，并前往飞书 Bot 日常绑定的<strong>工作区</strong>，创建新的会话并发送即可让 Foodism 协助完成配置。</p>
           <button
             type="button"
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -639,14 +639,14 @@ function FeishuBindingsTab(): React.ReactElement {
 
 // ===== 扫码注册 Dialog =====
 
-/** 扫码成功页底部的"下一步推荐"：把 CLI 提示词一键复制，让用户去 Agent 会话里跑 */
+/** 扫码成功页底部的"下一步推荐"：把 CLI 提示词一键复制，让用户去会话里跑 */
 function CliRecommendationCard(): React.ReactElement {
   const [copied, setCopied] = React.useState(false)
 
   const handleCopy = React.useCallback(() => {
     navigator.clipboard.writeText(FEISHU_CLI_PROMPT).then(() => {
       setCopied(true)
-      toast.success('提示词已复制，前往 Agent 对话粘贴发送')
+      toast.success('提示词已复制，前往会话粘贴发送')
       setTimeout(() => setCopied(false), 2000)
     }).catch(() => {
       toast.error('复制失败')
@@ -658,8 +658,8 @@ function CliRecommendationCard(): React.ReactElement {
       <div className="flex items-start gap-2">
         <div className="flex-1 text-xs text-foreground/80 leading-relaxed">
           <div className="font-medium text-foreground mb-0.5">想要更完整的飞书生态体验？</div>
-          补全飞书 CLI 后 Proma Agent 还可以直接读写你的文档、查日历、发邮件等。
-          复制下方提示词到任意工作区的新对话发送即可，Agent 会全程引导完成。
+          补全飞书 CLI 后 Foodism 还可以直接读写你的文档、查日历、发邮件等。
+          复制下方提示词到任意工作区的新对话发送即可，助手会全程引导完成。
         </div>
       </div>
       <Button
@@ -906,7 +906,7 @@ function SessionMirrorSection({ bots }: { bots: FeishuBotConfig[] }): React.Reac
   return (
     <SettingsSection
       title="同步到飞书"
-      description="开启后，每个新的 Proma Agent Session 会创建一个仅包含你和指定 Bot 的飞书群，并把输出同步到群内卡片，同时默认阻止电脑自动休眠，方便你脱离电脑在飞书上继续完成工作。"
+      description="开启后，每个新的会话会创建一个仅包含你和指定 Bot 的飞书群，并把输出同步到群内卡片，同时默认阻止电脑自动休眠，方便你脱离电脑在飞书上继续完成工作。"
     >
       <SettingsCard divided={false}>
         <div className="px-4 py-4 space-y-4">
@@ -1478,7 +1478,7 @@ function FeishuConfigTab(): React.ReactElement {
             {/* 提示 */}
             <div className="pl-7 p-3 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs">
               版本审核通过并发布后，在飞书中搜索机器人名称添加到聊天，
-              即可通过飞书向 Proma Agent 发送指令。
+              即可通过飞书向 Foodism 发送指令。
             </div>
           </div>
         </SettingsCard>

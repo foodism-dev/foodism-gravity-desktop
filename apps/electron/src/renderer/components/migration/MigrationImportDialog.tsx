@@ -69,7 +69,7 @@ export function MigrationImportDialog(): React.ReactElement {
         <DialogHeader>
           <DialogTitle>导入配置</DialogTitle>
           <DialogDescription>
-            从备份文件导入数据，支持 .proma-backup 和 .proma-share 格式
+            从备份文件导入数据，支持 .foodism-backup 和 .foodism-share 格式
           </DialogDescription>
         </DialogHeader>
 
@@ -81,7 +81,7 @@ export function MigrationImportDialog(): React.ReactElement {
                 <FolderOpen size={28} className="text-muted-foreground" />
               </div>
               <p className="text-sm text-muted-foreground text-center">
-                选择 .proma-backup 或 .proma-share 文件开始导入
+                选择 .foodism-backup 或 .foodism-share 文件开始导入
               </p>
               <button
                 onClick={handleSelectImportFile}
@@ -247,7 +247,7 @@ function V1ContentSummary({ preview }: { preview: { manifest: { workspaceName?: 
       </p>
       <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm text-muted-foreground">
         {preview.agentSessionCount > 0 && (
-          <span>Agent 会话：{preview.agentSessionCount} 个</span>
+          <span>会话：{preview.agentSessionCount} 个</span>
         )}
         {preview.chatConversationCount > 0 && (
           <span>Chat 对话：{preview.chatConversationCount} 个</span>
@@ -290,7 +290,7 @@ function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorks
         </p>
         <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm text-muted-foreground">
           {preview.agentSessionCount > 0 && (
-            <span>Agent 会话：{preview.agentSessionCount} 个</span>
+            <span>会话：{preview.agentSessionCount} 个</span>
           )}
           {preview.chatConversationCount > 0 && (
             <span>Chat 对话：{preview.chatConversationCount} 个</span>

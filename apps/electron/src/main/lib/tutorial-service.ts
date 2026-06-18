@@ -67,11 +67,11 @@ export function createWelcomeConversation(): ConversationMeta | null {
 
   try {
     // 1. 创建对话
-    const meta = createConversation('了解 Proma')
+    const meta = createConversation('快速上手')
 
     // 2. 保存教程文件为附件
     const attachmentId = randomUUID()
-    const attachmentFilename = 'Proma 使用教程.md'
+    const attachmentFilename = '使用教程.md'
     const localPath = `${meta.id}/${attachmentId}.md`
     const dir = getConversationAttachmentsDir(meta.id)
     const fullPath = join(dir, `${attachmentId}.md`)
@@ -93,7 +93,7 @@ export function createWelcomeConversation(): ConversationMeta | null {
     const userMessage: ChatMessage = {
       id: randomUUID(),
       role: 'user',
-      content: '你好，我是 Proma 的新用户，希望快速上手。这是完整的使用教程，作为你的参考。',
+      content: '你好，我希望快速上手。这是完整的使用教程，作为你的参考。',
       createdAt: now,
       attachments: [attachment],
     }

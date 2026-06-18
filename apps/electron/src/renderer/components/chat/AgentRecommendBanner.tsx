@@ -87,7 +87,7 @@ export function AgentRecommendBanner(): React.ReactElement | null {
       store.set(activeViewAtom, 'conversations')
 
       // 6. 打开 Agent 会话 Tab 并激活
-      const sessionTitle = session.title ?? '新 Agent 会话'
+      const sessionTitle = session.title ?? '新会话'
       const tabs = store.get(tabsAtom)
       const result = openTab(tabs, {
         type: 'agent',
@@ -106,12 +106,12 @@ export function AgentRecommendBanner(): React.ReactElement | null {
       })
 
       // 8. 通知用户
-      toast.success('已切换到 Agent 模式', {
-        description: '对话历史已迁移到新的 Agent 会话',
+      toast.success('已切换到会话', {
+        description: '对话历史已迁移到新的会话',
       })
     } catch (error) {
       console.error('[AgentRecommendBanner] 迁移失败:', error)
-      toast.error('切换到 Agent 模式失败')
+      toast.error('切换到会话失败')
     } finally {
       setMigrating(false)
     }
@@ -124,7 +124,7 @@ export function AgentRecommendBanner(): React.ReactElement | null {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="size-4 text-primary" />
-            <span className="text-sm font-medium text-foreground">推荐使用 Agent 模式</span>
+            <span className="text-sm font-medium text-foreground">推荐使用会话</span>
           </div>
           <button
             type="button"
@@ -152,7 +152,7 @@ export function AgentRecommendBanner(): React.ReactElement | null {
           disabled={migrating}
           className="h-7 px-3 text-xs"
         >
-          {migrating ? '切换中...' : '切换到 Agent 模式'}
+          {migrating ? '切换中...' : '切换到会话'}
           {!migrating && <ArrowRight className="size-3 ml-1" />}
         </Button>
       </div>

@@ -7,8 +7,61 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
-import { DEFAULT_THEME_MODE } from '../../types'
+import { DEFAULT_THEME_MODE, DEFAULT_THEME_STYLE } from '../../types'
 import type { AppSettings } from '../../types'
+
+const FOODISM_DEFAULT_CHANNEL_ID = 'foodism-default-relay'
+const FOODISM_LEGACY_DEFAULT_CHANNEL_ID = 'foodism-default-openrouter'
+const FOODISM_LEGACY_DEEPSEEK_CHANNEL_ID = 'foodism-default-deepseek'
+const FOODISM_DEFAULT_MODEL_ID = 'claude-opus-4-6'
+
+function hasDefaultProviderKey(): boolean {
+  return Boolean(
+    process.env.FOODISM_DEFAULT_RELAY_API_KEY?.trim()
+    || process.env.FOODISM_DEFAULT_DEEPSEEK_API_KEY?.trim()
+    || process.env.DEEPSEEK_API_KEY?.trim()
+    || process.env.FOODISM_DEFAULT_PROVIDER_API_KEY?.trim()
+    || process.env.ANTHROPIC_API_KEY?.trim(),
+  )
+}
+
+function getDefaultSettings(): AppSettings {
+  const defaults: AppSettings = {
+    themeMode: DEFAULT_THEME_MODE,
+    themeStyle: DEFAULT_THEME_STYLE,
+    onboardingCompleted: false,
+    environmentCheckSkipped: false,
+    notificationsEnabled: true,
+    feishuSessionMirror: { mode: 'off' },
+    builtinMcpDisabledIds: [],
+  }
+
+  if (hasDefaultProviderKey()) {
+    defaults.agentChannelId = FOODISM_DEFAULT_CHANNEL_ID
+    defaults.agentModelId = process.env.FOODISM_DEFAULT_MODEL_ID?.trim() || FOODISM_DEFAULT_MODEL_ID
+    defaults.agentChannelIds = [FOODISM_DEFAULT_CHANNEL_ID]
+  }
+
+  return defaults
+}
+
+function applyDefaultProviderSettings(settings: AppSettings): AppSettings {
+  if (!hasDefaultProviderKey()) return settings
+
+  return {
+    ...settings,
+    agentChannelId: FOODISM_DEFAULT_CHANNEL_ID,
+    agentModelId: process.env.FOODISM_DEFAULT_MODEL_ID?.trim() || FOODISM_DEFAULT_MODEL_ID,
+    agentChannelIds: [
+      FOODISM_DEFAULT_CHANNEL_ID,
+      ...(settings.agentChannelIds ?? []).filter((id) => (
+        id !== FOODISM_DEFAULT_CHANNEL_ID
+        && id !== FOODISM_LEGACY_DEFAULT_CHANNEL_ID
+        && id !== FOODISM_LEGACY_DEEPSEEK_CHANNEL_ID
+      )),
+    ],
+  }
+}
 
 /**
  * 获取应用设置
@@ -19,38 +72,25 @@ export function getSettings(): AppSettings {
   const filePath = getSettingsPath()
 
   if (!existsSync(filePath)) {
-    return {
-      themeMode: DEFAULT_THEME_MODE,
-      onboardingCompleted: false,
-      environmentCheckSkipped: false,
-      notificationsEnabled: true,
-      feishuSessionMirror: { mode: 'off' },
-      builtinMcpDisabledIds: [],
-    }
+    return getDefaultSettings()
   }
 
   try {
     const raw = readFileSync(filePath, 'utf-8')
     const data = JSON.parse(raw) as Partial<AppSettings>
-    return {
+    return applyDefaultProviderSettings({
       ...data,
       themeMode: data.themeMode || DEFAULT_THEME_MODE,
+      themeStyle: data.themeStyle ?? DEFAULT_THEME_STYLE,
       onboardingCompleted: data.onboardingCompleted ?? false,
       environmentCheckSkipped: data.environmentCheckSkipped ?? false,
       notificationsEnabled: data.notificationsEnabled ?? true,
       feishuSessionMirror: data.feishuSessionMirror ?? { mode: 'off' },
       builtinMcpDisabledIds: data.builtinMcpDisabledIds ?? [],
-    }
+    })
   } catch (error) {
     console.error('[设置] 读取失败:', error)
-    return {
-      themeMode: DEFAULT_THEME_MODE,
-      onboardingCompleted: false,
-      environmentCheckSkipped: false,
-      notificationsEnabled: true,
-      feishuSessionMirror: { mode: 'off' },
-      builtinMcpDisabledIds: [],
-    }
+    return getDefaultSettings()
   }
 }
 

@@ -131,7 +131,7 @@ export function VoiceInputSettings(): React.ReactElement {
     <div className="space-y-6">
       <SettingsSection
         title="豆包流式语音输入"
-        description="通过全局快捷键唤起浮窗，实时识别语音，停止后写入 Proma 输入框或当前光标位置。"
+        description="通过全局快捷键唤起浮窗，实时识别语音，停止后写入当前输入框或光标位置。"
         action={
           <Button
             variant="outline"
@@ -265,7 +265,7 @@ export function VoiceInputSettings(): React.ReactElement {
           />
           <SettingsSelect
             label="输出方式"
-            description="默认写入当前光标位置；如果唤起时 Proma 是当前激活窗口，会写入当前 Chat 或 Agent 输入框。自动粘贴失败时会保留到剪贴板。"
+            description="默认写入当前光标位置；如果唤起时 Foodism 是当前激活窗口，会写入当前输入框。自动粘贴失败时会保留到剪贴板。"
             value={settings.outputMode}
             onValueChange={(outputMode) => update({ outputMode: outputMode as VoiceDictationSettings['outputMode'] })}
             options={OUTPUT_OPTIONS}

@@ -8,6 +8,7 @@ import { useCallback } from 'react'
 import { MicIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { foodismDevFeaturesEnabled } from '@/lib/foodism-dev-features'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -26,7 +27,7 @@ interface SpeechButtonProps {
 export function SpeechButton({
   disabled = false,
   className,
-}: SpeechButtonProps): React.ReactElement {
+}: SpeechButtonProps): React.ReactElement | null {
   const handleClick = useCallback((): void => {
     void (async () => {
       try {
@@ -43,6 +44,8 @@ export function SpeechButton({
       }
     })()
   }, [])
+
+  if (!foodismDevFeaturesEnabled) return null
 
   return (
     <Tooltip>

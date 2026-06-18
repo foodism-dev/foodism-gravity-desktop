@@ -17,6 +17,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -43,12 +44,28 @@ jobs:
       - name: 安装依赖
         run: bun install --frozen-lockfile
 
+      - name: 写入默认模型配置
+        shell: bash
+        env:
+          FOODISM_DEFAULT_RELAY_API_KEY: ${{ secrets.FOODISM_DEFAULT_RELAY_API_KEY }}
+        run: |
+          if [ -n "$FOODISM_DEFAULT_RELAY_API_KEY" ]; then
+            printf '\nFOODISM_DEFAULT_RELAY_API_KEY=%s\n' "$FOODISM_DEFAULT_RELAY_API_KEY" >> apps/electron/resources/default.env
+          else
+            echo "::warning::未配置 FOODISM_DEFAULT_RELAY_API_KEY，发布包不会内置默认供应商 Key"
+          fi
+
       # macOS 代码签名准备
       - name: 导入 macOS 签名证书
         env:
           MAC_CERTS: ${{ secrets.MAC_CERTS }}
           MAC_CERTS_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
         run: |
+          if [ -z "$MAC_CERTS" ] || [ -z "$MAC_CERTS_PASSWORD" ]; then
+            echo "::warning::未配置 macOS 签名证书，跳过证书导入"
+            exit 0
+          fi
+
           # 创建临时 keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -106,12 +123,28 @@ jobs:
       - name: 安装依赖
         run: bun install --frozen-lockfile
 
+      - name: 写入默认模型配置
+        shell: bash
+        env:
+          FOODISM_DEFAULT_RELAY_API_KEY: ${{ secrets.FOODISM_DEFAULT_RELAY_API_KEY }}
+        run: |
+          if [ -n "$FOODISM_DEFAULT_RELAY_API_KEY" ]; then
+            printf '\nFOODISM_DEFAULT_RELAY_API_KEY=%s\n' "$FOODISM_DEFAULT_RELAY_API_KEY" >> apps/electron/resources/default.env
+          else
+            echo "::warning::未配置 FOODISM_DEFAULT_RELAY_API_KEY，发布包不会内置默认供应商 Key"
+          fi
+
       # macOS 代码签名准备
       - name: 导入 macOS 签名证书
         env:
           MAC_CERTS: ${{ secrets.MAC_CERTS }}
           MAC_CERTS_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
         run: |
+          if [ -z "$MAC_CERTS" ] || [ -z "$MAC_CERTS_PASSWORD" ]; then
+            echo "::warning::未配置 macOS 签名证书，跳过证书导入"
+            exit 0
+          fi
+
           # 创建临时 keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -304,6 +337,17 @@ jobs:
 
       - name: 安装依赖
         run: bun install --frozen-lockfile
+
+      - name: 写入默认模型配置
+        shell: bash
+        env:
+          FOODISM_DEFAULT_RELAY_API_KEY: ${{ secrets.FOODISM_DEFAULT_RELAY_API_KEY }}
+        run: |
+          if [ -n "$FOODISM_DEFAULT_RELAY_API_KEY" ]; then
+            printf '\nFOODISM_DEFAULT_RELAY_API_KEY=%s\n' "$FOODISM_DEFAULT_RELAY_API_KEY" >> apps/electron/resources/default.env
+          else
+            echo "::warning::未配置 FOODISM_DEFAULT_RELAY_API_KEY，发布包不会内置默认供应商 Key"
+          fi
 
       # 构建应用
       - name: 构建 Electron 应用

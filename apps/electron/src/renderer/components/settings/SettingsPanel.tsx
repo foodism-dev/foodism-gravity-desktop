@@ -27,10 +27,10 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { settingsTabAtom, channelFormDirtyAtom, settingsCloseRequestedAtom, settingsOpenAtom } from "@/atoms/settings-tab";
 import type { SettingsTab } from "@/atoms/settings-tab";
-import { appModeAtom } from "@/atoms/app-mode";
 import { hasUpdateAtom } from "@/atoms/updater";
 import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from "@/atoms/tab-atoms";
 import { hasEnvironmentIssuesAtom } from "@/atoms/environment";
+import { foodismDevFeaturesEnabled } from "@/lib/foodism-dev-features";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,7 +65,6 @@ interface TabItem {
 const BASE_TABS: TabItem[] = [
   { id: "general", label: "通用设置", icon: <Settings size={16} /> },
   { id: "channels", label: "模型配置", icon: <Radio size={16} /> },
-  { id: "prompts", label: "提示词管理", icon: <BookOpen size={16} /> },
   { id: "proxy", label: "代理设置", icon: <Globe size={16} /> },
 ];
 
@@ -84,6 +83,15 @@ const TUTORIAL_TAB: TabItem = {
   label: "Proma 教程",
   icon: <GraduationCap size={16} />,
 };
+
+/** DEV 模式恢复的高级配置入口 */
+const DEV_TABS: TabItem[] = [
+  { id: "prompts", label: "提示词管理", icon: <BookOpen size={16} /> },
+  TOOLS_TAB,
+  BOTS_TAB,
+  TUTORIAL_TAB,
+];
+
 const SHORTCUTS_TAB: TabItem = {
   id: "shortcuts",
   label: "快捷键管理",
@@ -96,11 +104,20 @@ const VOICE_INPUT_TAB: TabItem = {
 };
 
 /** 尾部 Tabs */
-const TAIL_TABS: TabItem[] = [
+function getTailTabs(): TabItem[] {
+  return [
+    { id: "migration", label: "数据迁移", icon: <HardDriveDownload size={16} /> },
+    { id: "storage", label: "磁盘管理", icon: <HardDrive size={16} /> },
+    { id: "appearance", label: "外观设置", icon: <Palette size={16} /> },
+    { id: "about", label: foodismDevFeaturesEnabled ? "关于/更新" : "关于", icon: <Info size={16} /> },
+  ];
+}
+
+const PRODUCT_TABS: TabItem[] = [
+  { id: "general", label: "通用设置", icon: <Settings size={16} /> },
+  SHORTCUTS_TAB,
   { id: "migration", label: "数据迁移", icon: <HardDriveDownload size={16} /> },
-  { id: "storage", label: "磁盘管理", icon: <HardDrive size={16} /> },
-  { id: "appearance", label: "外观设置", icon: <Palette size={16} /> },
-  { id: "about", label: "关于/更新", icon: <Info size={16} /> },
+  { id: "about", label: "关于", icon: <Info size={16} /> },
 ];
 
 /** 根据标签页 id 渲染对应内容 */
@@ -147,12 +164,10 @@ export function SettingsPanel({
   const channelFormDirty = useAtomValue(channelFormDirtyAtom);
   const [closeRequested, setCloseRequested] = useAtom(settingsCloseRequestedAtom);
   const setSettingsOpen = useSetAtom(settingsOpenAtom);
-  const appMode = useAtomValue(appModeAtom);
   const hasUpdate = useAtomValue(hasUpdateAtom);
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom);
   const [mainTabs, setMainTabs] = useAtom(tabsAtom);
   const setMainActiveTabId = useSetAtom(activeTabIdAtom);
-
   /** 统一的退出拦截对话框状态 */
   type PendingAction = { type: 'tab'; tabId: SettingsTab } | { type: 'close' } | null
   const [pendingAction, setPendingAction] = React.useState<PendingAction>(null)
@@ -174,7 +189,7 @@ export function SettingsPanel({
     setPendingAction(null)
   }
 
-  /** 切换标签页时检测是否有未保存内容，tutorial 特殊处理：打开 New Tab 并关闭设置 */
+  /** 切换标签页时检测是否有未保存内容 */
   const handleTabChange = (tabId: SettingsTab): void => {
     if (tabId === 'tutorial') {
       const result = openTab(mainTabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
@@ -208,29 +223,23 @@ export function SettingsPanel({
     }
   }, [closeRequested, activeTab, setCloseRequested])
 
-  // 工具 tab 两种模式都显示，Agent Skills / MCP 独立在侧边栏能力中心管理。
+  // 部分高级配置暂时隐藏，只保留当前产品化需要开放的设置入口。
   const tabs = React.useMemo(() => {
-    if (appMode === "agent") {
-      return [
-        ...BASE_TABS,
-        TOOLS_TAB,
-        VOICE_INPUT_TAB,
-        BOTS_TAB,
-        TUTORIAL_TAB,
-        SHORTCUTS_TAB,
-        ...TAIL_TABS,
-      ];
-    }
+    if (!foodismDevFeaturesEnabled) return PRODUCT_TABS;
+
     return [
       ...BASE_TABS,
-      TOOLS_TAB,
+      ...DEV_TABS,
       VOICE_INPUT_TAB,
-      BOTS_TAB,
-      TUTORIAL_TAB,
       SHORTCUTS_TAB,
-      ...TAIL_TABS,
+      ...getTailTabs(),
     ];
-  }, [appMode]);
+  }, []);
+
+  React.useEffect(() => {
+    if (tabs.some((tab) => tab.id === activeTab)) return;
+    setActiveTab("general");
+  }, [activeTab, setActiveTab, tabs]);
 
   // 当前 tab 标题
   const activeTabLabel = tabs.find((t) => t.id === activeTab)?.label ?? "设置";
@@ -270,7 +279,7 @@ export function SettingsPanel({
               >
                 {tab.icon}
                 <span>{tab.label}</span>
-                {tab.id === "about" && (hasUpdate || hasEnvironmentIssues) && (
+                {tab.id === "about" && (hasEnvironmentIssues || (foodismDevFeaturesEnabled && hasUpdate)) && (
                   <span className="w-2 h-2 rounded-full bg-red-500" />
                 )}
               </button>

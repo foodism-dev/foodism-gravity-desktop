@@ -7,11 +7,11 @@ import { isAgentSessionActive } from './lib/agent-service'
 import { createTrayMenuModel, type TrayRecentSessionItem } from './lib/tray-menu-model'
 
 let tray: Tray | null = null
+const APP_DISPLAY_NAME = 'foodism-gravity'
 
 export interface TrayActions {
   showMainWindow: () => void
   openAgentSession: (sessionId: string, title: string) => void
-  createChatSession: () => void
   createAgentSession: () => void
 }
 
@@ -44,7 +44,6 @@ function getDefaultTrayActions(): TrayActions {
   return {
     showMainWindow,
     openAgentSession: () => showMainWindow(),
-    createChatSession: () => showMainWindow(),
     createAgentSession: () => showMainWindow(),
   }
 }
@@ -92,21 +91,17 @@ function buildTrayMenu(actions: TrayActions): Menu {
       : []),
     { type: 'separator' },
     {
-      label: '新建对话',
-      click: () => actions.createChatSession(),
-    },
-    {
-      label: '新建 Agent 会话',
+      label: '新建会话',
       click: () => actions.createAgentSession(),
     },
     { type: 'separator' },
     {
-      label: '打开 Proma',
+      label: `打开 ${APP_DISPLAY_NAME}`,
       click: () => actions.showMainWindow(),
     },
     { type: 'separator' },
     {
-      label: '退出 Proma',
+      label: `退出 ${APP_DISPLAY_NAME}`,
       click: () => {
         app.quit()
       },
@@ -148,7 +143,7 @@ export function createTray(actionsInput?: Partial<TrayActions>): Tray | null {
     tray = new Tray(image)
 
     // 设置 tooltip
-    tray.setToolTip('Proma')
+    tray.setToolTip(APP_DISPLAY_NAME)
 
     updateTrayMenu(actions)
 

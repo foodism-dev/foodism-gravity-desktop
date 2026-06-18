@@ -10,7 +10,7 @@ import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSyn
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, AUTH_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
   VoiceDictationAudioChunkInput,
@@ -111,7 +111,7 @@ import type {
   CreateAutomationInput,
   UpdateAutomationInput,
 } from '@proma/shared'
-import type { UserProfile, AppSettings } from '../types'
+import type { UserProfile, AppSettings, AuthSession, LoginInput } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
 import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
@@ -149,6 +149,7 @@ import {
 import { extractTextFromAttachment } from './lib/document-parser'
 import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
+import { getAuthSession, login, logout } from './lib/auth-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
@@ -791,7 +792,7 @@ function cacheNull(key: string): null {
 export function resolveAppIconPath(variantId: string): string | null {
   const resourcesDir = getBundledResourcesDir()
   if (!variantId || variantId === 'default') {
-    return join(resourcesDir, 'icon.png')
+    return join(resourcesDir, 'proma-logos', 'proma-foodism.png')
   }
   return join(resourcesDir, 'proma-logos', `proma-${variantId}.png`)
 }
@@ -1407,6 +1408,30 @@ export function registerIpcHandlers(): void {
   )
 
   // ===== 用户档案相关 =====
+
+  // 获取登录会话
+  ipcMain.handle(
+    AUTH_IPC_CHANNELS.GET_SESSION,
+    async (): Promise<AuthSession> => {
+      return getAuthSession()
+    }
+  )
+
+  // mock 登录
+  ipcMain.handle(
+    AUTH_IPC_CHANNELS.LOGIN,
+    async (_, input: LoginInput): Promise<AuthSession> => {
+      return login(input)
+    }
+  )
+
+  // 退出登录
+  ipcMain.handle(
+    AUTH_IPC_CHANNELS.LOGOUT,
+    async (): Promise<AuthSession> => {
+      return logout()
+    }
+  )
 
   // 获取用户档案
   ipcMain.handle(
@@ -4151,7 +4176,7 @@ export function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog({
       title: '选择迁移文件',
       filters: [
-        { name: 'Proma 迁移文件', extensions: ['proma-backup', 'proma-share'] },
+        { name: 'Foodism 迁移文件', extensions: ['foodism-backup', 'foodism-share', 'proma-backup', 'proma-share'] },
         { name: '所有文件', extensions: ['*'] },
       ],
       properties: ['openFile'],
@@ -4161,13 +4186,13 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('migration:saveFileDialog', async (_, mode: string) => {
     const { dialog } = await import('electron')
-    const ext = mode === 'personal' ? 'proma-backup' : 'proma-share'
-    const defaultName = `proma-migration-${new Date().toISOString().slice(0, 10)}.${ext}`
+    const ext = mode === 'personal' ? 'foodism-backup' : 'foodism-share'
+    const defaultName = `foodism-migration-${new Date().toISOString().slice(0, 10)}.${ext}`
     const result = await dialog.showSaveDialog({
       title: '保存迁移文件',
       defaultPath: defaultName,
       filters: [
-        { name: mode === 'personal' ? 'Proma 个人备份' : 'Proma 分享包', extensions: [ext] },
+        { name: mode === 'personal' ? 'Foodism 个人备份' : 'Foodism 分享包', extensions: [ext] },
       ],
     })
     return result.canceled ? null : result.filePath

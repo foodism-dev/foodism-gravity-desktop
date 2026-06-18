@@ -17,6 +17,7 @@ interface DiffPanelTabBarProps {
   activeTab: DiffPanelTab
   onTabChange: (tab: DiffPanelTab) => void
   onClose?: () => void
+  hideSessionTab?: boolean
 }
 
 interface PreviousTabState {
@@ -24,7 +25,7 @@ interface PreviousTabState {
   activeTab: DiffPanelTab
 }
 
-export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTabBarProps): React.ReactElement {
+export function DiffPanelTabBar({ activeTab, onTabChange, onClose, hideSessionTab = false }: DiffPanelTabBarProps): React.ReactElement {
   const unseenMap = useAtomValue(agentDiffUnseenChangesAtom)
   const setUnseenMap = useSetAtom(agentDiffUnseenChangesAtom)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
@@ -61,19 +62,21 @@ export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTa
     <div className="flex items-end h-[34px] tabbar-bg relative flex-shrink-0">
       <div className="absolute inset-0 titlebar-drag-region" />
       <div className="relative flex items-end flex-1 titlebar-no-drag">
-        <button
-          type="button"
-          onClick={() => onTabChange('session')}
-          className={cn(
-            'flex-1 px-3 h-[34px] rounded-t-lg text-xs transition-colors select-none cursor-pointer',
-            'border-t border-l border-r',
-            activeTab === 'session'
-              ? 'bg-content-area text-foreground border-border/50'
-              : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50',
-          )}
-        >
-          会话文件
-        </button>
+        {!hideSessionTab && (
+          <button
+            type="button"
+            onClick={() => onTabChange('session')}
+            className={cn(
+              'flex-1 px-3 h-[34px] rounded-t-lg text-xs transition-colors select-none cursor-pointer',
+              'border-t border-l border-r',
+              activeTab === 'session'
+                ? 'bg-content-area text-foreground border-border/50'
+                : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50',
+            )}
+          >
+            会话文件
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onTabChange('workspace')}

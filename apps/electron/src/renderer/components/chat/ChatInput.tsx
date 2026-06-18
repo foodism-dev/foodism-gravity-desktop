@@ -357,7 +357,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
+        <p>停止生成 ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
       </TooltipContent>
     </Tooltip>
   ) : (

@@ -348,7 +348,7 @@ async function testAnthropicCompatible(
   } else if (provider === 'xiaomi-token-plan') {
     headers.Authorization = `Bearer ${apiKey}`
     headers['User-Agent'] = getPromaUserAgent(pkg.version)
-  } else if (provider === 'minimax' || provider === 'qwen-anthropic') {
+  } else if (provider === 'minimax' || provider === 'qwen-anthropic' || provider === 'openrouter') {
     headers.Authorization = `Bearer ${apiKey}`
   } else {
     headers['x-api-key'] = apiKey
@@ -544,7 +544,7 @@ async function fetchAnthropicCompatibleModels(
   } else if (provider === 'xiaomi-token-plan') {
     headers.Authorization = `Bearer ${apiKey}`
     headers['User-Agent'] = getPromaUserAgent(pkg.version)
-  } else if (provider === 'minimax' || provider === 'qwen-anthropic') {
+  } else if (provider === 'minimax' || provider === 'qwen-anthropic' || provider === 'openrouter') {
     headers.Authorization = `Bearer ${apiKey}`
   } else {
     headers['x-api-key'] = apiKey

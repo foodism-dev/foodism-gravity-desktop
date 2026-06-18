@@ -1,7 +1,7 @@
 {
   "name": "@proma/electron",
-  "version": "0.12.30",
-  "description": "Proma next gen ai software with general agents - Electron App",
+  "version": "0.12.62",
+  "description": "foodism-gravity desktop client",
   "main": "dist/main.cjs",
   "author": {
     "name": "ErlichLiu",
@@ -156,5 +156,6 @@
   "build": {
     "extends": "electron-builder.yml"
   },
-  "proma": {}
+  "proma": {},
+  "productName": "foodism-gravity"
 }

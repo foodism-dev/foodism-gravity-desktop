@@ -54,7 +54,7 @@ export function TabBar(): React.ReactElement {
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
 
-  // 统一关闭逻辑：关闭当前会话入口并回到 Scratch Pad，不停止后台 Agent
+  // 统一关闭逻辑：关闭当前会话入口，不停止后台 Agent
   const { requestClose } = useCloseTab()
   const store = useStore()
 

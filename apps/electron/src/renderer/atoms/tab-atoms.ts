@@ -1,7 +1,7 @@
 /**
  * Tab Atoms — 当前工作区入口状态管理
  *
- * 顶部只保留 Scratch Pad 与当前会话两个入口；会话恢复与导航交给左侧列表。
+ * 顶部只保留当前会话入口；会话恢复与导航交给左侧列表。
  * 通过桥接 atom 与现有 currentConversationIdAtom / currentAgentSessionIdAtom 同步，
  * 确保所有现有派生 atoms 无需修改。
  */
@@ -29,7 +29,7 @@ export const SCRATCH_PAD_ID = '__scratch-pad__'
 
 /** 教程 Tab 固定 ID */
 export const TUTORIAL_TAB_ID = '__tutorial__'
-export const TUTORIAL_TAB_TITLE = 'Proma 使用教程'
+export const TUTORIAL_TAB_TITLE = '使用教程'
 
 /** 会话预览 Tab 的 ID 前缀：运行时临时入口，不参与持久化 */
 const PREVIEW_TAB_PREFIX = '__preview__:'
@@ -81,7 +81,7 @@ export interface OpenTabRestore {
 
 // ===== 核心 Atoms =====
 
-/** 顶部入口列表：Scratch Pad + 当前会话 */
+/** 顶部入口列表：当前会话与临时预览入口 */
 export const tabsAtom = atom<TabItem[]>([])
 
 /** 当前激活的标签 ID */
@@ -234,9 +234,8 @@ export function openTab(
   item: { type: TabType; sessionId: string; title: string },
   restore?: OpenTabRestore,
 ): { tabs: TabItem[]; activeTabId: string } {
-  const scratchTab = tabs.find((t) => t.id === SCRATCH_PAD_ID) ?? createScratchPadTab()
-
   if (item.type === 'scratch') {
+    const scratchTab = tabs.find((t) => t.id === SCRATCH_PAD_ID) ?? createScratchPadTab()
     return {
       tabs: [scratchTab],
       activeTabId: SCRATCH_PAD_ID,
@@ -251,7 +250,7 @@ export function openTab(
       title: TUTORIAL_TAB_TITLE,
     }
     return {
-      tabs: [scratchTab, tutorialTab],
+      tabs: [tutorialTab],
       activeTabId: TUTORIAL_TAB_ID,
     }
   }
@@ -271,7 +270,7 @@ export function openTab(
     }
 
     return {
-      tabs: [scratchTab, ownerAgentTab, previewTab],
+      tabs: [ownerAgentTab, previewTab],
       activeTabId: previewTab.id,
     }
   }
@@ -293,13 +292,13 @@ export function openTab(
       title: restore.previewTitle,
     }
     return {
-      tabs: [scratchTab, sessionTab, previewTab],
+      tabs: [sessionTab, previewTab],
       activeTabId: restore.lastView === 'preview' ? previewTab.id : sessionTab.id,
     }
   }
 
   return {
-    tabs: [scratchTab, sessionTab],
+    tabs: [sessionTab],
     activeTabId: sessionTab.id,
   }
 }
@@ -324,13 +323,13 @@ export function buildOpenTabRestore(
   }
 }
 
-/** 关闭标签页（scratch tab 不可关闭） */
+/** 关闭标签页（草稿页兼容入口不可关闭） */
 export function closeTab(
   tabs: TabItem[],
   activeTabId: string | null,
   tabId: string,
 ): { tabs: TabItem[]; activeTabId: string | null } {
-  // Scratch Pad 不可关闭
+  // 草稿页由入口生命周期管理，不通过关闭按钮移除。
   if (tabId === SCRATCH_PAD_ID) return { tabs, activeTabId }
 
   const tabIndex = tabs.findIndex((t) => t.id === tabId)
@@ -354,14 +353,14 @@ export function closeTab(
   return { tabs: newTabs, activeTabId: newActiveTabId }
 }
 
-/** 重排标签顺序（当前只保留 Scratch + 当前会话，保留函数用于兼容旧调用） */
+/** 重排标签顺序（当前只保留当前会话与临时预览，保留函数用于兼容旧调用） */
 export function reorderTabs(
   tabs: TabItem[],
   fromIndex: number,
   toIndex: number,
 ): TabItem[] {
   if (fromIndex === toIndex) return tabs
-  // Scratch 不可移出第 0 位
+  // 草稿页兼容入口不可移出第 0 位。
   if (tabs[0]?.id === SCRATCH_PAD_ID && (fromIndex === 0 || toIndex === 0)) return tabs
   const newTabs = [...tabs]
   const [moved] = newTabs.splice(fromIndex, 1)
@@ -378,15 +377,4 @@ export function updateTabTitle(
   return tabs.map((t) =>
     t.sessionId === sessionId && !isPreviewTab(t) ? { ...t, title } : t
   )
-}
-
-/** 确保 Scratch Pad 标签存在并位于首位，同时只保留一个会话入口 */
-export function ensureScratchPadTab(tabs: TabItem[]): TabItem[] {
-  const scratchTab = tabs.find((t) => t.id === SCRATCH_PAD_ID)
-  const sessionTab = tabs.filter((t) => t.id !== SCRATCH_PAD_ID && !isPreviewTab(t)).at(-1)
-  if (scratchTab) {
-    return sessionTab ? [scratchTab, sessionTab] : [scratchTab]
-  }
-  const newTab = createScratchPadTab()
-  return sessionTab ? [newTab, sessionTab] : [newTab]
 }

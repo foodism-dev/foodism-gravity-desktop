@@ -37,6 +37,7 @@ import {
 import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { detectIsWindows } from '@/lib/platform'
+import { foodismDevFeaturesEnabled } from '@/lib/foodism-dev-features'
 import type { FileEntry, AgentPendingFile } from '@proma/shared'
 
 function getPathBasename(filePath: string): string {
@@ -67,6 +68,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   // Tab 系统
+  const showSessionFilesTab = foodismDevFeaturesEnabled
+  const visibleActiveTab = !showSessionFilesTab && activeTab === 'session' ? 'workspace' : activeTab
   const previewFileMap = useAtomValue(previewFileMapAtom)
   const selectedFilePath = previewFileMap.get(sessionId)?.filePath
 
@@ -381,11 +384,11 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       (!!workspaceFilesPath && (path === workspaceFilesPath || isPathUnderRoot(workspaceFilesPath, path)))
       || wsAttachedDirs.some((d) => isPathUnderRoot(d, path))
       || wsAttachedFiles.includes(path)
-    const targetTab = inSession ? 'session' : inWorkspace ? 'workspace' : null
+    const targetTab = inSession && showSessionFilesTab ? 'session' : inWorkspace ? 'workspace' : null
     if (!targetTab) return
     consumedTabRevealTsRef.current = autoRevealSignal.ts
     if (activeTab !== targetTab) onTabChange(targetTab)
-  }, [autoRevealSignal, sessionId, sessionPath, workspaceFilesPath, attachedDirs, attachedFiles, wsAttachedDirs, wsAttachedFiles, activeTab, onTabChange])
+  }, [autoRevealSignal, sessionId, sessionPath, workspaceFilesPath, attachedDirs, attachedFiles, wsAttachedDirs, wsAttachedFiles, showSessionFilesTab, activeTab, onTabChange])
 
   // RightSidePanel 完全由用户控制，不因 Agent 文件变更自动打开
 
@@ -412,9 +415,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}
         >
-          <DiffPanelTabBar activeTab={activeTab} onTabChange={onTabChange} onClose={() => setIsOpen(false)} />
+          <DiffPanelTabBar activeTab={visibleActiveTab} onTabChange={onTabChange} onClose={() => setIsOpen(false)} hideSessionTab={!showSessionFilesTab} />
 
-          {activeTab === 'changes' ? (
+          {visibleActiveTab === 'changes' ? (
             sessionPath ? (
               <DiffChangesList
                 key={sessionId}
@@ -432,7 +435,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>
             )
-          ) : activeTab === 'session' ? (
+          ) : visibleActiveTab === 'session' ? (
             <div className="flex-1 min-h-0 flex flex-col pt-0.5 mx-2 mb-2">
               {sessionPath ? (
                 <>
@@ -444,7 +447,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                         <Info className="size-3 text-muted-foreground/50 cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent side="bottom" className="max-w-[200px]">
-                        <p>当前会话的专属文件，仅本次对话的 Agent 可以访问</p>
+                        <p>当前会话的专属文件，仅本次对话可以访问</p>
                       </TooltipContent>
                     </Tooltip>
                     <span className="text-[10px] text-muted-foreground/70 truncate flex-1 min-w-0" title={sessionPath}>
@@ -623,7 +626,7 @@ interface AttachedFilesSectionProps {
 function AttachedFilesSection({ attachedFiles, onDetach, onAddToChat, onFilePreview, allowedPaths, sessionId }: AttachedFilesSectionProps): React.ReactElement {
   return (
     <div className="pt-2.5 pb-1 flex-shrink-0">
-      <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3">附加文件（Agent 可以按原路径读取）</div>
+      <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3">附加文件（助手可以按原路径读取）</div>
       {attachedFiles.map((filePath) => {
         const name = getPathBasename(filePath)
         const entry: FileEntry = { name, path: filePath, isDirectory: false }
@@ -758,7 +761,7 @@ function AttachedDirsSection({ attachedDirs, onDetach, refreshVersion, onAddToCh
 
   return (
     <div className="pt-2.5 pb-1 flex-shrink-0">
-      <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3">附加目录（Agent 可以读取并操作此外部文件夹）</div>
+      <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3">附加目录（助手可以读取并操作此外部文件夹）</div>
       {attachedDirs.map((dir) => {
         const isRevealRoot = dir === revealRoot
         return (
