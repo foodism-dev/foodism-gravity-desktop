@@ -146,6 +146,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  include: resources/installer/windows-gitbash.nsh
 
 # ============================================
 # 发布配置

@@ -31,11 +31,13 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 
 从 [GitHub Releases](https://github.com/ErlichLiu/Proma/releases) 下载开源版本。当前 release notes 以 `v0.9.12` 为准，提供 macOS Apple Silicon、macOS Intel 和 Windows 安装包。
 
+Windows 版安装时会检测 Git Bash。如果系统未安装 Git Bash，安装器会提示你安装 Git for Windows（包含 Git Bash）；你也可以跳过，之后在应用内的 Windows 环境检测页重新安装或检测。
+
 如果你希望开箱即用、减少 API 配置成本，也可以使用 [Proma 商业版](https://proma.cool/download)。商业版和开源版并行运行，主要区别是商业版提供内置渠道和订阅方案。
 
 ### 首次配置
 
-1. 打开 Proma，先完成环境检查。Agent 模式依赖本机基础环境，尤其是 Git、Node.js / Bun 以及可用的 Shell。
+1. 打开 Proma，先完成环境检查。Agent 模式依赖本机基础环境，Windows 上需要 Git Bash 或 WSL；Node.js / Bun 仅在部分 MCP 或工具链场景需要。
 2. 进入 **设置 > 渠道**，添加至少一个 AI 供应商渠道，填写 Base URL、API Key 和模型列表。
 3. Chat 模式可以使用 OpenAI、Anthropic、Google 或 OpenAI 兼容协议的渠道。
 4. Agent 模式需要 Anthropic 协议或 Anthropic 兼容协议渠道，例如 Anthropic、DeepSeek、Kimi API、Kimi Coding Plan。
@@ -157,7 +159,7 @@ proma-v2/
 
 | 包 | 版本 | 职责 |
 | --- | --- | --- |
-| `@proma/electron` | `0.10.7` | Electron 桌面应用 |
+| `@proma/electron` | `0.12.65` | Electron 桌面应用 |
 | `@proma/shared` | `0.1.20` | 共享类型、IPC 常量、配置和工具 |
 | `@proma/core` | `0.2.9` | Provider Adapter、SSE、Shiki 高亮 |
 | `@proma/ui` | `0.1.6` | 共享 React UI 组件 |
@@ -211,7 +213,7 @@ bun run dist:fast
 | 代码高亮 | Shiki |
 | 构建 | Vite + esbuild |
 | 分发 | electron-builder |
-| Agent SDK | `@anthropic-ai/claude-agent-sdk@0.3.143` |
+| Agent SDK | `@anthropic-ai/claude-agent-sdk@0.3.153` |
 
 ## 架构概览
 

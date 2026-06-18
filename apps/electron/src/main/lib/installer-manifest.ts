@@ -30,25 +30,25 @@ const BUILTIN_FALLBACK: InstallerManifest = {
       id: 'git-for-windows',
       platform: 'win32',
       arch: 'x64',
-      version: '2.47.1',
+      version: '2.54.0',
       downloadUrl: '',
       fallbackUrl:
-        'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe',
+        'https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe',
       sha256: '',
       sizeBytes: 66000000,
-      filename: 'Git-2.47.1-64-bit.exe',
+      filename: 'Git-2.54.0-64-bit.exe',
     },
     {
       id: 'git-for-windows',
       platform: 'win32',
       arch: 'arm64',
-      version: '2.47.1',
+      version: '2.54.0',
       downloadUrl: '',
       fallbackUrl:
-        'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-arm64.exe',
+        'https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-arm64.exe',
       sha256: '',
       sizeBytes: 66000000,
-      filename: 'Git-2.47.1-arm64.exe',
+      filename: 'Git-2.54.0-arm64.exe',
     },
     {
       id: 'nodejs',
@@ -73,6 +73,15 @@ const BUILTIN_FALLBACK: InstallerManifest = {
       filename: 'node-v22.13.1-arm64.msi',
     },
   ],
+}
+
+/**
+ * 获取内置 fallback 清单副本，避免调用方意外修改模块级常量。
+ */
+export function getBuiltinInstallerManifest(): InstallerManifest {
+  return {
+    installers: BUILTIN_FALLBACK.installers.map((installer) => ({ ...installer })),
+  }
 }
 
 /**
@@ -109,7 +118,7 @@ export async function fetchInstallerManifest(force = false): Promise<InstallerMa
       error,
     )
     // 不缓存 fallback，下一次仍然先试远程
-    return BUILTIN_FALLBACK
+    return getBuiltinInstallerManifest()
   }
 }
 
