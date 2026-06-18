@@ -16,6 +16,9 @@ directories:
 # 压缩配置
 compression: normal
 
+# macOS 内测包可通过 FOODISM_MAC_ADHOC_SIGN=true 启用 ad-hoc 签名。
+afterPack: scripts/after-pack-mac-adhoc.cjs
+
 # ASAR 打包配置
 # 启用 ASAR 归档，将 SDK native binary 解压到 app.asar.unpacked/ 避免路径问题
 asar: true
