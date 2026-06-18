@@ -1,6 +1,7 @@
 {
   "name": "@proma/electron",
-  "version": "0.12.62",
+  "productName": "foodism-gravity",
+  "version": "0.12.63",
   "description": "foodism-gravity desktop client",
   "main": "dist/main.cjs",
   "author": {
@@ -156,6 +157,5 @@
   "build": {
     "extends": "electron-builder.yml"
   },
-  "proma": {},
-  "productName": "foodism-gravity"
+  "proma": {}
 }
