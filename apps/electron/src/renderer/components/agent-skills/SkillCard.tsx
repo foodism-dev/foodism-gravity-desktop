@@ -5,7 +5,7 @@
  */
 
 import * as React from 'react'
-import { Sparkles, RefreshCw, ShieldCheck, ArrowDownToLine } from 'lucide-react'
+import { Sparkles, RefreshCw, ArrowDownToLine } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -66,11 +66,7 @@ export function SkillCard({ skill, isBuiltin, updating, onOpen, onToggle, onUpda
       </p>
 
       <div className="mt-auto flex items-center gap-2">
-        {isBuiltin ? (
-          <span className="flex items-center gap-1 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
-            <ShieldCheck size={12} /> PROMA 内置
-          </span>
-        ) : skill.importSource ? (
+        {isBuiltin ? null : skill.importSource ? (
           <span className="truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
             来自 {skill.importSource.sourceWorkspaceName}
           </span>

@@ -1,15 +1,14 @@
 import * as React from 'react'
-import { useAtom, useStore } from 'jotai'
+import { useAtom } from 'jotai'
 import { AppShell } from './components/app-shell/AppShell'
+import { LoginView } from './components/auth/LoginView'
 import { OnboardingView } from './components/onboarding/OnboardingView'
-import { TutorialBanner } from './components/tutorial/TutorialBanner'
 import { EnvironmentCheckDialog } from './components/environment/EnvironmentCheckDialog'
 import { MigrationImportDialog } from './components/migration/MigrationImportDialog'
 import { TooltipProvider } from './components/ui/tooltip'
 import { SettingsDialog } from './components/settings/SettingsDialog'
-import { conversationsAtom } from './atoms/chat-atoms'
+import { authSessionAtom } from './atoms/auth'
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
-import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
 import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
@@ -20,17 +19,21 @@ export default function App(): React.ReactElement {
     console.warn(`[FLASH-DEBUG] App re-render #${appRenderCountRef.current}, isLoading/showOnboarding may have changed`)
   }
 
-  const store = useStore()
+  const [authSession, setAuthSession] = useAtom(authSessionAtom)
   const [isLoading, setIsLoading] = React.useState(true)
   const [showOnboarding, setShowOnboarding] = React.useState(false)
 
-  // 初始化：检查是否需要显示 Onboarding
+  // 初始化：检查登录态与是否需要显示 Onboarding
   // macOS/Linux 上 SDK 自带 claude native binary 不依赖宿主 Node/Git；
   // Windows 上仍需 Git Bash/WSL，由 Onboarding Step 2 与聊天错误卡片引导用户安装。
   React.useEffect(() => {
     const initialize = async () => {
       try {
-        const settings = await window.electronAPI.getSettings()
+        const [session, settings] = await Promise.all([
+          window.electronAPI.getAuthSession(),
+          window.electronAPI.getSettings(),
+        ])
+        setAuthSession(session)
         if (!settings.onboardingCompleted) {
           setShowOnboarding(true)
         }
@@ -42,38 +45,11 @@ export default function App(): React.ReactElement {
     }
 
     initialize()
-  }, [])
+  }, [setAuthSession])
 
-  // 完成 onboarding 回调：创建欢迎对话，可选打开教程 Tab
-  const handleOnboardingComplete = async (openTutorial?: boolean) => {
+  // 完成 onboarding 回调
+  const handleOnboardingComplete = async () => {
     setShowOnboarding(false)
-
-    if (openTutorial) {
-      const tabs = store.get(tabsAtom)
-      const result = openTab(tabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
-      store.set(tabsAtom, result.tabs)
-      store.set(activeTabIdAtom, result.activeTabId)
-      return
-    }
-
-    try {
-      const meta = await window.electronAPI.createWelcomeConversation()
-      if (meta) {
-        const conversations = store.get(conversationsAtom)
-        store.set(conversationsAtom, [meta, ...conversations])
-
-        const tabs = store.get(tabsAtom)
-        const result = openTab(tabs, {
-          type: 'chat',
-          sessionId: meta.id,
-          title: meta.title,
-        })
-        store.set(tabsAtom, result.tabs)
-        store.set(activeTabIdAtom, result.activeTabId)
-      }
-    } catch (error) {
-      console.error('[App] 创建欢迎对话失败:', error)
-    }
   }
 
   // 加载中状态
@@ -85,6 +61,16 @@ export default function App(): React.ReactElement {
           <p className="text-sm text-muted-foreground">正在初始化...</p>
         </div>
       </div>
+    )
+  }
+
+  // 未登录时显示登录界面
+  if (!authSession.isAuthenticated) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <LoginView />
+        <MigrationImportDialog />
+      </TooltipProvider>
     )
   }
 
@@ -106,7 +92,6 @@ export default function App(): React.ReactElement {
     <TooltipProvider delayDuration={200}>
       <AppShell contextValue={contextValue} />
       <SettingsDialog />
-      <TutorialBanner />
       <GlobalEnvironmentCheckDialog />
       <MigrationImportDialog />
     </TooltipProvider>

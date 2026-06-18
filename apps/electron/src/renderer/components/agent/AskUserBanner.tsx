@@ -239,7 +239,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
       {/* 头部 + Tab 栏 */}
       <div className="px-4 pt-3 pb-2">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-foreground">Proma Agent 需要你的输入</span>
+          <span className="text-sm font-medium text-foreground">需要你的输入</span>
           <div className="flex items-center gap-1.5">
             {requests.length > 1 && (
               <span className="text-xs text-muted-foreground">(+{requests.length - 1})</span>
@@ -248,7 +248,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
               type="button"
               className="size-5 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
               onClick={handleDismiss}
-              title="关闭并终止 Agent"
+              title="关闭并终止任务"
             >
               <X className="size-3.5" />
             </button>

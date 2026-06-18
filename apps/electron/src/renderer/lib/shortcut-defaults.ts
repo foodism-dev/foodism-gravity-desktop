@@ -60,8 +60,8 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   },
   {
     id: 'new-session',
-    name: '新建对话',
-    description: '根据当前模式创建 Chat 对话或 Agent 会话',
+    name: '新建会话',
+    description: '创建新的会话',
     defaultMac: 'Cmd+N',
     defaultWin: 'Ctrl+N',
     category: 'app',
@@ -72,14 +72,6 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     description: '显示或隐藏左侧边栏',
     defaultMac: 'Cmd+B',
     defaultWin: 'Ctrl+B',
-    category: 'app',
-  },
-  {
-    id: 'toggle-mode',
-    name: '切换模式',
-    description: '在 Chat 和 Agent 模式之间切换',
-    defaultMac: 'Cmd+Shift+M',
-    defaultWin: 'Ctrl+Shift+M',
     category: 'app',
   },
   {
@@ -138,7 +130,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   },
   {
     id: 'stop-generation',
-    name: '停止 Agent',
+    name: '停止生成',
     description: '中断当前 AI 响应',
     defaultMac: 'Cmd+Shift+Backspace',
     defaultWin: 'Ctrl+Shift+Backspace',
@@ -147,7 +139,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   {
     id: 'close-tab',
     name: '关闭当前标签',
-    description: '关闭当前活跃的 Chat 或 Agent 标签页',
+    description: '关闭当前活跃的标签页',
     defaultMac: 'Cmd+W',
     defaultWin: 'Ctrl+W',
     category: 'app',

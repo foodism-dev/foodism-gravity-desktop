@@ -58,7 +58,7 @@ const PLAN_OPTIONS: PlanOption[] = [
   {
     action: 'feedback',
     label: '提供修改意见',
-    description: '告诉 Agent 需要调整什么',
+    description: '说明需要调整什么',
     icon: <MessageSquare className="size-3.5" />,
     variant: 'secondary',
   },
@@ -207,18 +207,18 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
       <div className="px-4 pt-3 pb-2">
         <div className="flex items-center gap-2 mb-1">
           <FileText className="size-4 text-primary" />
-          <span className="text-sm font-medium text-foreground flex-1">Agent 计划待审批</span>
+          <span className="text-sm font-medium text-foreground flex-1">计划待审批</span>
           <button
             type="button"
             className="size-5 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
             onClick={handleDismiss}
-            title="关闭并终止 Agent"
+            title="关闭并终止任务"
           >
             <X className="size-3.5" />
           </button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Agent 已完成计划，请选择如何继续
+          计划已完成，请选择如何继续
         </p>
       </div>
 

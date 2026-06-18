@@ -21,7 +21,6 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '@proma/shared'
-import { PROVIDER_DEFAULT_URLS } from '@proma/shared'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { normalizeBaseUrl, normalizeAnthropicProviderUrl, getPromaUserAgent } from '@proma/core'
@@ -29,6 +28,36 @@ import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
 const CONFIG_VERSION = 1
+export const FOODISM_DEFAULT_CHANNEL_ID = 'foodism-default-relay'
+export const FOODISM_DEFAULT_MODEL_ID = 'claude-opus-4-6'
+const FOODISM_DEFAULT_CHANNEL_NAME = '万店引力默认模型'
+const FOODISM_DEFAULT_BASE_URL = 'https://code.newcli.com/claude/ultra'
+const FOODISM_LEGACY_DEFAULT_CHANNEL_ID = 'foodism-default-openrouter'
+const FOODISM_LEGACY_DEEPSEEK_CHANNEL_ID = 'foodism-default-deepseek'
+const FOODISM_DEFAULT_MODEL_NAME = 'Claude Opus 4.6'
+const DEFAULT_RELAY_KEY_ENVS = [
+  'FOODISM_DEFAULT_RELAY_API_KEY',
+  'FOODISM_DEFAULT_DEEPSEEK_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'FOODISM_DEFAULT_PROVIDER_API_KEY',
+  'ANTHROPIC_API_KEY',
+] as const
+
+function getDefaultRelayApiKey(): string {
+  for (const envName of DEFAULT_RELAY_KEY_ENVS) {
+    const value = process.env[envName]?.trim()
+    if (value) return value
+  }
+  return ''
+}
+
+function getDefaultRelayModelId(): string {
+  return process.env.FOODISM_DEFAULT_MODEL_ID?.trim() || FOODISM_DEFAULT_MODEL_ID
+}
+
+function getDefaultRelayModelName(modelId: string): string {
+  return process.env.FOODISM_DEFAULT_MODEL_NAME?.trim() || (modelId === FOODISM_DEFAULT_MODEL_ID ? FOODISM_DEFAULT_MODEL_NAME : modelId)
+}
 
 /**
  * 读取渠道配置文件
@@ -61,6 +90,63 @@ function writeConfig(config: ChannelsConfig): void {
     console.error('[渠道管理] 写入配置文件失败:', error)
     throw new Error('写入渠道配置失败')
   }
+}
+
+function ensureDefaultRelayChannel(config: ChannelsConfig): boolean {
+  const apiKey = getDefaultRelayApiKey()
+  if (!apiKey) return false
+
+  const modelId = getDefaultRelayModelId()
+  const modelName = getDefaultRelayModelName(modelId)
+  const now = Date.now()
+  const existingIndex = config.channels.findIndex(
+    (channel) => channel.id === FOODISM_DEFAULT_CHANNEL_ID
+      || channel.id === FOODISM_LEGACY_DEFAULT_CHANNEL_ID
+      || channel.id === FOODISM_LEGACY_DEEPSEEK_CHANNEL_ID
+      || channel.managedBy === 'foodism-default',
+  )
+
+  if (existingIndex === -1) {
+    config.channels.unshift({
+      id: FOODISM_DEFAULT_CHANNEL_ID,
+      name: FOODISM_DEFAULT_CHANNEL_NAME,
+      provider: 'anthropic-compatible',
+      baseUrl: FOODISM_DEFAULT_BASE_URL,
+      apiKey: encryptApiKey(apiKey),
+      models: [{ id: modelId, name: modelName, enabled: true }],
+      enabled: true,
+      locked: true,
+      managedBy: 'foodism-default',
+      createdAt: now,
+      updatedAt: now,
+    })
+    console.log('[渠道管理] 已创建万店引力默认中转站渠道')
+    return true
+  }
+
+  const existing = config.channels[existingIndex]!
+  const models: ChannelModel[] = [{ id: modelId, name: modelName, enabled: true }]
+
+  const updated: Channel = {
+    ...existing,
+    id: FOODISM_DEFAULT_CHANNEL_ID,
+    name: FOODISM_DEFAULT_CHANNEL_NAME,
+    provider: 'anthropic-compatible',
+    baseUrl: FOODISM_DEFAULT_BASE_URL,
+    apiKey: encryptApiKey(apiKey),
+    models,
+    enabled: true,
+    locked: true,
+    managedBy: 'foodism-default',
+    updatedAt: now,
+  }
+
+  const changed = JSON.stringify(existing) !== JSON.stringify(updated)
+  if (changed) {
+    config.channels[existingIndex] = updated
+    console.log('[渠道管理] 已同步万店引力默认中转站渠道')
+  }
+  return changed
 }
 
 /**
@@ -108,36 +194,13 @@ function decryptKey(encryptedKey: string): string {
  * 获取所有渠道
  *
  * 返回的渠道中 apiKey 保持加密状态。
- * 首次调用时，如果没有任何 DeepSeek 渠道，自动创建预设渠道。
+ * 首次调用时，会在 .env 提供 Key 后自动创建 Foodism 默认渠道。
  */
 export function listChannels(): Channel[] {
   const config = readConfig()
+  const changed = ensureDefaultRelayChannel(config)
 
-  // 首次使用：如果没有 DeepSeek 渠道，自动创建预设
-  const hasDeepSeek = config.channels.some(
-    (c) => c.provider === 'deepseek' || c.baseUrl.includes('api.deepseek.com'),
-  )
-  if (!hasDeepSeek) {
-    const now = Date.now()
-    const presetChannel: Channel = {
-      id: randomUUID(),
-      name: 'DeepSeek',
-      provider: 'deepseek',
-      baseUrl: PROVIDER_DEFAULT_URLS.deepseek,
-      apiKey: encryptApiKey(''),
-      models: [
-        { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
-        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-      ],
-      enabled: false,
-      createdAt: now,
-      updatedAt: now,
-    }
-    config.channels.push(presetChannel)
-    writeConfig(config)
-    console.log('[渠道管理] 已自动创建 DeepSeek 预设渠道')
-    return config.channels
-  }
+  if (changed) writeConfig(config)
 
   return config.channels
 }
@@ -149,6 +212,10 @@ export function listChannels(): Channel[] {
  */
 export function getChannelById(id: string): Channel | undefined {
   const config = readConfig()
+  const changed = ensureDefaultRelayChannel(config)
+
+  if (changed) writeConfig(config)
+
   return config.channels.find((c) => c.id === id)
 }
 
@@ -197,6 +264,9 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
   }
 
   const existing = config.channels[index]!
+  if (existing.locked) {
+    throw new Error('内置默认渠道不可修改')
+  }
 
   const updated: Channel = {
     ...existing,
@@ -227,7 +297,12 @@ export function deleteChannel(id: string): void {
     throw new Error(`渠道不存在: ${id}`)
   }
 
-  const removed = config.channels.splice(index, 1)[0]!
+  const removed = config.channels[index]!
+  if (removed.locked) {
+    throw new Error('内置默认渠道不可删除')
+  }
+
+  config.channels.splice(index, 1)
   writeConfig(config)
 
   console.log(`[渠道管理] 已删除渠道: ${removed.name} (${removed.id})`)
@@ -269,6 +344,7 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
     switch (channel.provider) {
       case 'anthropic':
       case 'anthropic-compatible':
+      case 'openrouter':
       case 'deepseek':
       case 'kimi-api':
       case 'kimi-coding':
@@ -326,6 +402,9 @@ async function testAnthropicCompatible(
     case 'minimax':
       testModel = 'MiniMax-M3'
       break
+    case 'openrouter':
+      testModel = 'anthropic/claude-opus-4.6'
+      break
     case 'xiaomi':
     case 'xiaomi-token-plan':
       testModel = 'mimo-v2.5-pro'
@@ -344,7 +423,7 @@ async function testAnthropicCompatible(
   } else if (provider === 'xiaomi-token-plan') {
     headers.Authorization = `Bearer ${apiKey}`
     headers['User-Agent'] = getPromaUserAgent(pkg.version)
-  } else if (provider === 'minimax') {
+  } else if (provider === 'minimax' || provider === 'openrouter') {
     headers.Authorization = `Bearer ${apiKey}`
   } else {
     headers['x-api-key'] = apiKey
@@ -438,6 +517,7 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
     switch (input.provider) {
       case 'anthropic':
       case 'anthropic-compatible':
+      case 'openrouter':
       case 'deepseek':
       case 'kimi-api':
       case 'kimi-coding':
@@ -478,6 +558,7 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
     switch (input.provider) {
       case 'anthropic':
       case 'anthropic-compatible':
+      case 'openrouter':
       case 'deepseek':
       case 'kimi-api':
       case 'kimi-coding':
@@ -538,7 +619,7 @@ async function fetchAnthropicCompatibleModels(
   } else if (provider === 'xiaomi-token-plan') {
     headers.Authorization = `Bearer ${apiKey}`
     headers['User-Agent'] = getPromaUserAgent(pkg.version)
-  } else if (provider === 'minimax') {
+  } else if (provider === 'minimax' || provider === 'openrouter') {
     headers.Authorization = `Bearer ${apiKey}`
   } else {
     headers['x-api-key'] = apiKey

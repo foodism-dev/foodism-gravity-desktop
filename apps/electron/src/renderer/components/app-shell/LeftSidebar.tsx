@@ -2,7 +2,6 @@
  * LeftSidebar - 左侧导航栏
  *
  * 包含：
- * - Chat/Agent 模式切换器
  * - 导航菜单项（点击切换主内容区视图）
  * - 置顶对话区域（可展开/收起）
  * - 对话列表（新对话按钮 + 右键菜单 + 按 updatedAt 降序排列）
@@ -11,15 +10,14 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import { ModeSwitcher } from './ModeSwitcher'
 import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom } from '@/atoms/active-view'
 import { automationFormAtom, automationsAtom } from '@/atoms/automation-atoms'
-import { appModeAtom, type AppMode } from '@/atoms/app-mode'
+import { appModeAtom } from '@/atoms/app-mode'
 import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import {
   conversationsAtom,
@@ -74,6 +72,7 @@ import {
   sessionViewStateMapAtom,
 } from '@/atoms/tab-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
+import { authSessionAtom } from '@/atoms/auth'
 import { sidebarViewModeAtom } from '@/atoms/sidebar-atoms'
 import { searchDialogOpenAtom } from '@/atoms/search-atoms'
 import { hasUpdateAtom } from '@/atoms/updater'
@@ -91,6 +90,7 @@ import {
 } from '@/components/session-preview/SessionMiniMapPopover'
 import { detectIsMac } from '@/lib/platform'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
+import foodismLogo from '@/assets/models/foodism.png'
 import {
   replaceAgentSessionInFreshnessOrder,
   sortAgentSessionsByUpdatedAtDesc,
@@ -176,7 +176,7 @@ function SkillsSidebarEntry({ count, updateCount, active, onClick }: SkillsSideb
   return (
     <button
       type="button"
-      aria-label={`Agent 技能，${count} 个能力${hasUpdate ? `，${updateCount} 个可更新` : ''}`}
+      aria-label={`技能，${count} 个能力${hasUpdate ? `，${updateCount} 个可更新` : ''}`}
       onClick={onClick}
       className={cn(
         'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
@@ -189,7 +189,7 @@ function SkillsSidebarEntry({ count, updateCount, active, onClick }: SkillsSideb
         <span className={cn('flex-shrink-0 w-[18px] h-[18px]', active ? 'text-accent-foreground' : 'text-foreground/45')}>
           <Blocks size={16} className="block" />
         </span>
-        <span className="truncate">Agent 技能</span>
+        <span className="truncate">技能</span>
       </span>
       <span
         className={cn(
@@ -331,7 +331,7 @@ function RailRecentButton({
           <button
             ref={preview.setAnchorRef}
             type="button"
-            aria-label={`打开${item.type === 'agent' ? 'Agent 会话' : 'Chat 对话'}：${item.title}`}
+            aria-label={`打开会话：${item.title}`}
             onClick={() => onSelect(item)}
             onMouseEnter={preview.handleMouseEnter}
             onMouseLeave={preview.handleMouseLeave}
@@ -355,7 +355,7 @@ function RailRecentButton({
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">
-          {item.type === 'agent' ? 'Agent' : 'Chat'} · {item.title}
+          会话 · {item.title}
         </TooltipContent>
       </Tooltip>
       <SessionMiniMapPopover
@@ -438,6 +438,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const newProjectInputRef = React.useRef<HTMLInputElement>(null)
   const [relativeTimeNow, setRelativeTimeNow] = React.useState(() => Date.now())
   const [userProfile, setUserProfile] = useAtom(userProfileAtom)
+  const authSession = useAtomValue(authSessionAtom)
+  const setAuthSession = useSetAtom(authSessionAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
   const mode = useAtomValue(appModeAtom)
@@ -446,6 +448,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
   const promptConfig = useAtomValue(promptConfigAtom)
   const setSelectedPromptId = useSetAtom(selectedPromptIdAtom)
+  const displayUserName = authSession.user?.username || userProfile.userName
 
   // Agent 模式状态
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
@@ -675,6 +678,18 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleOpenSkills = React.useCallback((): void => {
     setActiveView('agent-skills')
   }, [setActiveView])
+
+  /** 退出当前 mock 登录会话 */
+  const handleLogout = React.useCallback(async (): Promise<void> => {
+    try {
+      const session = await window.electronAPI.logout()
+      setAuthSession(session)
+      toast.success('已退出登录')
+    } catch (error) {
+      console.error('[侧边栏] 退出登录失败:', error)
+      toast.error(error instanceof Error ? error.message : '退出登录失败')
+    }
+  }, [setAuthSession])
 
   // 切换模式时重置归档视图
   React.useEffect(() => {
@@ -1322,40 +1337,37 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     [agentSessions, draftSessionIds]
   )
 
-  const handleRailModeSwitch = React.useCallback((targetMode: AppMode) => {
+  const handleShowAgentMode = React.useCallback(() => {
     setViewMode('active')
-    if (targetMode === mode) return
+    if (mode === 'agent') return
 
-    const isChatMode = targetMode === 'chat'
-    const sessions = isChatMode ? conversations : agentSessions
-    const lastId = isChatMode ? currentConversationId : currentAgentSessionId
+    const sessions = agentSessions
+    const lastId = currentAgentSessionId
 
     if (lastId) {
       const match = sessions.find((s) => s.id === lastId)
       if (match) {
-        openSession(targetMode, match.id, match.title)
+        openSession('agent', match.id, match.title)
         return
       }
     }
 
-    const tab = tabs.find((t) => t.type === targetMode)
+    const tab = tabs.find((t) => t.type === 'agent')
     if (tab) {
-      openSession(targetMode, tab.sessionId, tab.title)
+      openSession('agent', tab.sessionId, tab.title)
       return
     }
 
     const recent = sessions.find((s) => !s.archived && !draftSessionIds.has(s.id))
     if (recent) {
-      openSession(targetMode, recent.id, recent.title)
+      openSession('agent', recent.id, recent.title)
       return
     }
 
-    setMode(targetMode)
+    setMode('agent')
   }, [
     mode,
-    conversations,
     agentSessions,
-    currentConversationId,
     currentAgentSessionId,
     tabs,
     draftSessionIds,
@@ -1551,42 +1563,23 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
         <div className="my-3 h-px w-8 bg-border/70" />
 
-        {/* 模式切换 */}
+        {/* 会话入口 */}
         <div className="flex flex-col items-center gap-1.5">
           <CollapsedWorkspacePopover>
             <button
               type="button"
-              aria-label="切换到 Agent 模式（悬停查看项目）"
-              onClick={() => handleRailModeSwitch('agent')}
+              aria-label="万店引力"
+              onClick={handleShowAgentMode}
               className={cn(
                 'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag',
                 mode === 'agent'
                   ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
                   : 'text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/75'
-              )}
-            >
-              <Bot size={18} />
-            </button>
-          </CollapsedWorkspacePopover>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label="切换到 Chat 模式"
-                onClick={() => handleRailModeSwitch('chat')}
-                className={cn(
-                  'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag',
-                  mode === 'chat'
-                    ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-                    : 'text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/75'
                 )}
               >
-                <MessageSquare size={17} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">Chat 模式</TooltipContent>
-          </Tooltip>
+              <img src={foodismLogo} alt="万店引力" className="size-8 object-contain" />
+            </button>
+          </CollapsedWorkspacePopover>
         </div>
 
         <div className="my-3 h-px w-8 bg-border/70" />
@@ -1597,15 +1590,15 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={mode === 'agent' ? '新建 Agent 会话' : '新建 Chat 对话'}
-                onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
+                aria-label="新建会话"
+                onClick={handleNewAgentSession}
                 className="size-10 flex items-center justify-center rounded-[12px] text-foreground/70 bg-primary/5 hover:bg-primary/10 hover:text-foreground transition-[background-color,border-color,color] duration-150 titlebar-no-drag border border-border/60 hover:border-border"
               >
                 <Plus size={16} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              {mode === 'agent' ? '新会话' : '新对话'}
+              新会话
             </TooltipContent>
           </Tooltip>
 
@@ -1661,7 +1654,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label="Agent 技能"
+                  aria-label="技能"
                   onClick={handleOpenSkills}
                   className={cn(
                     'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
@@ -1676,7 +1669,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                   )}
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">Agent 技能</TooltipContent>
+              <TooltipContent side="right">技能</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -1702,24 +1695,39 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           </div>
         </div>
 
-        {/* 用户头像（点击打开设置） */}
+        {/* 用户头像菜单 */}
         <div className="pt-3 pb-3">
-          <Tooltip>
-            <TooltipTrigger asChild>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label="打开设置"
-                onClick={() => setSettingsOpen(true)}
-                className="relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag hover:bg-foreground/5"
+                aria-label="用户菜单"
+                className="relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag hover:bg-foreground/5 data-[state=open]:bg-foreground/5"
               >
                 <UserAvatar avatar={userProfile.avatar} size={28} />
                 {(hasUpdate || hasEnvironmentIssues) && (
                   <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-red-500" />
                 )}
               </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">设置</TooltipContent>
-          </Tooltip>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="right" className="w-40 z-[9999] min-w-0 p-0.5">
+              <DropdownMenuItem
+                className="text-xs py-1 [&>svg]:size-3.5"
+                onSelect={() => setSettingsOpen(true)}
+              >
+                <Settings size={14} />
+                设置
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="my-0.5" />
+              <DropdownMenuItem
+                className="text-xs py-1 text-destructive focus:text-destructive [&>svg]:size-3.5"
+                onSelect={() => { void handleLogout() }}
+              >
+                <LogOut size={14} />
+                退出登录
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {deleteDialog}
@@ -1743,10 +1751,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
       <div className={cn('w-full flex-shrink-0 titlebar-drag-region', isMac ? 'h-[30px]' : 'h-1')} />
 
-      {/* 模式切换器 + 折叠按钮 */}
+      {/* 应用标识 + 折叠按钮 */}
       <div className="titlebar-drag-region flex items-start gap-1.5 px-3">
-        <div className="flex-1 min-w-0">
-          <ModeSwitcher />
+        <div className="flex-1 min-w-0 pt-2">
+          <div className="flex h-10 items-center gap-2 rounded-[10px] px-2 text-base font-medium text-foreground/75">
+            <img src={foodismLogo} alt="万店引力" className="size-7 flex-shrink-0 object-contain" />
+            <span>万店引力</span>
+          </div>
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1764,11 +1775,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       {/* 新对话/新会话按钮 + 搜索按钮 */}
       <div className="px-3 pt-2 flex items-center gap-1.5">
         <button
-          onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
+          onClick={handleNewAgentSession}
           className="flex-1 flex items-center gap-2 px-3 py-2 rounded-[10px] text-[13px] font-medium text-foreground/70 bg-primary/5 hover:bg-primary/10 hover:text-foreground transition-[background-color,border-color,color] duration-150 titlebar-no-drag border border-border/60 hover:border-border"
         >
           <Plus size={14} />
-          <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
+          <span>新会话</span>
         </button>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1792,7 +1803,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         />
       </div>
 
-      {/* Agent 技能入口：Skills / MCP 能力中心，仅 Agent 模式可见 */}
+      {/* 技能入口：Skills / MCP 能力中心 */}
       {mode === 'agent' && (
         <div className="px-3 pb-0.5">
           <SkillsSidebarEntry
@@ -2097,19 +2108,40 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
       {/* 底部：用户资料 + 设置入口 */}
       <div className="px-3 pb-3">
-        <button
-          onClick={() => setSettingsOpen(true)}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] transition-colors titlebar-no-drag text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground"
-        >
-          <UserAvatar avatar={userProfile.avatar} size={28} />
-          <span className="flex-1 text-sm truncate text-left">{userProfile.userName}</span>
-          <div className="relative flex-shrink-0 text-foreground/40">
-            <Settings size={16} />
-            {(hasUpdate || hasEnvironmentIssues) && (
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
-            )}
-          </div>
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] transition-colors titlebar-no-drag text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground data-[state=open]:bg-foreground/[0.04]"
+            >
+              <UserAvatar avatar={userProfile.avatar} size={28} />
+              <span className="flex-1 text-sm truncate text-left">{displayUserName}</span>
+              <div className="relative flex-shrink-0 text-foreground/40">
+                <Settings size={16} />
+                {(hasUpdate || hasEnvironmentIssues) && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
+                )}
+              </div>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-44 z-[9999] min-w-0 p-0.5">
+            <DropdownMenuItem
+              className="text-xs py-1 [&>svg]:size-3.5"
+              onSelect={() => setSettingsOpen(true)}
+            >
+              <Settings size={14} />
+              设置
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="my-0.5" />
+            <DropdownMenuItem
+              className="text-xs py-1 text-destructive focus:text-destructive [&>svg]:size-3.5"
+              onSelect={() => { void handleLogout() }}
+            >
+              <LogOut size={14} />
+              退出登录
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {deleteDialog}

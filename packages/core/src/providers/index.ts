@@ -27,6 +27,7 @@ export { GoogleAdapter } from './google-adapter.ts'
 const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
   ['anthropic', new AnthropicAdapter()],
   ['anthropic-compatible', new AnthropicAdapter('anthropic-compatible')],
+  ['openrouter', new AnthropicAdapter('openrouter')],
   ['openai', new OpenAIAdapter()],
   ['deepseek', new AnthropicAdapter('deepseek')],   // DeepSeek 使用 Anthropic 兼容协议
   ['kimi-api', new AnthropicAdapter('kimi-api')],       // Kimi API 的 Anthropic 协议端点

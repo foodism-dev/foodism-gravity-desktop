@@ -62,7 +62,7 @@ export function AgentSettings(): React.ReactElement {
   return (
     <SettingsSection
       title="内置工具"
-      description="启用后自动注入到 Agent 会话，在工具设置中配置。Skills 与 MCP 已移至侧边栏的「Agent 技能」。"
+      description="启用后自动注入到会话，在工具设置中配置。Skills 与 MCP 已移至侧边栏的「技能」。"
       action={
         <Button size="sm" variant="outline" onClick={() => setSettingsTab('tools')}>
           <Pencil size={14} />

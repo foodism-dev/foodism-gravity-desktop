@@ -1,8 +1,7 @@
 /**
  * AboutSettings - 关于页面
  *
- * 显示应用版本号等基本信息，以及版本检测状态。
- * 检测到新版本后引导用户去 GitHub Releases 手动下载。
+ * 显示应用版本号和本地运行环境检测状态。
  */
 
 import * as React from 'react'
@@ -22,6 +21,7 @@ import {
 import { EnvironmentCheckCard } from '@/components/environment/EnvironmentCheckCard'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { foodismDevFeaturesEnabled } from '@/lib/foodism-dev-features'
 import { ReleaseNotesViewer } from './ReleaseNotesViewer'
 import { VersionHistory } from './VersionHistory'
 
@@ -39,7 +39,6 @@ function UpdateCard(): React.ReactElement | null {
   const [showReleaseNotes, setShowReleaseNotes] = React.useState(false)
   const [release, setRelease] = React.useState<import('@proma/shared').GitHubRelease | null>(null)
 
-  // updater 不可用时不渲染
   if (!available) return null
 
   const handleCheck = async (): Promise<void> => {
@@ -47,7 +46,6 @@ function UpdateCard(): React.ReactElement | null {
     try {
       await checkForUpdates()
     } finally {
-      // 状态由 atom 订阅自动更新，延迟重置 checking 避免按钮闪烁
       setTimeout(() => setChecking(false), 1000)
     }
   }
@@ -61,7 +59,6 @@ function UpdateCard(): React.ReactElement | null {
     window.electronAPI.updater?.quitAndInstall()
   }
 
-  // 当检测到新版本时，获取完整的 release 信息
   React.useEffect(() => {
     if (status.status === 'available' && status.version && !release) {
       window.electronAPI
@@ -85,10 +82,8 @@ function UpdateCard(): React.ReactElement | null {
     <SettingsCard>
       <SettingsRow label="软件更新">
         <div className="flex items-center gap-3">
-          {/* 状态文字 */}
           <StatusText status={status.status} version={status.version} error={status.error} />
 
-          {/* 操作按钮 */}
           {status.status === 'downloaded' ? (
             <button
               onClick={handleQuitAndInstall}
@@ -122,7 +117,6 @@ function UpdateCard(): React.ReactElement | null {
         </div>
       </SettingsRow>
 
-      {/* Release Notes（新版本可用时显示） */}
       {status.status === 'available' && hasReleaseNotes && (
         <div className="px-4 pb-4 border-t">
           <button
@@ -270,7 +264,7 @@ function EnvironmentCard(): React.ReactElement {
           </button>
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          Agent 模式需要 Node.js 和 Git 支持
+          会话运行需要 Node.js 和 Git 支持
         </p>
       </div>
 
@@ -376,7 +370,7 @@ function ShellEnvironmentCard(): React.ReactElement | null {
           </button>
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          Agent 模式需要 Git Bash 或 WSL 支持
+          会话运行需要 Git Bash 或 WSL 支持
         </p>
       </div>
 
@@ -430,7 +424,7 @@ function ShellEnvironmentCard(): React.ReactElement | null {
             <AlertDescription className="text-xs">
               <strong>未检测到可用的 Shell 环境！</strong>
               <br />
-              Agent 模式需要 Git Bash 或 WSL 才能运行。请安装其中之一后重启应用。
+              会话运行需要 Git Bash 或 WSL。请安装其中之一后重启应用。
             </AlertDescription>
           </Alert>
         )}
@@ -442,46 +436,47 @@ function ShellEnvironmentCard(): React.ReactElement | null {
 export function AboutSettings(): React.ReactElement {
   return (
     <SettingsSection
-      title="关于 Proma"
-      description="集成通用 AI Agent 的下一代人工智能软件"
+      title="关于万店引力"
+      description="Foodism AI 桌面助手"
     >
       <SettingsCard>
         <SettingsRow label="版本">
           <span className="text-sm text-muted-foreground font-mono">{APP_VERSION}</span>
         </SettingsRow>
-        <SettingsRow label="运行时">
-          <span className="text-sm text-muted-foreground">Electron + React</span>
-        </SettingsRow>
-        <SettingsRow
-          label="开源协议"
-          description="社区版基于 AGPL-3.0 开源，商业授权请联系 erlichliu@gmail.com"
-        >
-          <a
-            href="https://www.gnu.org/licenses/agpl-3.0.html"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-primary hover:underline"
-          >
-            AGPL-3.0
-          </a>
-        </SettingsRow>
-        <SettingsRow label="项目地址">
-          <a
-            href="https://github.com/ErlichLiu/Proma.git"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-primary hover:underline"
-          >
-            github.com/ErlichLiu/Proma
-          </a>
-        </SettingsRow>
+        {foodismDevFeaturesEnabled && (
+          <>
+            <SettingsRow label="运行时">
+              <span className="text-sm text-muted-foreground">Electron + React</span>
+            </SettingsRow>
+            <SettingsRow
+              label="开源协议"
+              description="社区版基于 AGPL-3.0 开源，商业授权请联系 erlichliu@gmail.com"
+            >
+              <a
+                href="https://www.gnu.org/licenses/agpl-3.0.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-primary hover:underline"
+              >
+                AGPL-3.0
+              </a>
+            </SettingsRow>
+            <SettingsRow label="项目地址">
+              <a
+                href="https://github.com/ErlichLiu/Proma.git"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-primary hover:underline"
+              >
+                github.com/ErlichLiu/Proma
+              </a>
+            </SettingsRow>
+          </>
+        )}
       </SettingsCard>
 
-      {/* 自动更新卡片（updater 不可用时不渲染） */}
-      <UpdateCard />
-
-      {/* 版本历史 */}
-      <VersionHistory />
+      {foodismDevFeaturesEnabled && <UpdateCard />}
+      {foodismDevFeaturesEnabled && <VersionHistory />}
 
       {/* 环境检测卡片 */}
       <EnvironmentCard />

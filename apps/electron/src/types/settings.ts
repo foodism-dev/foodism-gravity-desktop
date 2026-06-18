@@ -169,10 +169,10 @@ export const THEME_STYLES = [
 export type ThemeStyle = (typeof THEME_STYLES)[number]
 
 /** 默认主题模式 */
-export const DEFAULT_THEME_MODE: ThemeMode = 'dark'
+export const DEFAULT_THEME_MODE: ThemeMode = 'special'
 
 /** 默认特殊风格 */
-export const DEFAULT_THEME_STYLE: ThemeStyle = 'default'
+export const DEFAULT_THEME_STYLE: ThemeStyle = 'forest-light'
 
 /** Markdown 预览字号档位 */
 export type MarkdownFontSize = 'small' | 'medium' | 'large'

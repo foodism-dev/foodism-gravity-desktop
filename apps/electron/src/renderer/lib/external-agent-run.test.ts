@@ -73,8 +73,8 @@ describe('外部 Agent 运行激活', () => {
       startedAt: 300,
     })
 
-    expect(result.title).toBe('新 Agent 会话')
-    expect(result.tabs[0]!.title).toBe('新 Agent 会话')
+    expect(result.title).toBe('新会话')
+    expect(result.tabs[0]!.title).toBe('新会话')
     expect(result.activeTabId).toBe('unknown-session')
     expect(result.workspaceId).toBeUndefined()
   })

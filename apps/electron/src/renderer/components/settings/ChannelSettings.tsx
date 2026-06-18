@@ -9,12 +9,12 @@
 
 import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
-import { Plus, Pencil, Trash2, ExternalLink } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { PROVIDER_LABELS, isAgentCompatibleProvider } from '@proma/shared'
 import type { Channel } from '@proma/shared'
-import { getChannelLogo, PromaLogo } from '@/lib/model-logo'
+import { getChannelLogo } from '@/lib/model-logo'
 import { agentChannelIdAtom, agentModelIdAtom, agentChannelIdsAtom } from '@/atoms/agent-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
@@ -29,6 +29,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { ChannelForm } from './ChannelForm'
+import { foodismDevFeaturesEnabled } from '@/lib/foodism-dev-features'
 
 /** 组件视图模式 */
 type ViewMode = 'list' | 'create' | 'edit'
@@ -109,6 +110,7 @@ export function ChannelSettings(): React.ReactElement {
 
   /** 删除渠道（通过弹窗确认） */
   const handleDeleteRequest = (channel: Channel): void => {
+    if (channel.locked) return
     setDeleteTarget(channel)
   }
 
@@ -143,6 +145,7 @@ export function ChannelSettings(): React.ReactElement {
 
   /** 切换渠道启用状态 */
   const handleToggle = async (channel: Channel): Promise<void> => {
+    if (channel.locked) return
     try {
       const savedChannel = await window.electronAPI.updateChannel(channel.id, { enabled: !channel.enabled })
       await syncAgentChannelEligibility(
@@ -158,6 +161,9 @@ export function ChannelSettings(): React.ReactElement {
 
   /** 切换 Agent 供应商开关 */
   const handleToggleAgentProvider = async (channelId: string, enabled: boolean): Promise<void> => {
+    const channel = channels.find((item) => item.id === channelId)
+    if (channel?.locked && !enabled) return
+
     const newIds = enabled
       ? [...agentChannelIds, channelId]
       : agentChannelIds.filter((id) => id !== channelId)
@@ -204,8 +210,12 @@ export function ChannelSettings(): React.ReactElement {
     )
   }
 
-  // Agent 兼容渠道（已启用）：Anthropic / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax
-  const agentCapableChannels = channels.filter(
+  const visibleChannels = foodismDevFeaturesEnabled
+    ? channels
+    : channels.filter((channel) => !isHiddenLegacyDeepSeekPreset(channel))
+
+  // Agent 兼容渠道（已启用）：Anthropic / OpenRouter / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax
+  const agentCapableChannels = visibleChannels.filter(
     (c) => isAgentCompatibleProvider(c.provider) && c.enabled
   )
 
@@ -215,32 +225,39 @@ export function ChannelSettings(): React.ReactElement {
       {/* 区块一：模型配置 */}
       <SettingsSection
         title="模型配置"
-        description="管理 AI 供应商连接，配置 API Key 和可用模型。Anthropic 渠道同时可用于 Agent 模式"
-        action={
-          <Button size="sm" onClick={() => setViewMode('create')}>
-            <Plus size={16} />
-            <span>添加配置</span>
-          </Button>
-        }
+        description="管理 AI 供应商连接，配置 API Key 和可用模型。Anthropic 渠道同时可用于会话"
       >
-        <SettingsCard>
-          <PromaProviderCard />
-        </SettingsCard>
+        {foodismDevFeaturesEnabled && (
+          <div className="mb-3 flex justify-end">
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditingChannel(null)
+                setViewMode('create')
+              }}
+              className="gap-1.5"
+            >
+              <Plus size={14} />
+              添加配置
+            </Button>
+          </div>
+        )}
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
-        ) : channels.length === 0 ? (
+        ) : visibleChannels.length === 0 ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-12 text-center">
-              还没有配置任何模型，点击上方"添加配置"开始
+              暂未加载默认模型，请先在 .env 配置默认供应商 Key
             </div>
           </SettingsCard>
         ) : (
           <SettingsCard>
-            {channels.map((channel) => (
+            {visibleChannels.map((channel) => (
               <ChannelRow
                 key={channel.id}
                 channel={channel}
                 onEdit={() => {
+                  if (channel.locked) return
                   setEditingChannel(channel)
                   setViewMode('edit')
                 }}
@@ -252,20 +269,17 @@ export function ChannelSettings(): React.ReactElement {
         )}
       </SettingsSection>
 
-      {/* 区块二：Agent 供应商 */}
+      {/* 区块二：会话供应商 */}
       <SettingsSection
-        title="Agent 供应商"
-        description="启用 Agent 模式可用的供应商，支持同时开启多个渠道，在 Agent 模式下可直接切换"
+        title="会话供应商"
+        description="启用会话可用的供应商，支持同时开启多个渠道，在会话中直接切换"
       >
-        <SettingsCard>
-          <PromaProviderCard />
-        </SettingsCard>
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
         ) : agentCapableChannels.length === 0 ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-8 text-center">
-              暂无可用的 Anthropic 兼容渠道，请先在上方添加 Anthropic / DeepSeek / Kimi / MiniMax 渠道并启用
+              暂无可用的 Anthropic 兼容渠道，请先在上方添加 OpenRouter / Anthropic / DeepSeek / Kimi / MiniMax 渠道并启用
             </div>
           </SettingsCard>
         ) : (
@@ -314,8 +328,9 @@ function ChannelRow({ channel, onEdit, onDelete, onToggle }: ChannelRowProps): R
   const enabledCount = channel.models.filter((m) => m.enabled).length
   const description = [
     PROVIDER_LABELS[channel.provider],
+    channel.locked ? '系统内置' : undefined,
     enabledCount > 0 ? `${enabledCount} 个模型已启用` : undefined,
-    isAgentCompatibleProvider(channel.provider) ? '可用于 Agent' : undefined,
+    isAgentCompatibleProvider(channel.provider) ? '可用于会话' : undefined,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -329,25 +344,30 @@ function ChannelRow({ channel, onEdit, onDelete, onToggle }: ChannelRowProps): R
     >
       <div className="flex items-center gap-2">
         {/* 操作按钮 */}
-        <button
-          onClick={onEdit}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
-          title="编辑"
-        >
-          <Pencil size={14} />
-        </button>
-        <button
-          onClick={onDelete}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
-          title="删除"
-        >
-          <Trash2 size={14} />
-        </button>
+        {!channel.locked && (
+          <>
+            <button
+              onClick={onEdit}
+              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
+              title="编辑"
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              onClick={onDelete}
+              className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+              title="删除"
+            >
+              <Trash2 size={14} />
+            </button>
+          </>
+        )}
 
         {/* 启用/关闭开关 */}
         <Switch
           checked={channel.enabled}
           onCheckedChange={onToggle}
+          disabled={channel.locked}
         />
       </div>
     </SettingsRow>
@@ -366,6 +386,7 @@ function AgentProviderRow({ channel, enabled, onToggle }: AgentProviderRowProps)
   const enabledCount = channel.models.filter((m) => m.enabled).length
   const description = [
     PROVIDER_LABELS[channel.provider],
+    channel.locked ? '系统内置' : undefined,
     enabledCount > 0 ? `${enabledCount} 个模型可用` : undefined,
   ]
     .filter(Boolean)
@@ -380,28 +401,19 @@ function AgentProviderRow({ channel, enabled, onToggle }: AgentProviderRowProps)
       <Switch
         checked={enabled}
         onCheckedChange={onToggle}
+        disabled={channel.locked}
       />
     </SettingsRow>
   )
 }
 
-// ===== Proma 官方供应商推广卡片 =====
-
-function PromaProviderCard(): React.ReactElement {
-  const handleDownload = (): void => {
-    window.open('http://proma.cool/download', '_blank')
-  }
-
-  return (
-    <SettingsRow
-      label="Proma"
-      icon={<img src={PromaLogo} alt="Proma" className="w-8 h-8 rounded" />}
-      description="Proma 官方供应｜稳定｜靠谱｜丝滑｜简单｜可用于 Agent"
-    >
-      <Button size="sm" variant="outline" className="gap-1.5" onClick={handleDownload}>
-        <ExternalLink size={13} />
-        <span>下载后启动</span>
-      </Button>
-    </SettingsRow>
-  )
+function isHiddenLegacyDeepSeekPreset(channel: Channel): boolean {
+  const modelIds = channel.models.map((model) => model.id).sort()
+  return channel.provider === 'deepseek'
+    && channel.name === 'DeepSeek'
+    && !channel.enabled
+    && channel.baseUrl.includes('api.deepseek.com')
+    && modelIds.length === 2
+    && modelIds[0] === 'deepseek-v4-flash'
+    && modelIds[1] === 'deepseek-v4-pro'
 }

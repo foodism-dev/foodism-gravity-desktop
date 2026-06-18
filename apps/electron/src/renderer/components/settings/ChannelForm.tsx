@@ -44,6 +44,7 @@ import type {
 } from '@proma/shared'
 import { normalizeAnthropicProviderUrl } from '@proma/core'
 import { getProviderLogo } from '@/lib/model-logo'
+import { getChannelDisplayName } from '@/lib/foodism-default-channel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   AlertDialog,
@@ -72,7 +73,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'minimax', 'doubao', 'qwen', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openrouter', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'minimax', 'doubao', 'qwen', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 供应商选项（用于 SettingsSelect） */
 const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
@@ -85,6 +86,7 @@ const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
 const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   anthropic: '/v1/messages',
   'anthropic-compatible': '/v1/messages',
+  openrouter: '/v1/messages',
   openai: '/chat/completions',
   deepseek: '/messages',
   google: '/v1beta/models/{model}:generateContent',
@@ -104,6 +106,7 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
 const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
   'anthropic',
   'anthropic-compatible',
+  'openrouter',
   'deepseek',
   'kimi-api',
   'kimi-coding',
@@ -136,6 +139,34 @@ function isAgentEligibleChannel(channel: Pick<Channel, 'provider' | 'enabled'>):
 
 export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCancel }: ChannelFormProps): React.ReactElement {
   const isEdit = channel !== null
+
+  if (channel?.locked) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={onCancel}
+          >
+            <ArrowLeft size={18} />
+          </Button>
+          <h3 className="text-lg font-medium text-foreground flex-1">内置模型配置</h3>
+        </div>
+        <SettingsSection
+          title={getChannelDisplayName(channel)}
+          description="这是安装包提供的默认模型配置，由万店引力管理，不能在客户端修改。"
+        >
+          <SettingsCard divided={false}>
+            <div className="px-4 py-4 text-sm text-muted-foreground">
+              当前模型：{channel.models.find((model) => model.enabled)?.name ?? 'Claude Opus 4.6'}
+            </div>
+          </SettingsCard>
+        </SettingsSection>
+      </div>
+    )
+  }
 
   // 表单状态
   const [name, setName] = React.useState(channel?.name ?? '')

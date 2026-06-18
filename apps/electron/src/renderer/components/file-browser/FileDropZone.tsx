@@ -304,7 +304,7 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
               </div>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{isWorkspace ? '添加文件到工作区文件目录' : '将文件放入 Agent 工作文件夹'}</p>
+              <p>{isWorkspace ? '添加文件到工作区文件目录' : '将文件放入会话工作文件夹'}</p>
             </TooltipContent>
           </Tooltip>
           {/* 附加文件夹 */}
@@ -326,7 +326,7 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
               </div>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{isWorkspace ? '附加文件夹供工作区所有会话访问' : '告知 Agent 你想处理的文件夹'}</p>
+              <p>{isWorkspace ? '附加文件夹供工作区所有会话访问' : '告诉助手你想处理的文件夹'}</p>
             </TooltipContent>
           </Tooltip>
         </>

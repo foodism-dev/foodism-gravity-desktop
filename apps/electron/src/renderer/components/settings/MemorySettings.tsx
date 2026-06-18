@@ -100,7 +100,7 @@ export function MemorySettings(): React.ReactElement {
     <div className="space-y-8">
       <SettingsSection
         title="记忆"
-        description="启用后 Chat 和 Agent 模式都可跨会话记住重要信息"
+        description="启用后可跨会话记住重要信息"
         action={
           <Switch
             checked={config.enabled}

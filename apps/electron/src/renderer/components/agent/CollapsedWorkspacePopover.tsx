@@ -126,7 +126,7 @@ export function CollapsedWorkspacePopover({
         {/* 头部 */}
         <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-border/40">
           <span className="text-[11px] font-medium text-foreground/50 uppercase tracking-wide">
-            Agent 模式 · 项目
+            项目
           </span>
           <button
             type="button"

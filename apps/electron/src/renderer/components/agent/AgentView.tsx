@@ -47,6 +47,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { getSelectableChannelModels } from '@/lib/foodism-default-channel'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { previewPanelOpenMapAtom, autoPreviewEnabledAtom, quotedSelectionMapAtom, currentQuotedSelectionAtom } from '@/atoms/preview-atoms'
@@ -470,27 +471,31 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     pendingFilesRef.current = pendingFiles
   }, [pendingFiles])
 
-  // 渠道已选但模型未选时，自动选择第一个可用模型
+  // 渠道已选但模型缺失或已不可选时，自动选择第一个可用模型
   const globalChannels = useAtomValue(channelsAtom)
 
   // 检查 Agent 渠道列表中是否存在可用的模型（渠道 enabled + 模型 enabled）
   const hasAvailableModel = React.useMemo(() => {
     // Proma 官方渠道（商业版）：只要 enabled 且有可用模型，直接视为可用
     const promaOfficial = globalChannels.find((c) => c.id === 'proma-official')
-    if (promaOfficial?.enabled && promaOfficial.models.some((m) => m.enabled)) return true
+    if (promaOfficial?.enabled && getSelectableChannelModels(promaOfficial).some((m) => m.enabled)) return true
     // 其他渠道：需在 agentChannelIds 白名单中
     if (!agentChannelIds || agentChannelIds.length === 0) return false
     return globalChannels.some(
-      (c) => c.enabled && agentChannelIds.includes(c.id) && c.models.some((m) => m.enabled),
+      (c) => c.enabled && agentChannelIds.includes(c.id) && getSelectableChannelModels(c).some((m) => m.enabled),
     )
   }, [globalChannels, agentChannelIds])
   React.useEffect(() => {
-    if (!agentChannelId || agentModelId) return
+    if (!agentChannelId) return
 
     const channel = globalChannels.find((c) => c.id === agentChannelId && c.enabled)
     if (!channel) return
 
-    const firstModel = channel.models.find((m) => m.enabled)
+    const selectableModels = getSelectableChannelModels(channel).filter((m) => m.enabled)
+    const selectedModelStillAvailable = selectableModels.some((model) => model.id === agentModelId)
+    if (agentModelId && selectedModelStillAvailable) return
+
+    const firstModel = selectableModels[0]
     if (!firstModel) return
 
     // 更新 per-session map（带幂等守卫，避免无意义写入导致 effect 自循环）
@@ -509,7 +514,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         agentModelId: firstModel.id,
       }).catch(console.error)
     }
-  }, [agentChannelId, agentModelId, globalChannels, sessionId, setSessionModelMap, setDefaultModelId])
+  }, [agentChannelId, agentModelId, globalChannels, sessionId, setSessionModelMap, defaultModelId, setDefaultModelId])
 
   // 获取当前 session 的工作路径（文件浏览器需要）
   React.useEffect(() => {
@@ -1258,7 +1263,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     if (streaming || backgroundWaiting) {
       // 流式追加时不处理附件（仅支持纯文本）
       if (pendingFilesSnapshot.length > 0) {
-        toast.info('Agent 运行中暂不支持追加发送附件', {
+        toast.info('运行中暂不支持追加发送附件', {
           description: '请等待完成后再发送附件，或先撤除附件仅发送文本',
         })
         return
@@ -1340,7 +1345,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
       if (!workspace) {
         toast.warning('暂时无法发送附件', {
-          description: '当前 Agent 会话没有绑定有效工作区。请在顶部选择工作区，或新建 Agent 会话后重新上传。',
+          description: '当前会话没有绑定有效工作区。请在顶部选择工作区，或新建会话后重新上传。',
         })
         return
       }
@@ -1418,7 +1423,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         } catch (error) {
           console.error('[AgentView] 保存附件到 session 失败:', error)
           toast.error('附件保存失败', {
-            description: '请确认当前工作区可用，或新建 Agent 会话后重新上传。',
+            description: '请确认当前工作区可用，或新建会话后重新上传。',
           })
           return
         }
@@ -1999,7 +2004,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
+        <p>停止生成 ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
       </TooltipContent>
     </Tooltip>
   ) : (
@@ -2070,11 +2075,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             onDrop={handleDrop}
           >
             {(isPlanMode || isPermissionPlanMode) && !isDragOver && <PlanModeDashedBorder />}
-            {/* 无 Agent 渠道或无可用模型提示 */}
+            {/* 无渠道或无可用模型提示 */}
             {(!agentChannelId || !hasAvailableModel) && (
               <div className="flex items-center gap-2 px-4 py-2 text-sm text-amber-600 dark:text-amber-400">
                 <Settings size={14} />
-                <span>{!agentChannelId ? '请在设置中选择 Agent 供应商' : '暂无可用模型，请在设置中启用 Agent 渠道并配置模型'}</span>
+                <span>{!agentChannelId ? '请在设置中选择供应商' : '暂无可用模型，请在设置中启用渠道并配置模型'}</span>
                 <button
                   type="button"
                   className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
@@ -2147,7 +2152,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                     ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP，& 引用会话)'
                     : '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP，& 引用会话)'
                   : !agentChannelId
-                    ? '请先在设置中选择 Agent 供应商'
+                    ? '请先在设置中选择供应商'
                     : '暂无可用模型，请先在设置中启用渠道'
               }
               disabled={!agentChannelId || !hasAvailableModel}

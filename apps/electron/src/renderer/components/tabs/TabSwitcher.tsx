@@ -105,7 +105,7 @@ export function TabSwitcher(): ReactElement | null {
       return {
         id: session.id,
         type: 'agent',
-        title: session.title || '新 Agent 会话',
+        title: session.title || '新会话',
         updatedAt: session.updatedAt,
         status,
         workspaceId: session.workspaceId,

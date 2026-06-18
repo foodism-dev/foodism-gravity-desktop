@@ -13,6 +13,7 @@
 // ===== 模型图标导入 =====
 
 import DefaultLogo from '@/assets/models/default.png'
+import FoodismLogo from '@/assets/models/foodism.png'
 
 // Claude / Anthropic
 import ClaudeLogo from '@/assets/models/claude.png'
@@ -122,6 +123,7 @@ import EmbeddingLogo from '@/assets/models/embedding.png'
 // ===== 供应商类型 =====
 
 import type { ProviderType } from '@proma/shared'
+import { FOODISM_DEFAULT_CHANNEL_ID } from './foodism-default-channel'
 
 // ===== 正则匹配映射 =====
 
@@ -237,6 +239,7 @@ const MODEL_LOGO_MAP: Record<string, string> = {
 const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   anthropic: ClaudeLogo,
   'anthropic-compatible': DefaultLogo,
+  openrouter: DefaultLogo,
   openai: OpenAILogo,
   deepseek: DeepSeekLogo,
   google: GeminiLogo,
@@ -336,6 +339,13 @@ const GENERIC_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
   'custom',
 ])
 
+interface ChannelLogoInput {
+  id?: string
+  managedBy?: string
+  provider: ProviderType
+  baseUrl: string
+}
+
 /**
  * 获取渠道（Channel）的 Logo
  *
@@ -347,7 +357,11 @@ const GENERIC_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
  * 这样既能识别「用 Anthropic 协议接入第三方品牌」的渠道，又不会把第三方
  * anthropic-compatible 服务误判为 Claude。
  */
-export function getChannelLogo(channel: { provider: ProviderType; baseUrl: string }): string {
+export function getChannelLogo(channel: ChannelLogoInput): string {
+  if (channel.id === FOODISM_DEFAULT_CHANNEL_ID || channel.managedBy === 'foodism-default') {
+    return FoodismLogo
+  }
+
   if (GENERIC_PROVIDERS.has(channel.provider) && channel.baseUrl) {
     for (const [regex, logo] of URL_LOGO_MAP) {
       if (regex.test(channel.baseUrl)) {

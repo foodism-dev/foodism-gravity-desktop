@@ -42,7 +42,7 @@ export interface ThinkingCapability {
  * 匹配模型 ID（不区分大小写，允许 -latest、-20250101 等后缀）
  */
 function startsWith(modelId: string, prefix: string): boolean {
-  const id = modelId.toLowerCase()
+  const id = modelId.toLowerCase().split('/').pop()?.replace(/\./g, '-') ?? modelId.toLowerCase()
   return id === prefix || id.startsWith(`${prefix}-`)
 }
 
@@ -80,7 +80,7 @@ export function detectThinkingCapability(
   }
 
   // 其它非 Anthropic 供应商：不发 thinking
-  if (providerType !== 'anthropic' && providerType !== 'anthropic-compatible') {
+  if (providerType !== 'anthropic' && providerType !== 'anthropic-compatible' && providerType !== 'openrouter') {
     return { mode: 'manual-only', disableStrategy: 'explicit-disabled' }
   }
 

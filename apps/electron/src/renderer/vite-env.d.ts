@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+declare const __FOODISM_DEV_FEATURES__: boolean
+
 // CSS 模块类型声明
 declare module '*.css' {
   const content: Record<string, string>

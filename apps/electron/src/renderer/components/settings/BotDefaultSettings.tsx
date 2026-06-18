@@ -87,11 +87,11 @@ export function BotDefaultSettings(): React.ReactElement {
               <code className="text-foreground/80 font-mono">/help (/h)</code>
               <span>显示帮助</span>
               <code className="text-foreground/80 font-mono">/new (/n)</code>
-              <span>创建新 Agent 会话</span>
+              <span>创建新会话</span>
               <code className="text-foreground/80 font-mono">/list (/ls)</code>
               <span>列出所有会话</span>
               <code className="text-foreground/80 font-mono">/stop (/s)</code>
-              <span>停止当前 Agent</span>
+              <span>停止当前任务</span>
               <code className="text-foreground/80 font-mono">/switch (/sw)</code>
               <span>切换到已有会话（序号）</span>
               <code className="text-foreground/80 font-mono">/workspace (/ws)</code>

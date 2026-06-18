@@ -107,7 +107,7 @@ export function createAgentSession(
 
   const meta: AgentSessionMeta = {
     id: randomUUID(),
-    title: title || '新 Agent 会话',
+    title: title || '新会话',
     channelId,
     modelId,
     workspaceId,

@@ -11,6 +11,7 @@
 export type ProviderType =
   | 'anthropic'
   | 'anthropic-compatible'
+  | 'openrouter'
   | 'openai'
   | 'deepseek'
   | 'google'
@@ -31,6 +32,7 @@ export type ProviderType =
 export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   anthropic: 'https://api.anthropic.com',
   'anthropic-compatible': '',
+  openrouter: 'https://openrouter.ai/api',
   openai: 'https://api.openai.com/v1',
   deepseek: 'https://api.deepseek.com/anthropic',
   google: 'https://generativelanguage.googleapis.com',
@@ -52,6 +54,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
 export const PROVIDER_LABELS: Record<ProviderType, string> = {
   anthropic: 'Anthropic',
   'anthropic-compatible': 'Anthropic 兼容格式',
+  openrouter: 'OpenRouter',
   openai: 'OpenAI',
   deepseek: 'DeepSeek',
   google: 'Google',
@@ -76,6 +79,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
 export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
   'anthropic',
   'anthropic-compatible',
+  'openrouter',
   'deepseek',
   'kimi-api',
   'kimi-coding',
@@ -126,6 +130,10 @@ export interface Channel {
   models: ChannelModel[]
   /** 是否启用 */
   enabled: boolean
+  /** 是否为系统锁定渠道，锁定后禁止用户编辑、删除或关闭 */
+  locked?: boolean
+  /** 托管来源标记，用于识别安装包内置渠道 */
+  managedBy?: 'foodism-default'
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */

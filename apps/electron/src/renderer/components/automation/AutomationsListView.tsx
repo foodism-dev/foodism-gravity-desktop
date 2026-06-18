@@ -131,7 +131,7 @@ function Section({ title, automations, onEdit, onRefresh, variant }: SectionProp
       return
     }
     toast.success(`已开始运行「${a.name}」`, {
-      description: '本次任务会创建新的 Agent 会话，可在左侧会话列表查看',
+      description: '本次任务会创建新的会话，可在左侧会话列表查看',
     })
     try {
       await window.electronAPI.runAutomationNow(a.id)

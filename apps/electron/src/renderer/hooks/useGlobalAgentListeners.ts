@@ -830,8 +830,8 @@ export function useGlobalAgentListeners(): void {
               sessionId,
               '需要权限确认',
               event.request.toolName
-                ? `Agent 请求使用工具: ${event.request.toolName}`
-                : 'Agent 需要你的权限确认',
+                ? `请求使用工具: ${event.request.toolName}`
+                : '需要你的权限确认',
               'permissionRequest'
             )
           } else if (event.type === 'ask_user_request') {
@@ -845,8 +845,8 @@ export function useGlobalAgentListeners(): void {
             // 桌面通知（带提示音 + 会话导航）
             sendBlockingNotification(
               sessionId,
-              'Agent 需要你的输入',
-              event.request.questions[0]?.question ?? 'Agent 有问题需要你回答',
+              '需要你的输入',
+              event.request.questions[0]?.question ?? '有问题需要你回答',
               'permissionRequest'
             )
           } else if (event.type === 'exit_plan_mode_request') {
@@ -867,8 +867,8 @@ export function useGlobalAgentListeners(): void {
             // 桌面通知（带提示音 + 会话导航）
             sendBlockingNotification(
               sessionId,
-              'Agent 计划待审批',
-              'Agent 已完成计划，等待你的审批',
+              '计划待审批',
+              '计划已完成，等待你的审批',
               'exitPlanMode'
             )
           } else if (event.type === 'enter_plan_mode') {

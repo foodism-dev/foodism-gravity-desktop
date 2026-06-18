@@ -92,7 +92,7 @@ export function AgentSkillsView(): React.ReactElement {
         </div>
         <div className="text-[15px] font-medium text-foreground/80">未选择工作区</div>
         <div className="max-w-sm text-[13px] text-foreground/50">
-          请先在 Agent 模式下选择或创建一个工作区，再来管理它的 Skills 与 MCP。
+          请先选择或创建一个工作区，再来管理它的 Skills 与 MCP。
         </div>
       </div>
     )
@@ -107,7 +107,7 @@ export function AgentSkillsView(): React.ReactElement {
       <div className="titlebar-no-drag mx-auto flex w-full max-w-6xl shrink-0 items-center justify-between px-8 pt-14 pb-4">
         <div className="flex items-center gap-2.5">
           <Blocks className="size-6 text-foreground/70" />
-          <h1 className="text-2xl font-semibold text-foreground">Agent 技能</h1>
+          <h1 className="text-2xl font-semibold text-foreground">技能</h1>
         </div>
 
         <Popover open={wsPopoverOpen} onOpenChange={setWsPopoverOpen}>
@@ -344,7 +344,7 @@ interface SkillsTabProps {
 
 function SkillsTab({ customSkills, builtinSkills, total, updateCount, updatingSkill, isBuiltin, onOpen, onToggle, onUpdate }: SkillsTabProps): React.ReactElement {
   if (total === 0) {
-    return <EmptyState icon={<Blocks className="size-8 text-foreground/30" />} title="暂无 Skill" hint="可以在 Agent 模式下让 Proma 帮你联网查找并安装 Skill，或从其他工作区导入。" />
+    return <EmptyState icon={<Blocks className="size-8 text-foreground/30" />} title="暂无 Skill" hint="可以让 Foodism 帮你联网查找并安装 Skill，或从其他工作区导入。" />
   }
   if (customSkills.length === 0 && builtinSkills.length === 0) {
     return <EmptyState icon={<Search className="size-8 text-foreground/30" />} title="没有匹配的 Skill" hint="试试更换搜索关键词。" />
@@ -361,7 +361,7 @@ function SkillsTab({ customSkills, builtinSkills, total, updateCount, updatingSk
         <SkillSection title="我的 Skills" skills={customSkills} isBuiltin={isBuiltin} updatingSkill={updatingSkill} onOpen={onOpen} onToggle={onToggle} onUpdate={onUpdate} />
       )}
       {builtinSkills.length > 0 && (
-        <SkillSection title="PROMA 内置" skills={builtinSkills} isBuiltin={isBuiltin} updatingSkill={updatingSkill} onOpen={onOpen} onToggle={onToggle} onUpdate={onUpdate} />
+        <SkillSection title="内置" skills={builtinSkills} isBuiltin={isBuiltin} updatingSkill={updatingSkill} onOpen={onOpen} onToggle={onToggle} onUpdate={onUpdate} />
       )}
     </div>
   )
@@ -418,7 +418,7 @@ function McpTab({ entries, total, onOpen, onToggle, onRequestDelete, onAdd }: Mc
       <EmptyState
         icon={<Plus className="size-8 text-foreground/30" />}
         title="还没有 MCP 服务器"
-        hint="点击右上角「添加服务器」开始，或在 Agent 模式下让 Proma 帮你查找并配置。"
+        hint="点击右上角「添加服务器」开始，或让 Foodism 帮你查找并配置。"
         action={
           <button
             type="button"

@@ -172,9 +172,9 @@ function AutomationPromptEmptyGuide(): React.ReactElement {
     <div className="rounded-xl bg-foreground/[0.035] p-4 shadow-inner">
       <div className="flex flex-col gap-3">
         <div>
-          <div className="text-[13px] font-semibold text-foreground">推荐：让 Proma Agent 创建</div>
+          <div className="text-[13px] font-semibold text-foreground">推荐：让 Foodism 创建</div>
           <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            在左侧会话里说清目标，并明确表示要求创建定时任务，Proma Agent 会生成任务描述，并补全周期、工作区和模型等配置，手动编辑更适合微调任务描述。
+            在左侧会话里说清目标，并明确表示要求创建定时任务，Foodism 会生成任务描述，并补全周期、工作区和模型等配置，手动编辑更适合微调任务描述。
           </div>
         </div>
         <div className="h-px bg-border/50" />
@@ -470,7 +470,7 @@ export function AutomationFormView(): React.ReactElement | null {
 
     setRunningNow(true)
     toast.success('已开始运行定时任务', {
-      description: '本次任务会创建新的 Agent 会话，可在左侧会话列表查看',
+      description: '本次任务会创建新的会话，可在左侧会话列表查看',
     })
     try {
       const automationId = await persistDraft(latest)
@@ -813,13 +813,13 @@ export function AutomationFormView(): React.ReactElement | null {
             </div>
           )}
 
-          {/* 选择模型（定时任务只能跑 Agent，因此只显示已勾选为 Agent 兼容的渠道模型） */}
+          {/* 选择模型（定时任务只显示已勾选为会话可用的渠道模型） */}
           <div className="flex flex-col gap-2">
             <Label>选择模型</Label>
             {agentChannelIds.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
                 <Settings size={14} className="shrink-0" />
-                <span>尚未启用任何 Agent 兼容渠道</span>
+                <span>尚未启用任何会话可用渠道</span>
                 <button
                   type="button"
                   className="ml-auto text-xs underline underline-offset-2 hover:text-foreground transition-colors"

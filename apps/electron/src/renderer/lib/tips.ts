@@ -30,7 +30,6 @@ export const TIPS: Tip[] = [
   { id: 'mac-shortcut-file-find', text: '按 ⌘F 可在对话中搜索消息，预览面板中则查找文件内容', platform: 'mac' },
   { id: 'mac-shortcut-settings', text: '按 ⌘, 打开设置', platform: 'mac' },
   { id: 'mac-shortcut-sidebar', text: '按 ⌘B 切换侧边栏显示', platform: 'mac' },
-  { id: 'mac-shortcut-mode', text: '按 ⌘⇧M 快速切换 Chat / Agent 模式', platform: 'mac' },
   { id: 'mac-shortcut-focus', text: '按 ⌘L 快速跳转到输入框', platform: 'mac' },
   { id: 'mac-shortcut-clear', text: '按 ⌘K 清除当前对话上下文', platform: 'mac' },
   { id: 'mac-shortcut-stop', text: '按 ⌘. 中断 AI 响应', platform: 'mac' },
@@ -44,7 +43,6 @@ export const TIPS: Tip[] = [
   { id: 'win-shortcut-file-find', text: '按 Ctrl+F 可在对话中搜索消息，预览面板中则查找文件内容', platform: 'windows' },
   { id: 'win-shortcut-settings', text: '按 Ctrl+, 打开设置', platform: 'windows' },
   { id: 'win-shortcut-sidebar', text: '按 Ctrl+B 切换侧边栏显示', platform: 'windows' },
-  { id: 'win-shortcut-mode', text: '按 Ctrl+Shift+M 快速切换 Chat / Agent 模式', platform: 'windows' },
   { id: 'win-shortcut-focus', text: '按 Ctrl+L 快速跳转到输入框', platform: 'windows' },
   { id: 'win-shortcut-clear', text: '按 Ctrl+K 清除当前对话上下文', platform: 'windows' },
   { id: 'win-shortcut-stop', text: '按 Ctrl+Shift+Backspace 中断 AI 响应', platform: 'windows' },
@@ -53,9 +51,9 @@ export const TIPS: Tip[] = [
   { id: 'win-shortcut-tab-switch', text: '按 Ctrl+Tab 快速切换标签，长按 Ctrl 反复按 Tab 可在标签间循环选择', platform: 'windows' },
 
   // 通用
-  { id: 'tip-agent-file', text: 'Agent 模式下输入 @ 可以引用工作区文件', platform: 'all' },
-  { id: 'tip-agent-mcp', text: 'Agent 模式下输入 # 可以调用 MCP 工具', platform: 'all' },
-  { id: 'tip-agent-skill', text: 'Agent 模式下输入 / 可以使用 Skill', platform: 'all' },
+  { id: 'tip-agent-file', text: '输入 @ 可以引用工作区文件', platform: 'all' },
+  { id: 'tip-agent-mcp', text: '输入 # 可以调用 MCP 工具', platform: 'all' },
+  { id: 'tip-agent-skill', text: '输入 / 可以使用 Skill', platform: 'all' },
   { id: 'tip-attachment', text: '支持拖拽文件到输入框直接上传附件', platform: 'all' },
   { id: 'tip-shortcuts-custom', text: '在设置 → 快捷键中可以自定义所有快捷键', platform: 'all' },
 ]
