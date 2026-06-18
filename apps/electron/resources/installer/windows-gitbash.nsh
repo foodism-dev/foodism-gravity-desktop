@@ -5,7 +5,8 @@
 
 !define GIT_FOR_WINDOWS_VERSION "2.54.0"
 !define GIT_FOR_WINDOWS_EXE "Git-2.54.0-64-bit.exe"
-!define GIT_FOR_WINDOWS_URL "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
+!define GIT_FOR_WINDOWS_URL "https://npmmirror.com/mirrors/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
+!define GIT_FOR_WINDOWS_FALLBACK_URL "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
 
 Var GitBashPath
 
@@ -43,12 +44,29 @@ FunctionEnd
 Function InstallGitForWindows
   StrCpy $0 "$TEMP\${GIT_FOR_WINDOWS_EXE}"
 
+  Call DetectGitBash
+  ${If} $GitBashPath != ""
+    DetailPrint "Git Bash 已就绪：$GitBashPath"
+    Return
+  ${EndIf}
+
   DetailPrint "正在下载 Git for Windows ${GIT_FOR_WINDOWS_VERSION}..."
   nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri ''${GIT_FOR_WINDOWS_URL}'' -OutFile ''$0''"'
   Pop $1
 
   ${If} $1 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Git for Windows 下载失败。你可以稍后在应用的「Windows 环境检测」里重新安装 Git Bash。"
+    DetailPrint "主下载源失败，尝试 GitHub 官方下载源..."
+    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri ''${GIT_FOR_WINDOWS_FALLBACK_URL}'' -OutFile ''$0''"'
+    Pop $1
+  ${EndIf}
+
+  ${If} $1 != 0
+    Call DetectGitBash
+    ${If} $GitBashPath != ""
+      DetailPrint "Git Bash 已就绪：$GitBashPath"
+    ${Else}
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Git for Windows 下载失败。你可以稍后在应用的「Windows 环境检测」里重新安装 Git Bash。"
+    ${EndIf}
     Return
   ${EndIf}
 
