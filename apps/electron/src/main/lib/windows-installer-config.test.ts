@@ -17,6 +17,8 @@ describe('Windows NSIS 安装器配置', () => {
       'utf8',
     )
 
+    expect(script).toContain('!ifndef BUILD_UNINSTALLER')
+    expect(script).toContain('!endif # BUILD_UNINSTALLER')
     expect(script).toContain('DetectGitBash')
     expect(script).toContain('Git-2.54.0-64-bit.exe')
     expect(script).toContain('/VERYSILENT')

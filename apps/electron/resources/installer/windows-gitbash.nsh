@@ -1,6 +1,8 @@
 !include LogicLib.nsh
 !include x64.nsh
 
+!ifndef BUILD_UNINSTALLER
+
 !define GIT_FOR_WINDOWS_VERSION "2.54.0"
 !define GIT_FOR_WINDOWS_EXE "Git-2.54.0-64-bit.exe"
 !define GIT_FOR_WINDOWS_URL "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
@@ -79,3 +81,5 @@ FunctionEnd
 
   done:
 !macroend
+
+!endif # BUILD_UNINSTALLER
