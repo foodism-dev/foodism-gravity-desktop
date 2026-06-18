@@ -159,7 +159,7 @@ proma-v2/
 
 | 包 | 版本 | 职责 |
 | --- | --- | --- |
-| `@proma/electron` | `0.12.67` | Electron 桌面应用 |
+| `@proma/electron` | `0.12.68` | Electron 桌面应用 |
 | `@proma/shared` | `0.1.20` | 共享类型、IPC 常量、配置和工具 |
 | `@proma/core` | `0.2.9` | Provider Adapter、SSE、Shiki 高亮 |
 | `@proma/ui` | `0.1.6` | 共享 React UI 组件 |
