@@ -25,6 +25,7 @@ import {
   HardDrive,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import foodismLogoUrl from "@/assets/models/foodism.png";
 import { settingsTabAtom, channelFormDirtyAtom, settingsCloseRequestedAtom, settingsOpenAtom } from "@/atoms/settings-tab";
 import type { SettingsTab } from "@/atoms/settings-tab";
 import { hasUpdateAtom } from "@/atoms/updater";
@@ -43,6 +44,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ChannelSettings } from "./ChannelSettings";
 import { GeneralSettings } from "./GeneralSettings";
+import { GravitySettings } from "./GravitySettings";
 import { ProxySettings } from "./ProxySettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { AboutSettings } from "./AboutSettings";
@@ -61,8 +63,15 @@ interface TabItem {
   icon: React.ReactNode;
 }
 
+const GRAVITY_TAB: TabItem = {
+  id: "gravity",
+  label: "万店引力",
+  icon: <img src={foodismLogoUrl} alt="" className="h-4 w-4 rounded-[3px] object-cover" />,
+};
+
 /** 基础 Tabs（所有模式都有） */
 const BASE_TABS: TabItem[] = [
+  GRAVITY_TAB,
   { id: "general", label: "通用设置", icon: <Settings size={16} /> },
   { id: "channels", label: "模型配置", icon: <Radio size={16} /> },
   { id: "proxy", label: "代理设置", icon: <Globe size={16} /> },
@@ -114,6 +123,7 @@ function getTailTabs(): TabItem[] {
 }
 
 const PRODUCT_TABS: TabItem[] = [
+  GRAVITY_TAB,
   { id: "general", label: "通用设置", icon: <Settings size={16} /> },
   SHORTCUTS_TAB,
   { id: "migration", label: "数据迁移", icon: <HardDriveDownload size={16} /> },
@@ -125,6 +135,8 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
   switch (tab) {
     case "general":
       return <GeneralSettings />;
+    case "gravity":
+      return <GravitySettings />;
     case "channels":
       return <ChannelSettings />;
     case "prompts":

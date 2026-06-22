@@ -24,7 +24,6 @@ import {
 import { UserAvatar } from '../chat/UserAvatar'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { authSessionAtom } from '@/atoms/auth'
-import { apiUserInfoAtom } from '@/atoms/server-user'
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -41,20 +40,18 @@ import {
   updateStickyUserMessageEnabled,
 } from '@/atoms/ui-preferences'
 import { Button } from '../ui/button'
-import { fetchCurrentApiUser } from '@/lib/server-api'
 import type { NotificationSoundId, NotificationSoundType, NotificationSoundSettings } from '@/types/settings'
 
 export function GeneralSettings(): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const authSession = useAtomValue(authSessionAtom)
-  const [apiUserInfo, setApiUserInfo] = useAtom(apiUserInfoAtom)
   const [notificationsEnabled, setNotificationsEnabled] = useAtom(notificationsEnabledAtom)
   const [notificationSoundEnabled, setNotificationSoundEnabled] = useAtom(notificationSoundEnabledAtom)
   const [notificationSounds, setNotificationSounds] = useAtom(notificationSoundsAtom)
   const [stickyUserMessageEnabled, setStickyUserMessageEnabled] = useAtom(stickyUserMessageEnabledAtom)
   const [archiveAfterDays, setArchiveAfterDays] = React.useState<number>(7)
-  const displayUserName = apiUserInfo?.displayName || authSession.user?.displayName || authSession.user?.username || userProfile.userName
-  const displayAccountName = apiUserInfo?.username || authSession.user?.username
+  const displayUserName = authSession.user?.displayName || authSession.user?.username || userProfile.userName
+  const displayAccountName = authSession.user?.username
 
   // 加载归档天数设置
   React.useEffect(() => {
@@ -62,33 +59,6 @@ export function GeneralSettings(): React.ReactElement {
       setArchiveAfterDays(settings.archiveAfterDays ?? 7)
     }).catch(console.error)
   }, [])
-
-  // 从 Hono API 获取当前登录用户信息，失败时保留本地用户档案降级展示。
-  React.useEffect(() => {
-    const token = authSession.apiToken
-    if (!token) {
-      setApiUserInfo(null)
-      return
-    }
-
-    let ignore = false
-    fetchCurrentApiUser(token)
-      .then((user) => {
-        if (!ignore) {
-          setApiUserInfo(user)
-        }
-      })
-      .catch((error) => {
-        console.warn('[通用设置] 获取 API 用户信息失败:', error)
-        if (!ignore) {
-          setApiUserInfo(null)
-        }
-      })
-
-    return () => {
-      ignore = true
-    }
-  }, [authSession.apiToken, setApiUserInfo])
 
   /** 更新归档天数 */
   const handleArchiveDaysChange = async (value: string): Promise<void> => {

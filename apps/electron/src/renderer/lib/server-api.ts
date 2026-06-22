@@ -8,6 +8,12 @@ export interface ApiUserInfo {
   displayName: string
 }
 
+export type JsonPrimitive = string | number | boolean | null
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
+export interface JsonRecord {
+  [key: string]: JsonValue
+}
+
 interface LoginApiResponse {
   token: string
   user: ApiUserInfo
@@ -15,6 +21,13 @@ interface LoginApiResponse {
 
 interface MeApiResponse {
   user: ApiUserInfo
+}
+
+export interface PortalMeResponse {
+  user?: ApiUserInfo
+  portal?: JsonValue
+  portals?: JsonValue
+  [key: string]: unknown
 }
 
 interface ApiErrorResponse {
@@ -91,4 +104,8 @@ export async function loginWithServerApi(input: LoginInput): Promise<AuthSession
 export async function fetchCurrentApiUser(token: string): Promise<ApiUserInfo> {
   const response = await requestServerApi<MeApiResponse>('/api/me', {}, token)
   return response.user
+}
+
+export async function fetchCurrentPortalMe(token?: string): Promise<PortalMeResponse> {
+  return requestServerApi<PortalMeResponse>('/api/me', {}, token)
 }
