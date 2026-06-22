@@ -3,13 +3,14 @@
  *
  * 控制 MainArea 显示的内容：
  * - conversations: 对话视图（Chat/Agent 模式内容）
+ * - work-orders: 我的工单视图
  * - automations: 定时任务列表视图
  * - agent-skills: Agent 技能（Skills/MCP）全屏管理视图
  */
 
 import { atom } from 'jotai'
 
-export type ActiveView = 'conversations' | 'automations' | 'agent-skills'
+export type ActiveView = 'conversations' | 'work-orders' | 'automations' | 'agent-skills'
 export type AgentSkillsCapabilityTab = 'skills' | 'mcp'
 
 /** 当前活跃视图（不持久化，每次启动默认显示对话） */

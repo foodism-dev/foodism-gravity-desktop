@@ -10,7 +10,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, LogOut } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, LogOut, ClipboardCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { SearchDialog } from './SearchDialog'
@@ -90,6 +90,7 @@ import {
 } from '@/components/session-preview/SessionMiniMapPopover'
 import { detectIsMac } from '@/lib/platform'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
+import { WORK_ORDER_NAV_ITEM } from '@/lib/work-order-navigation'
 import foodismLogo from '@/assets/models/foodism.png'
 import {
   replaceAgentSessionInFreshnessOrder,
@@ -129,6 +130,34 @@ interface AutomationSidebarEntryProps {
   count: number
   active: boolean
   onClick: () => void
+}
+
+interface WorkOrderSidebarEntryProps {
+  active: boolean
+  onClick: () => void
+}
+
+function WorkOrderSidebarEntry({ active, onClick }: WorkOrderSidebarEntryProps): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-label={WORK_ORDER_NAV_ITEM.ariaLabel}
+      onClick={onClick}
+      className={cn(
+        'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
+        active
+          ? 'bg-primary/10 text-primary shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <span className={cn('flex-shrink-0 w-[18px] h-[18px]', active ? 'text-primary' : 'text-foreground/45')}>
+          <ClipboardCheck size={16} className="block" />
+        </span>
+        <span className="truncate">{WORK_ORDER_NAV_ITEM.label}</span>
+      </span>
+    </button>
+  )
 }
 
 function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEntryProps): React.ReactElement {
@@ -675,6 +704,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleOpenAutomations = React.useCallback((): void => {
     setAutomationForm({ open: false, draft: null })
     setActiveView('automations')
+  }, [setAutomationForm, setActiveView])
+
+  /** 打开我的工单 */
+  const handleOpenWorkOrders = React.useCallback((): void => {
+    setAutomationForm({ open: false, draft: null })
+    setActiveView(WORK_ORDER_NAV_ITEM.view)
   }, [setAutomationForm, setActiveView])
 
   /** 打开 Agent 技能视图 */
@@ -1616,6 +1651,25 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             <TooltipTrigger asChild>
               <button
                 type="button"
+                aria-label={WORK_ORDER_NAV_ITEM.ariaLabel}
+                onClick={handleOpenWorkOrders}
+                className={cn(
+                  'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                  activeView === WORK_ORDER_NAV_ITEM.view
+                    ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                    : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                )}
+              >
+                <ClipboardCheck size={16} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{WORK_ORDER_NAV_ITEM.label}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
                 aria-label="搜索"
                 onClick={() => setSearchDialogOpen(true)}
                 className="size-10 flex items-center justify-center rounded-[12px] text-foreground/45 bg-primary/5 hover:bg-primary/10 hover:text-foreground/70 transition-[background-color,border-color,color] duration-150 titlebar-no-drag border border-border/60 hover:border-border"
@@ -1804,8 +1858,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         </Tooltip>
       </div>
 
-      {/* 自动任务入口：作为任务中心入口放在置顶区上方，不参与置顶列表层级。 */}
+      {/* 我的工单入口：作为工作流入口放在任务中心上方，不参与置顶列表层级。 */}
       <div className="px-3 pt-2 pb-0.5">
+        <WorkOrderSidebarEntry
+          active={activeView === WORK_ORDER_NAV_ITEM.view}
+          onClick={handleOpenWorkOrders}
+        />
+      </div>
+
+      {/* 自动任务入口：作为任务中心入口放在置顶区上方，不参与置顶列表层级。 */}
+      <div className="px-3 pt-0.5 pb-0.5">
         <AutomationSidebarEntry
           count={automationCount}
           active={activeView === 'automations'}

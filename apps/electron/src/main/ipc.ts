@@ -10,7 +10,7 @@ import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSyn
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, AUTH_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, AUTH_IPC_CHANNELS, REBUILD_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
   VoiceDictationAudioChunkInput,
@@ -111,7 +111,7 @@ import type {
   CreateAutomationInput,
   UpdateAutomationInput,
 } from '@proma/shared'
-import type { UserProfile, AppSettings, AuthSession, AuthSsoLoginResult, LoginInput } from '../types'
+import type { UserProfile, AppSettings, AuthSession, AuthSsoLoginResult, LoginInput, RebuildEntityGetRequest, RebuildEntityListRequest, RebuildFieldOption, RebuildSupplyGoodsRecord, RebuildSupplyGoodsListResult } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
 import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
@@ -152,6 +152,7 @@ import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getAuthSession, login, logout, saveAuthSession } from './lib/auth-service'
 import { createSsoOidcService, getDefaultSsoOidcConfig } from './lib/auth/sso-oidc-service'
 import type { SsoOidcService } from './lib/auth/sso-oidc-service'
+import { getSupplyGoods, getSupplyGoodsApprovalStateOptions, listSupplyGoods } from './lib/rebuild-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
@@ -1463,6 +1464,32 @@ export function registerIpcHandlers(): void {
     async (): Promise<AuthSession> => {
       ssoOidcService?.stopCallbackServer()
       return logout()
+    }
+  )
+
+  // ===== REBUILD OpenAPI =====
+
+  // 查询 SupplyGoods 多条记录
+  ipcMain.handle(
+    REBUILD_IPC_CHANNELS.LIST_SUPPLY_GOODS,
+    async (_, request?: RebuildEntityListRequest): Promise<RebuildSupplyGoodsListResult> => {
+      return listSupplyGoods(request)
+    }
+  )
+
+  // 查询 SupplyGoods 单条记录
+  ipcMain.handle(
+    REBUILD_IPC_CHANNELS.GET_SUPPLY_GOODS,
+    async (_, request: RebuildEntityGetRequest): Promise<RebuildSupplyGoodsRecord> => {
+      return getSupplyGoods(request)
+    }
+  )
+
+  // 获取 SupplyGoods approvalState 选项
+  ipcMain.handle(
+    REBUILD_IPC_CHANNELS.GET_SUPPLY_GOODS_APPROVAL_STATE_OPTIONS,
+    async (): Promise<RebuildFieldOption[]> => {
+      return getSupplyGoodsApprovalStateOptions()
     }
   )
 
