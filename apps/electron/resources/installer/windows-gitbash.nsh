@@ -6,11 +6,14 @@
 !define GIT_FOR_WINDOWS_VERSION "2.54.0"
 !define GIT_FOR_WINDOWS_EXE "Git-2.54.0-64-bit.exe"
 !define GIT_FOR_WINDOWS_URL "https://npmmirror.com/mirrors/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
+!define GIT_FOR_WINDOWS_MIN_BYTES "50000000"
 
 Var GitBashPath
 Var ShellEnvironmentName
 Var GitInstallLogPath
 Var GitDownloadScriptPath
+Var GitInstallerPath
+Var GitDownloadScriptReady
 
 !macro AppendGitInstallLog MESSAGE
   ${If} $GitInstallLogPath == ""
@@ -27,6 +30,8 @@ Var GitDownloadScriptPath
 Function InitGitInstallLog
   StrCpy $GitInstallLogPath "$TEMP\foodism-gravity-git-install.log"
   StrCpy $GitDownloadScriptPath "$TEMP\foodism-gravity-download-git.ps1"
+  StrCpy $GitInstallerPath "$TEMP\${GIT_FOR_WINDOWS_EXE}"
+  StrCpy $GitDownloadScriptReady "0"
   Delete "$GitInstallLogPath"
   !insertmacro AppendGitInstallLog "Git for Windows 安装日志"
   !insertmacro AppendGitInstallLog "日志路径：$GitInstallLogPath"
@@ -40,6 +45,10 @@ Function WriteGitDownloadScript
   ${If} $GitDownloadScriptPath == ""
     StrCpy $GitDownloadScriptPath "$TEMP\foodism-gravity-download-git.ps1"
   ${EndIf}
+  ${If} $GitInstallerPath == ""
+    StrCpy $GitInstallerPath "$TEMP\${GIT_FOR_WINDOWS_EXE}"
+  ${EndIf}
+  StrCpy $GitDownloadScriptReady "0"
 
   Delete "$GitDownloadScriptPath"
   !insertmacro AppendGitInstallLog "下载脚本：$GitDownloadScriptPath"
@@ -50,34 +59,40 @@ Function WriteGitDownloadScript
     Return
   ${EndIf}
 
+  FileWrite $3 "param($\r$\n"
+  FileWrite $3 "  [Parameter(Mandatory=$$true)][string]$$LogPath,$\r$\n"
+  FileWrite $3 "  [Parameter(Mandatory=$$true)][string]$$Url,$\r$\n"
+  FileWrite $3 "  [Parameter(Mandatory=$$true)][string]$$OutPath$\r$\n"
+  FileWrite $3 ")$\r$\n"
   FileWrite $3 "$$ErrorActionPreference = 'Stop'$\r$\n"
-  FileWrite $3 "$$log = '$GitInstallLogPath'$\r$\n"
-  FileWrite $3 "$$url = '${GIT_FOR_WINDOWS_URL}'$\r$\n"
-  FileWrite $3 "$$out = '$0'$\r$\n"
   FileWrite $3 "function Write-InstallLog {$\r$\n"
   FileWrite $3 "  param([string]$$message)$\r$\n"
-  FileWrite $3 "  Add-Content -LiteralPath $$log -Encoding UTF8 -Value $$message$\r$\n"
+  FileWrite $3 "  Add-Content -LiteralPath $$LogPath -Encoding UTF8 -Value $$message$\r$\n"
   FileWrite $3 "}$\r$\n"
   FileWrite $3 "try {$\r$\n"
   FileWrite $3 "  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12$\r$\n"
   FileWrite $3 "  Write-InstallLog ('PowerShell 版本：' + $$PSVersionTable.PSVersion.ToString())$\r$\n"
   FileWrite $3 "  Write-InstallLog ('操作系统：' + [Environment]::OSVersion.VersionString)$\r$\n"
   FileWrite $3 "  Write-InstallLog ('64 位系统：' + [Environment]::Is64BitOperatingSystem)$\r$\n"
-  FileWrite $3 "  Write-InstallLog ('下载目标：' + $$out)$\r$\n"
+  FileWrite $3 "  Write-InstallLog ('下载目标：' + $$OutPath)$\r$\n"
   FileWrite $3 "  $$proxy = [System.Net.WebRequest]::DefaultWebProxy$\r$\n"
   FileWrite $3 "  if ($$proxy) {$\r$\n"
-  FileWrite $3 "    $$proxyUri = $$proxy.GetProxy([Uri]$$url)$\r$\n"
+  FileWrite $3 "    $$proxyUri = $$proxy.GetProxy([Uri]$$Url)$\r$\n"
   FileWrite $3 "    Write-InstallLog ('代理解析：' + $$proxyUri.AbsoluteUri)$\r$\n"
   FileWrite $3 "  } else {$\r$\n"
   FileWrite $3 "    Write-InstallLog '代理解析：未检测到'$\r$\n"
   FileWrite $3 "  }$\r$\n"
-  FileWrite $3 "  $$response = Invoke-WebRequest -Uri $$url -OutFile $$out -UseBasicParsing -ErrorAction Stop$\r$\n"
+  FileWrite $3 "  $$response = Invoke-WebRequest -Uri $$Url -OutFile $$OutPath -UseBasicParsing -ErrorAction Stop$\r$\n"
   FileWrite $3 "  if ($$response.StatusCode) {$\r$\n"
   FileWrite $3 "    Write-InstallLog ('HTTP 状态码：' + $$response.StatusCode)$\r$\n"
   FileWrite $3 "  }$\r$\n"
-  FileWrite $3 "  if (Test-Path -LiteralPath $$out) {$\r$\n"
-  FileWrite $3 "    $$file = Get-Item -LiteralPath $$out$\r$\n"
-  FileWrite $3 "    Write-InstallLog ('下载文件大小：' + $$file.Length + ' bytes')$\r$\n"
+  FileWrite $3 "  if (-not (Test-Path -LiteralPath $$OutPath)) {$\r$\n"
+  FileWrite $3 "    throw '下载完成但未找到安装包文件'$\r$\n"
+  FileWrite $3 "  }$\r$\n"
+  FileWrite $3 "  $$file = Get-Item -LiteralPath $$OutPath$\r$\n"
+  FileWrite $3 "  Write-InstallLog ('下载文件大小：' + $$file.Length + ' bytes')$\r$\n"
+  FileWrite $3 "  if ($$file.Length -lt ${GIT_FOR_WINDOWS_MIN_BYTES}) {$\r$\n"
+  FileWrite $3 "    throw ('下载文件过小：' + $$file.Length + ' bytes')$\r$\n"
   FileWrite $3 "  }$\r$\n"
   FileWrite $3 "  Write-InstallLog '主下载源下载成功'$\r$\n"
   FileWrite $3 "  exit 0$\r$\n"
@@ -91,6 +106,7 @@ Function WriteGitDownloadScript
   FileWrite $3 "  exit 1$\r$\n"
   FileWrite $3 "}$\r$\n"
   FileClose $3
+  StrCpy $GitDownloadScriptReady "1"
 FunctionEnd
 
 !macro CheckGitBashPath CANDIDATE_PATH
@@ -175,9 +191,11 @@ Function DetectGitBash
 FunctionEnd
 
 Function InstallGitForWindows
-  StrCpy $0 "$TEMP\${GIT_FOR_WINDOWS_EXE}"
   ${If} $GitInstallLogPath == ""
     Call InitGitInstallLog
+  ${EndIf}
+  ${If} $GitInstallerPath == ""
+    StrCpy $GitInstallerPath "$TEMP\${GIT_FOR_WINDOWS_EXE}"
   ${EndIf}
 
   Call DetectGitBash
@@ -188,14 +206,15 @@ Function InstallGitForWindows
 
   DetailPrint "Git for Windows 安装日志：$GitInstallLogPath"
   DetailPrint "正在下载 Git for Windows ${GIT_FOR_WINDOWS_VERSION}..."
-  Delete "$0"
+  Delete "$GitInstallerPath"
   !insertmacro AppendGitInstallLog "开始下载 Git for Windows：${GIT_FOR_WINDOWS_URL}"
-  !insertmacro AppendGitInstallLog "下载目标：$0"
+  !insertmacro AppendGitInstallLog "下载目标：$GitInstallerPath"
   Call WriteGitDownloadScript
-  ${If} ${FileExists} "$GitDownloadScriptPath"
-    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$GitDownloadScriptPath"'
+  ${If} $GitDownloadScriptReady == "1"
+    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$GitDownloadScriptPath" -LogPath "$GitInstallLogPath" -Url "${GIT_FOR_WINDOWS_URL}" -OutPath "$GitInstallerPath"'
     Pop $1
   ${Else}
+    !insertmacro AppendGitInstallLog "下载脚本未就绪，跳过执行"
     StrCpy $1 1
   ${EndIf}
   !insertmacro AppendGitInstallLog "主下载源退出码：$1"
@@ -212,8 +231,8 @@ Function InstallGitForWindows
   ${EndIf}
 
   DetailPrint "正在安装 Git for Windows ${GIT_FOR_WINDOWS_VERSION}..."
-  !insertmacro AppendGitInstallLog "开始运行 Git for Windows 安装程序：$0"
-  ExecWait '"$0" /VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS' $1
+  !insertmacro AppendGitInstallLog "开始运行 Git for Windows 安装程序：$GitInstallerPath"
+  ExecWait '"$GitInstallerPath" /VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS' $1
   !insertmacro AppendGitInstallLog "Git for Windows 安装程序退出码：$1"
 
   ${If} $1 != 0
