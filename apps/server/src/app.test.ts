@@ -39,19 +39,34 @@ interface ErrorResponse {
 }
 
 function createMemoryUserRepository(user: UserWithPasswordHash): UserRepository {
+  let storedUser = user;
   return {
     async findById(id: string): Promise<ApiUser | null> {
-      return user.id === id
+      return storedUser.id === id
         ? {
-            id: user.id,
-            username: user.username,
+            id: storedUser.id,
+            username: storedUser.username,
             displayName: "数据库用户",
           }
         : null;
     },
 
     async findByUsername(username: string): Promise<UserWithPasswordHash | null> {
-      return user.username === username ? user : null;
+      return storedUser.username === username ? storedUser : null;
+    },
+
+    async ensureSsoUser(ssoUser: ApiUser): Promise<ApiUser> {
+      storedUser = {
+        ...storedUser,
+        id: storedUser.username === ssoUser.username ? storedUser.id : ssoUser.id,
+        username: ssoUser.username,
+        displayName: ssoUser.displayName,
+      };
+      return {
+        id: storedUser.id,
+        username: storedUser.username,
+        displayName: storedUser.displayName,
+      };
     },
   };
 }
@@ -210,6 +225,66 @@ describe("server app", () => {
       id: "11111111-1111-1111-1111-111111111111",
       username: "pg-user",
       displayName: "数据库用户",
+    });
+  });
+
+  test("Given an uninitialized SSO account, When create_user is requested, Then it creates a jwt session", async () => {
+    const app = createServerApp({ userRepository: null });
+
+    const response = await app.request("/create_user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user: {
+          id: "sso-user-1",
+          username: "zhangsan",
+          displayName: "张三",
+        },
+      }),
+    });
+    const body = (await response.json()) as LoginResponse;
+
+    expect(response.status).toBe(200);
+    expect(typeof body.token).toBe("string");
+    expect(body.user).toEqual({
+      id: "sso-user-1",
+      username: "zhangsan",
+      displayName: "张三",
+    });
+  });
+
+  test("Given an initialized SSO account, When sso_login is requested, Then it upserts user and returns a jwt session", async () => {
+    const passwordHash = await Bun.password.hash("secret-password");
+    const app = createServerApp({
+      userRepository: createMemoryUserRepository({
+        id: "11111111-1111-1111-1111-111111111111",
+        username: "zhangsan",
+        displayName: "旧名称",
+        passwordHash,
+      }),
+    });
+
+    const response = await app.request("/sso_login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account: {
+          account: {
+            sub: "sso-user-1",
+            preferred_username: "zhangsan",
+            display_name: "张三",
+          },
+        },
+      }),
+    });
+    const body = (await response.json()) as LoginResponse;
+
+    expect(response.status).toBe(200);
+    expect(typeof body.token).toBe("string");
+    expect(body.user).toEqual({
+      id: "11111111-1111-1111-1111-111111111111",
+      username: "zhangsan",
+      displayName: "张三",
     });
   });
 });

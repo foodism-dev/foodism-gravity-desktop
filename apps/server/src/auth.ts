@@ -30,6 +30,11 @@ export interface LoginResponse {
   user: ApiUser;
 }
 
+export interface SsoAuthRequest {
+  user?: unknown;
+  account?: unknown;
+}
+
 const TEST_USER: ApiUser = {
   id: TEST_USERNAME,
   username: TEST_USERNAME,
@@ -53,6 +58,54 @@ export function isLoginRequest(value: unknown): value is LoginRequest {
 
   const input = value as Record<string, unknown>;
   return typeof input.username === "string" && typeof input.password === "string";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function pickRecord(value: unknown, keys: string[]): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  for (const key of keys) {
+    const candidate = value[key];
+    if (isRecord(candidate)) return candidate;
+  }
+  return null;
+}
+
+function pickString(value: unknown, keys: string[]): string {
+  if (!isRecord(value)) return "";
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+function toApiUser(value: unknown): ApiUser | null {
+  const username = pickString(value, ["username", "preferred_username"]);
+  const id = pickString(value, ["id", "sub", "user_id", "userId"]) || username;
+  const displayName = pickString(value, ["displayName", "display_name", "name", "username"]);
+  if (!id || !username || !displayName) return null;
+  return { id, username, displayName };
+}
+
+export function extractSsoUser(value: unknown): ApiUser | null {
+  if (!isRecord(value)) return null;
+  const candidates = [
+    value.user,
+    value.account,
+    pickRecord(value.account, ["account"]),
+    pickRecord(pickRecord(value.account, ["account"]), ["account"]),
+  ];
+
+  for (const candidate of candidates) {
+    const user = toApiUser(candidate);
+    if (user) return user;
+  }
+  return null;
 }
 
 export function validateLogin(input: LoginRequest): ApiUser | null {

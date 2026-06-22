@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { createDatabase, getDatabaseUrl, type ServerDatabase } from "./db/client.ts";
 import { users, type UserRow } from "./db/schema.ts";
 import type { ApiUser } from "./auth.ts";
@@ -10,6 +11,7 @@ export interface UserWithPasswordHash extends ApiUser {
 export interface UserRepository {
   findById: (id: string) => Promise<ApiUser | null>;
   findByUsername: (username: string) => Promise<UserWithPasswordHash | null>;
+  ensureSsoUser: (user: ApiUser) => Promise<ApiUser>;
 }
 
 function mapUser(row: UserRow): ApiUser {
@@ -37,6 +39,27 @@ export function createDrizzleUserRepository(db: ServerDatabase): UserRepository 
     async findByUsername(username: string): Promise<UserWithPasswordHash | null> {
       const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
       return user ? mapUserWithPasswordHash(user) : null;
+    },
+
+    async ensureSsoUser(user: ApiUser): Promise<ApiUser> {
+      const passwordHash = await Bun.password.hash(`sso:${user.id}:${randomUUID()}`);
+      const [savedUser] = await db
+        .insert(users)
+        .values({
+          username: user.username,
+          displayName: user.displayName,
+          passwordHash,
+        })
+        .onConflictDoUpdate({
+          target: users.username,
+          set: {
+            displayName: user.displayName,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      return savedUser ? mapUser(savedUser) : user;
     },
   };
 }

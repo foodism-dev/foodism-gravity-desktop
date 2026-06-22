@@ -7,7 +7,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import http from 'node:http'
 import { createAuthSessionFromGravityAccount } from '../auth-service'
-import type { AuthSession } from '../../../types'
+import type { AuthSession, AuthUser } from '../../../types'
 
 export interface SsoOidcConfig {
   ssoIssuer: string
@@ -38,6 +38,24 @@ export interface SsoLoginResult {
   authorizeUrl: string
 }
 
+export interface InternalAuthConfig {
+  apiBaseUrl: string
+  createUserPath: string
+  loginPath: string
+}
+
+export interface InternalAuthInput {
+  tokenSet: SsoTokenSet
+  account: unknown
+  session: AuthSession
+  userInitial: boolean
+}
+
+export interface InternalAuthResult {
+  apiToken: string
+  user?: AuthUser
+}
+
 export interface CompleteSsoCallbackInput {
   requestUrl: URL
   redirectUri: string
@@ -45,6 +63,7 @@ export interface CompleteSsoCallbackInput {
   now?: Date
   exchangeCode: (code: string, verifier: string) => Promise<SsoTokenSet>
   fetchAccount: (accessToken: string) => Promise<unknown>
+  issueInternalToken?: (input: InternalAuthInput) => Promise<InternalAuthResult>
 }
 
 export interface CreateSsoOidcServiceOptions {
@@ -85,6 +104,19 @@ export function getDefaultSsoOidcConfig(env: Record<string, string | undefined> 
   }
 }
 
+export function getDefaultInternalAuthConfig(env: Record<string, string | undefined> = process.env): InternalAuthConfig {
+  return {
+    apiBaseUrl: normalizeBaseUrl(
+      env.API_BASE_URL
+      || env.PROMA_SERVER_URL
+      || env.VITE_PROMA_SERVER_URL
+      || 'http://localhost:8787'
+    ),
+    createUserPath: normalizePath(env.GRAVITY_CREATE_USER_PATH || '/create_user'),
+    loginPath: normalizePath(env.GRAVITY_SSO_LOGIN_PATH || '/sso_login'),
+  }
+}
+
 export function buildAuthorizeUrl(config: SsoOidcConfig, pkce: PKCEState): URL {
   const authorizeUrl = new URL('/oauth2/authorize', config.ssoIssuer)
   authorizeUrl.search = new URLSearchParams({
@@ -119,7 +151,32 @@ export async function completeSsoCallback(input: CompleteSsoCallbackInput): Prom
   }
 
   const account = await input.fetchAccount(tokenSet.access_token)
-  return createAuthSessionFromGravityAccount(tokenSet, account, input.now)
+  logSsoUserInfo(account)
+  const session = createAuthSessionFromGravityAccount(tokenSet, account, input.now)
+  const userInitial = hasUserInitial(account)
+  console.log('[SSO] 解析后的用户会话摘要:', stringifyForLog({
+    userInitial,
+    user: session.user,
+    roles: session.roles ?? [],
+    identities: session.identities ?? [],
+    expiresAt: session.expiresAt,
+    refreshable: session.refreshable,
+  }))
+  if (!input.issueInternalToken) {
+    return session
+  }
+
+  const internalAuth = await input.issueInternalToken({
+    tokenSet,
+    account,
+    session,
+    userInitial,
+  })
+  return {
+    ...session,
+    apiToken: internalAuth.apiToken,
+    user: internalAuth.user ?? session.user,
+  }
 }
 
 export function createSsoOidcService(options: CreateSsoOidcServiceOptions): SsoOidcService {
@@ -164,6 +221,10 @@ export function createSsoOidcService(options: CreateSsoOidcServiceOptions): SsoO
     return payload
   }
 
+  async function issueInternalToken(input: InternalAuthInput): Promise<InternalAuthResult> {
+    return requestInternalAuthToken(getDefaultInternalAuthConfig(), input, fetchImpl)
+  }
+
   function startCallbackServer(): Promise<void> {
     if (callbackServer) return Promise.resolve()
     const redirect = new URL(options.config.redirectUri)
@@ -181,6 +242,7 @@ export function createSsoOidcService(options: CreateSsoOidcServiceOptions): SsoO
             pkce: currentPkce,
             exchangeCode,
             fetchAccount,
+            issueInternalToken,
           })
           options.saveSession(session)
           options.onCompleted?.(session)
@@ -220,6 +282,24 @@ export function createSsoOidcService(options: CreateSsoOidcServiceOptions): SsoO
   }
 }
 
+export async function requestInternalAuthToken(
+  config: InternalAuthConfig,
+  input: InternalAuthInput,
+  fetchImpl: typeof fetch = fetch
+): Promise<InternalAuthResult> {
+  const endpoint = input.userInitial ? config.loginPath : config.createUserPath
+  const response = await fetchImpl(new URL(endpoint, `${config.apiBaseUrl}/`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildInternalAuthPayload(input)),
+  })
+  const payload = await parseJsonResponse(response)
+  if (!response.ok) {
+    throw new Error(getResponseError(payload, `内部认证请求失败: ${response.status}`))
+  }
+  return toInternalAuthResult(payload)
+}
+
 async function parseJsonResponse(response: Response): Promise<unknown> {
   try {
     return await response.json()
@@ -246,6 +326,149 @@ function toTokenSet(payload: unknown): SsoTokenSet {
     access_token: typeof data.access_token === 'string' ? data.access_token : undefined,
     refresh_token: typeof data.refresh_token === 'string' ? data.refresh_token : undefined,
     id_token: typeof data.id_token === 'string' ? data.id_token : undefined,
+  }
+}
+
+function stringifyForLog(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function logSsoUserInfo(account: unknown): void {
+  console.log('[SSO] userinfo/account 原始响应:', stringifyForLog(account))
+  if (isRecord(account)) {
+    console.log('[SSO] userinfo/account 顶层字段:', Object.keys(account).join(', ') || '<empty>')
+  }
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '')
+}
+
+function normalizePath(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return '/'
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function pickRecord(value: unknown, keys: string[]): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined
+  for (const key of keys) {
+    const nested = value[key]
+    if (isRecord(nested)) return nested
+  }
+  return undefined
+}
+
+function pickString(value: unknown, keys: string[]): string {
+  if (!isRecord(value)) return ''
+  for (const key of keys) {
+    const candidate = value[key]
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim()
+    }
+  }
+  return ''
+}
+
+function pickBoolean(value: unknown, keys: string[]): boolean | undefined {
+  if (!isRecord(value)) return undefined
+  for (const key of keys) {
+    const candidate = value[key]
+    if (typeof candidate === 'boolean') return candidate
+  }
+  return undefined
+}
+
+function hasUserInitial(rawAccount: unknown): boolean {
+  const keys = [
+    'userInitial',
+    'user_initial',
+    'isUserInitial',
+    'is_user_initial',
+    'userInitialized',
+    'user_initialized',
+    'hasUser',
+    'has_user',
+    'hasInternalUser',
+    'has_internal_user',
+    'initial',
+    'isInitial',
+    'is_initial',
+    'initialized',
+  ]
+  const candidates = [
+    rawAccount,
+    pickRecord(rawAccount, ['account']),
+    pickRecord(pickRecord(rawAccount, ['account']), ['account']),
+    pickRecord(rawAccount, ['user']),
+    pickRecord(rawAccount, ['internalUser', 'internal_user']),
+  ]
+
+  for (const candidate of candidates) {
+    const matched = pickBoolean(candidate, keys)
+    if (typeof matched === 'boolean') return matched
+  }
+
+  // SSO 侧没有下发明确标记时，按已初始化处理，避免重复创建用户。
+  return true
+}
+
+function buildInternalAuthPayload(input: InternalAuthInput): Record<string, unknown> {
+  return {
+    provider: 'gravity-sso',
+    action: input.userInitial ? 'login' : 'create_user',
+    userInitial: input.userInitial,
+    accessToken: input.tokenSet.access_token,
+    refreshToken: input.tokenSet.refresh_token,
+    idToken: input.tokenSet.id_token,
+    tokenType: input.tokenSet.token_type,
+    expiresIn: input.tokenSet.expires_in,
+    account: input.account,
+    user: input.session.user,
+    roles: input.session.roles ?? [],
+    identities: input.session.identities ?? [],
+  }
+}
+
+function toAuthUser(value: unknown): AuthUser | undefined {
+  const id = pickString(value, ['id', 'sub', 'user_id', 'userId'])
+  const username = pickString(value, ['username', 'preferred_username'])
+  const displayName = pickString(value, ['displayName', 'display_name', 'name', 'username'])
+  if (!id || !username || !displayName) return undefined
+
+  const user: AuthUser = { id, username, displayName }
+  const email = pickString(value, ['email'])
+  const phoneMasked = pickString(value, ['phoneMasked', 'phone_masked'])
+  const tenantId = pickString(value, ['tenantId', 'tenant_id'])
+  const employeeNo = pickString(value, ['employeeNo', 'employee_no'])
+  const title = pickString(value, ['title'])
+  if (email) user.email = email
+  if (phoneMasked) user.phoneMasked = phoneMasked
+  if (tenantId) user.tenantId = tenantId
+  if (employeeNo) user.employeeNo = employeeNo
+  if (title) user.title = title
+  return user
+}
+
+function toInternalAuthResult(payload: unknown): InternalAuthResult {
+  if (!isRecord(payload)) {
+    throw new Error('内部认证响应格式无效')
+  }
+  const apiToken = pickString(payload, ['token', 'jwt', 'apiToken', 'api_token', 'accessToken', 'access_token'])
+  if (!apiToken) {
+    throw new Error('内部认证响应缺少 JWT token')
+  }
+  return {
+    apiToken,
+    user: toAuthUser(payload.user),
   }
 }
 
