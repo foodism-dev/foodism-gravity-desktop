@@ -6,7 +6,6 @@
 !define GIT_FOR_WINDOWS_VERSION "2.54.0"
 !define GIT_FOR_WINDOWS_EXE "Git-2.54.0-64-bit.exe"
 !define GIT_FOR_WINDOWS_URL "https://npmmirror.com/mirrors/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
-!define GIT_FOR_WINDOWS_FALLBACK_URL "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
 
 Var GitBashPath
 Var ShellEnvironmentName
@@ -28,16 +27,22 @@ Function InitGitInstallLog
   StrCpy $GitInstallLogPath "$TEMP\foodism-gravity-git-install.log"
   Delete "$GitInstallLogPath"
   !insertmacro AppendGitInstallLog "Git for Windows 安装日志"
-  !insertmacro AppendGitInstallLog "主下载源：${GIT_FOR_WINDOWS_URL}"
-  !insertmacro AppendGitInstallLog "备用下载源：${GIT_FOR_WINDOWS_FALLBACK_URL}"
+  !insertmacro AppendGitInstallLog "日志路径：$GitInstallLogPath"
+  !insertmacro AppendGitInstallLog "安装包版本：${GIT_FOR_WINDOWS_VERSION}"
+  !insertmacro AppendGitInstallLog "安装包文件：${GIT_FOR_WINDOWS_EXE}"
+  !insertmacro AppendGitInstallLog "临时目录：$TEMP"
+  !insertmacro AppendGitInstallLog "下载源：${GIT_FOR_WINDOWS_URL}"
 FunctionEnd
 
 !macro CheckGitBashPath CANDIDATE_PATH
+  !insertmacro AppendGitInstallLog "检查 Git Bash 路径：${CANDIDATE_PATH}"
   ${If} ${FileExists} "${CANDIDATE_PATH}"
     StrCpy $GitBashPath "${CANDIDATE_PATH}"
     StrCpy $ShellEnvironmentName "Git Bash"
     !insertmacro AppendGitInstallLog "检测到 Git Bash：${CANDIDATE_PATH}"
     Return
+  ${Else}
+    !insertmacro AppendGitInstallLog "Git Bash 路径不存在：${CANDIDATE_PATH}"
   ${EndIf}
 !macroend
 
@@ -53,26 +58,40 @@ Function DetectGitBash
 
   SetRegView 64
   ReadRegStr $0 HKLM "SOFTWARE\GitForWindows" "InstallPath"
-  ${If} $0 != ""
-  ${AndIf} ${FileExists} "$0\bin\bash.exe"
-    StrCpy $GitBashPath "$0\bin\bash.exe"
-    StrCpy $ShellEnvironmentName "Git Bash"
-    !insertmacro AppendGitInstallLog "检测到 Git Bash：$GitBashPath"
-    Return
+  ${If} $0 == ""
+    !insertmacro AppendGitInstallLog "HKLM GitForWindows InstallPath：未设置"
+  ${Else}
+    !insertmacro AppendGitInstallLog "HKLM GitForWindows InstallPath：$0"
+    ${If} ${FileExists} "$0\bin\bash.exe"
+      StrCpy $GitBashPath "$0\bin\bash.exe"
+      StrCpy $ShellEnvironmentName "Git Bash"
+      !insertmacro AppendGitInstallLog "检测到 Git Bash：$GitBashPath"
+      Return
+    ${Else}
+      !insertmacro AppendGitInstallLog "HKLM InstallPath 下未找到 bin\bash.exe"
+    ${EndIf}
   ${EndIf}
 
   ReadRegStr $0 HKCU "SOFTWARE\GitForWindows" "InstallPath"
-  ${If} $0 != ""
-  ${AndIf} ${FileExists} "$0\bin\bash.exe"
-    StrCpy $GitBashPath "$0\bin\bash.exe"
-    StrCpy $ShellEnvironmentName "Git Bash"
-    !insertmacro AppendGitInstallLog "检测到 Git Bash：$GitBashPath"
-    Return
+  ${If} $0 == ""
+    !insertmacro AppendGitInstallLog "HKCU GitForWindows InstallPath：未设置"
+  ${Else}
+    !insertmacro AppendGitInstallLog "HKCU GitForWindows InstallPath：$0"
+    ${If} ${FileExists} "$0\bin\bash.exe"
+      StrCpy $GitBashPath "$0\bin\bash.exe"
+      StrCpy $ShellEnvironmentName "Git Bash"
+      !insertmacro AppendGitInstallLog "检测到 Git Bash：$GitBashPath"
+      Return
+    ${Else}
+      !insertmacro AppendGitInstallLog "HKCU InstallPath 下未找到 bin\bash.exe"
+    ${EndIf}
   ${EndIf}
 
   nsExec::ExecToStack 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$cmd = Get-Command bash.exe -ErrorAction SilentlyContinue; if ($$cmd -and $$cmd.Source -match ''\\Git\\'') { Write-Output $$cmd.Source; exit 0 }; exit 1"'
   Pop $1
   Pop $0
+  !insertmacro AppendGitInstallLog "PATH 检测退出码：$1"
+  !insertmacro AppendGitInstallLog "PATH 检测输出：$0"
   ${If} $1 == 0
   ${AndIf} $0 != ""
     StrCpy $GitBashPath "$0"
@@ -84,6 +103,8 @@ Function DetectGitBash
   nsExec::ExecToStack 'wsl.exe --status'
   Pop $1
   Pop $0
+  !insertmacro AppendGitInstallLog "WSL 检测退出码：$1"
+  !insertmacro AppendGitInstallLog "WSL 检测输出：$0"
   ${If} $1 == 0
     StrCpy $GitBashPath "wsl.exe"
     StrCpy $ShellEnvironmentName "WSL"
@@ -108,18 +129,12 @@ Function InstallGitForWindows
 
   DetailPrint "Git for Windows 安装日志：$GitInstallLogPath"
   DetailPrint "正在下载 Git for Windows ${GIT_FOR_WINDOWS_VERSION}..."
+  Delete "$0"
   !insertmacro AppendGitInstallLog "开始下载 Git for Windows：${GIT_FOR_WINDOWS_URL}"
-  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri ''${GIT_FOR_WINDOWS_URL}'' -OutFile ''$0'' -UseBasicParsing -ErrorAction Stop; Add-Content -LiteralPath ''$GitInstallLogPath'' -Encoding UTF8 -Value ''主下载源下载成功''; exit 0 } catch { Add-Content -LiteralPath ''$GitInstallLogPath'' -Encoding UTF8 -Value (''主下载源下载失败：'' + $$_.Exception.Message); exit 1 }"'
+  !insertmacro AppendGitInstallLog "下载目标：$0"
+  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$log = ''$GitInstallLogPath''; $$url = ''${GIT_FOR_WINDOWS_URL}''; $$out = ''$0''; function Write-InstallLog { param([string]$$message) Add-Content -LiteralPath $$log -Encoding UTF8 -Value $$message }; try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Write-InstallLog (''PowerShell 版本：'' + $$PSVersionTable.PSVersion.ToString()); Write-InstallLog (''操作系统：'' + [Environment]::OSVersion.VersionString); Write-InstallLog (''64 位系统：'' + [Environment]::Is64BitOperatingSystem); Write-InstallLog (''下载目标：'' + $$out); $$proxy = [System.Net.WebRequest]::DefaultWebProxy; if ($$proxy) { $$proxyUri = $$proxy.GetProxy([Uri]$$url); Write-InstallLog (''代理解析：'' + $$proxyUri.AbsoluteUri) } else { Write-InstallLog ''代理解析：未检测到'' }; $$response = Invoke-WebRequest -Uri $$url -OutFile $$out -UseBasicParsing -ErrorAction Stop; if ($$response.StatusCode) { Write-InstallLog (''HTTP 状态码：'' + $$response.StatusCode) }; if (Test-Path -LiteralPath $$out) { $$file = Get-Item -LiteralPath $$out; Write-InstallLog (''下载文件大小：'' + $$file.Length + '' bytes'') }; Write-InstallLog ''主下载源下载成功''; exit 0 } catch { Write-InstallLog (''异常类型：'' + $$_.Exception.GetType().FullName); Write-InstallLog (''异常消息：'' + $$_.Exception.Message); if ($$_.Exception.Response) { Write-InstallLog (''HTTP 响应：'' + [int]$$_.Exception.Response.StatusCode + '' '' + $$_.Exception.Response.StatusDescription) }; Write-InstallLog ''主下载源下载失败''; exit 1 }"'
   Pop $1
   !insertmacro AppendGitInstallLog "主下载源退出码：$1"
-
-  ${If} $1 != 0
-    DetailPrint "主下载源失败，尝试 GitHub 官方下载源..."
-    !insertmacro AppendGitInstallLog "开始下载 Git for Windows：${GIT_FOR_WINDOWS_FALLBACK_URL}"
-    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri ''${GIT_FOR_WINDOWS_FALLBACK_URL}'' -OutFile ''$0'' -UseBasicParsing -ErrorAction Stop; Add-Content -LiteralPath ''$GitInstallLogPath'' -Encoding UTF8 -Value ''备用下载源下载成功''; exit 0 } catch { Add-Content -LiteralPath ''$GitInstallLogPath'' -Encoding UTF8 -Value (''备用下载源下载失败：'' + $$_.Exception.Message); exit 1 }"'
-    Pop $1
-    !insertmacro AppendGitInstallLog "备用下载源退出码：$1"
-  ${EndIf}
 
   ${If} $1 != 0
     Call DetectGitBash

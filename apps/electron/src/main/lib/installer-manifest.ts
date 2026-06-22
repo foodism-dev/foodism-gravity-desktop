@@ -2,7 +2,7 @@
  * Installer Manifest 客户端
  *
  * 从 proma-api 的 /api/v1/installers/manifest 接口拉取第三方安装包清单，
- * 带 5 分钟缓存和内置 fallback——断网或接口不可用时至少能拿到可用镜像 URL。
+ * 带 5 分钟缓存和内置 fallback——断网或接口不可用时至少能拿到内置镜像 URL。
  */
 
 import type { InstallerManifest, InstallerSource } from '@proma/shared'
@@ -42,8 +42,8 @@ let cache: ManifestCache | null = null
 /**
  * 内置 fallback manifest。
  *
- * 断网或 API 不可达时使用。Git for Windows 优先走国内常用镜像，
- * 再回退到官方上游；sha256 留空时下载器会跳过校验并打 warning。
+ * 断网或 API 不可达时使用。Git for Windows 只走国内常用镜像；
+ * sha256 留空时下载器会跳过校验并打 warning。
  */
 const BUILTIN_FALLBACK: InstallerManifest = {
   installers: [
@@ -53,7 +53,7 @@ const BUILTIN_FALLBACK: InstallerManifest = {
       arch: 'x64',
       version: GIT_FOR_WINDOWS_VERSION,
       downloadUrl: getGitForWindowsMirrorUrl('x64'),
-      fallbackUrl: getGitForWindowsGithubUrl('x64'),
+      fallbackUrl: '',
       sha256: GIT_FOR_WINDOWS_METADATA.x64.sha256,
       sizeBytes: GIT_FOR_WINDOWS_METADATA.x64.sizeBytes,
       filename: GIT_FOR_WINDOWS_METADATA.x64.filename,
@@ -64,7 +64,7 @@ const BUILTIN_FALLBACK: InstallerManifest = {
       arch: 'arm64',
       version: GIT_FOR_WINDOWS_VERSION,
       downloadUrl: getGitForWindowsMirrorUrl('arm64'),
-      fallbackUrl: getGitForWindowsGithubUrl('arm64'),
+      fallbackUrl: '',
       sha256: GIT_FOR_WINDOWS_METADATA.arm64.sha256,
       sizeBytes: GIT_FOR_WINDOWS_METADATA.arm64.sizeBytes,
       filename: GIT_FOR_WINDOWS_METADATA.arm64.filename,
@@ -98,10 +98,6 @@ function getGitForWindowsMirrorUrl(arch: 'x64' | 'arm64'): string {
   return `https://npmmirror.com/mirrors/git-for-windows/${GIT_FOR_WINDOWS_RELEASE_TAG}/${GIT_FOR_WINDOWS_METADATA[arch].filename}`
 }
 
-function getGitForWindowsGithubUrl(arch: 'x64' | 'arm64'): string {
-  return `https://github.com/git-for-windows/git/releases/download/${GIT_FOR_WINDOWS_RELEASE_TAG}/${GIT_FOR_WINDOWS_METADATA[arch].filename}`
-}
-
 function normalizeInstallerSource(source: InstallerSource): InstallerSource {
   if (source.id !== 'git-for-windows') {
     return source
@@ -112,7 +108,7 @@ function normalizeInstallerSource(source: InstallerSource): InstallerSource {
     ...source,
     version: GIT_FOR_WINDOWS_VERSION,
     downloadUrl: getGitForWindowsMirrorUrl(source.arch),
-    fallbackUrl: getGitForWindowsGithubUrl(source.arch),
+    fallbackUrl: '',
     sha256: metadata.sha256,
     sizeBytes: metadata.sizeBytes,
     filename: metadata.filename,

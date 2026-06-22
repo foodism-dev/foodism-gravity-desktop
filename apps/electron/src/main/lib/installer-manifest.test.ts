@@ -15,13 +15,14 @@ describe('Windows 安装包清单', () => {
     for (const installer of gitInstallers) {
       expect(installer.version).toBe('2.54.0')
       expect(installer.downloadUrl).toContain('https://npmmirror.com/mirrors/git-for-windows/v2.54.0.windows.1/')
-      expect(installer.fallbackUrl).toContain('https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/')
+      expect(installer.downloadUrl).not.toContain('github.com/git-for-windows')
+      expect(installer.fallbackUrl).toBe('')
       expect(installer.filename).toContain('2.54.0')
       expect(installer.sha256).toHaveLength(64)
     }
   })
 
-  test('Given 远程清单仍返回 Proma CDN When 标准化 Then Git 下载源不再包含 Proma CDN', () => {
+  test('Given 远程清单仍返回旧下载源和旧 fallback When 标准化 Then Git 下载源只使用 npmmirror', () => {
     const manifest = normalizeInstallerManifest({
       installers: [
         {
@@ -29,10 +30,8 @@ describe('Windows 安装包清单', () => {
           platform: 'win32',
           arch: 'x64',
           version: '2.54.0',
-          downloadUrl:
-            'https://cdn.proma.cool/installers/git-for-windows/2.54.0/Git-2.54.0-64-bit.exe',
-          fallbackUrl:
-            'https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe',
+          downloadUrl: 'https://legacy.example.com/Git-2.54.0-64-bit.exe',
+          fallbackUrl: 'https://legacy.example.com/Git-2.54.0-64-bit.exe',
           sha256: '',
           sizeBytes: 0,
           filename: 'Git-2.54.0-64-bit.exe',
@@ -46,9 +45,9 @@ describe('Windows 安装包清单', () => {
     }
 
     expect(installer.downloadUrl).toContain('npmmirror.com')
-    expect(installer.downloadUrl).not.toContain('cdn.proma.cool')
-    expect(installer.fallbackUrl).toContain('github.com/git-for-windows/git')
-    expect(installer.fallbackUrl).not.toContain('cdn.proma.cool')
+    expect(installer.downloadUrl).not.toContain('legacy.example.com')
+    expect(installer.downloadUrl).not.toContain('github.com/git-for-windows')
+    expect(installer.fallbackUrl).toBe('')
     expect(installer.sha256).toHaveLength(64)
     expect(installer.sizeBytes).toBe(65175776)
   })

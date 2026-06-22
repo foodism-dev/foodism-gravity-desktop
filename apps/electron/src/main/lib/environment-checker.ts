@@ -29,7 +29,7 @@ function getDownloadUrls(platform: NodeJS.Platform): {
     case 'win32':
       return {
         nodejs: `https://nodejs.org/dist/v${NODEJS_VERSION}/node-v${NODEJS_VERSION}-x64.msi`,
-        git: 'https://github.com/git-for-windows/git/releases/latest',
+        git: 'https://npmmirror.com/mirrors/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe',
       }
     case 'linux':
       return {
