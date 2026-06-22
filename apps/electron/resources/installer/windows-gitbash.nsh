@@ -10,6 +10,7 @@
 Var GitBashPath
 Var ShellEnvironmentName
 Var GitInstallLogPath
+Var GitDownloadScriptPath
 
 !macro AppendGitInstallLog MESSAGE
   ${If} $GitInstallLogPath == ""
@@ -25,6 +26,7 @@ Var GitInstallLogPath
 
 Function InitGitInstallLog
   StrCpy $GitInstallLogPath "$TEMP\foodism-gravity-git-install.log"
+  StrCpy $GitDownloadScriptPath "$TEMP\foodism-gravity-download-git.ps1"
   Delete "$GitInstallLogPath"
   !insertmacro AppendGitInstallLog "Git for Windows 安装日志"
   !insertmacro AppendGitInstallLog "日志路径：$GitInstallLogPath"
@@ -32,6 +34,63 @@ Function InitGitInstallLog
   !insertmacro AppendGitInstallLog "安装包文件：${GIT_FOR_WINDOWS_EXE}"
   !insertmacro AppendGitInstallLog "临时目录：$TEMP"
   !insertmacro AppendGitInstallLog "下载源：${GIT_FOR_WINDOWS_URL}"
+FunctionEnd
+
+Function WriteGitDownloadScript
+  ${If} $GitDownloadScriptPath == ""
+    StrCpy $GitDownloadScriptPath "$TEMP\foodism-gravity-download-git.ps1"
+  ${EndIf}
+
+  Delete "$GitDownloadScriptPath"
+  !insertmacro AppendGitInstallLog "下载脚本：$GitDownloadScriptPath"
+
+  FileOpen $3 "$GitDownloadScriptPath" w
+  ${If} $3 == ""
+    !insertmacro AppendGitInstallLog "下载脚本写入失败：无法打开文件"
+    Return
+  ${EndIf}
+
+  FileWrite $3 "$$ErrorActionPreference = 'Stop'$\r$\n"
+  FileWrite $3 "$$log = '$GitInstallLogPath'$\r$\n"
+  FileWrite $3 "$$url = '${GIT_FOR_WINDOWS_URL}'$\r$\n"
+  FileWrite $3 "$$out = '$0'$\r$\n"
+  FileWrite $3 "function Write-InstallLog {$\r$\n"
+  FileWrite $3 "  param([string]$$message)$\r$\n"
+  FileWrite $3 "  Add-Content -LiteralPath $$log -Encoding UTF8 -Value $$message$\r$\n"
+  FileWrite $3 "}$\r$\n"
+  FileWrite $3 "try {$\r$\n"
+  FileWrite $3 "  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12$\r$\n"
+  FileWrite $3 "  Write-InstallLog ('PowerShell 版本：' + $$PSVersionTable.PSVersion.ToString())$\r$\n"
+  FileWrite $3 "  Write-InstallLog ('操作系统：' + [Environment]::OSVersion.VersionString)$\r$\n"
+  FileWrite $3 "  Write-InstallLog ('64 位系统：' + [Environment]::Is64BitOperatingSystem)$\r$\n"
+  FileWrite $3 "  Write-InstallLog ('下载目标：' + $$out)$\r$\n"
+  FileWrite $3 "  $$proxy = [System.Net.WebRequest]::DefaultWebProxy$\r$\n"
+  FileWrite $3 "  if ($$proxy) {$\r$\n"
+  FileWrite $3 "    $$proxyUri = $$proxy.GetProxy([Uri]$$url)$\r$\n"
+  FileWrite $3 "    Write-InstallLog ('代理解析：' + $$proxyUri.AbsoluteUri)$\r$\n"
+  FileWrite $3 "  } else {$\r$\n"
+  FileWrite $3 "    Write-InstallLog '代理解析：未检测到'$\r$\n"
+  FileWrite $3 "  }$\r$\n"
+  FileWrite $3 "  $$response = Invoke-WebRequest -Uri $$url -OutFile $$out -UseBasicParsing -ErrorAction Stop$\r$\n"
+  FileWrite $3 "  if ($$response.StatusCode) {$\r$\n"
+  FileWrite $3 "    Write-InstallLog ('HTTP 状态码：' + $$response.StatusCode)$\r$\n"
+  FileWrite $3 "  }$\r$\n"
+  FileWrite $3 "  if (Test-Path -LiteralPath $$out) {$\r$\n"
+  FileWrite $3 "    $$file = Get-Item -LiteralPath $$out$\r$\n"
+  FileWrite $3 "    Write-InstallLog ('下载文件大小：' + $$file.Length + ' bytes')$\r$\n"
+  FileWrite $3 "  }$\r$\n"
+  FileWrite $3 "  Write-InstallLog '主下载源下载成功'$\r$\n"
+  FileWrite $3 "  exit 0$\r$\n"
+  FileWrite $3 "} catch {$\r$\n"
+  FileWrite $3 "  Write-InstallLog ('异常类型：' + $$_.Exception.GetType().FullName)$\r$\n"
+  FileWrite $3 "  Write-InstallLog ('异常消息：' + $$_.Exception.Message)$\r$\n"
+  FileWrite $3 "  if ($$_.Exception.Response) {$\r$\n"
+  FileWrite $3 "    Write-InstallLog ('HTTP 响应：' + [int]$$_.Exception.Response.StatusCode + ' ' + $$_.Exception.Response.StatusDescription)$\r$\n"
+  FileWrite $3 "  }$\r$\n"
+  FileWrite $3 "  Write-InstallLog '主下载源下载失败'$\r$\n"
+  FileWrite $3 "  exit 1$\r$\n"
+  FileWrite $3 "}$\r$\n"
+  FileClose $3
 FunctionEnd
 
 !macro CheckGitBashPath CANDIDATE_PATH
@@ -132,8 +191,13 @@ Function InstallGitForWindows
   Delete "$0"
   !insertmacro AppendGitInstallLog "开始下载 Git for Windows：${GIT_FOR_WINDOWS_URL}"
   !insertmacro AppendGitInstallLog "下载目标：$0"
-  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$log = ''$GitInstallLogPath''; $$url = ''${GIT_FOR_WINDOWS_URL}''; $$out = ''$0''; function Write-InstallLog { param([string]$$message) Add-Content -LiteralPath $$log -Encoding UTF8 -Value $$message }; try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Write-InstallLog (''PowerShell 版本：'' + $$PSVersionTable.PSVersion.ToString()); Write-InstallLog (''操作系统：'' + [Environment]::OSVersion.VersionString); Write-InstallLog (''64 位系统：'' + [Environment]::Is64BitOperatingSystem); Write-InstallLog (''下载目标：'' + $$out); $$proxy = [System.Net.WebRequest]::DefaultWebProxy; if ($$proxy) { $$proxyUri = $$proxy.GetProxy([Uri]$$url); Write-InstallLog (''代理解析：'' + $$proxyUri.AbsoluteUri) } else { Write-InstallLog ''代理解析：未检测到'' }; $$response = Invoke-WebRequest -Uri $$url -OutFile $$out -UseBasicParsing -ErrorAction Stop; if ($$response.StatusCode) { Write-InstallLog (''HTTP 状态码：'' + $$response.StatusCode) }; if (Test-Path -LiteralPath $$out) { $$file = Get-Item -LiteralPath $$out; Write-InstallLog (''下载文件大小：'' + $$file.Length + '' bytes'') }; Write-InstallLog ''主下载源下载成功''; exit 0 } catch { Write-InstallLog (''异常类型：'' + $$_.Exception.GetType().FullName); Write-InstallLog (''异常消息：'' + $$_.Exception.Message); if ($$_.Exception.Response) { Write-InstallLog (''HTTP 响应：'' + [int]$$_.Exception.Response.StatusCode + '' '' + $$_.Exception.Response.StatusDescription) }; Write-InstallLog ''主下载源下载失败''; exit 1 }"'
-  Pop $1
+  Call WriteGitDownloadScript
+  ${If} ${FileExists} "$GitDownloadScriptPath"
+    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$GitDownloadScriptPath"'
+    Pop $1
+  ${Else}
+    StrCpy $1 1
+  ${EndIf}
   !insertmacro AppendGitInstallLog "主下载源退出码：$1"
 
   ${If} $1 != 0
