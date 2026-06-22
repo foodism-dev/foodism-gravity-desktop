@@ -85,6 +85,7 @@ const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
 const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   anthropic: '/v1/messages',
   'anthropic-compatible': '/v1/messages',
+  openrouter: '/v1/messages',
   openai: '/chat/completions',
   deepseek: '/messages',
   google: '/v1beta/models/{model}:generateContent',
@@ -105,6 +106,7 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
 const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
   'anthropic',
   'anthropic-compatible',
+  'openrouter',
   'deepseek',
   'kimi-api',
   'kimi-coding',
