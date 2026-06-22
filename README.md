@@ -31,7 +31,7 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 
 从 [GitHub Releases](https://github.com/ErlichLiu/Proma/releases) 下载开源版本。当前 release notes 以 `v0.9.12` 为准，提供 macOS Apple Silicon、macOS Intel 和 Windows 安装包。
 
-Windows 版安装时会检测 Git Bash。如果系统未安装 Git Bash，安装器会提示你安装 Git for Windows（包含 Git Bash）；你也可以跳过，之后在应用内的 Windows 环境检测页重新安装或检测。
+Windows 版安装时会检测 Git Bash 或 WSL。如果系统未安装可用 Shell，安装器会提示你安装 Git for Windows（包含 Git Bash）；你也可以跳过，之后在应用内的 Windows 环境检测页重新安装或检测。安装器自动安装 Git for Windows 失败时，会在 `%TEMP%\foodism-gravity-git-install.log` 写入诊断日志。
 
 如果你希望开箱即用、减少 API 配置成本，也可以使用 [Proma 商业版](https://proma.cool/download)。商业版和开源版并行运行，主要区别是商业版提供内置渠道和订阅方案。
 
@@ -159,7 +159,7 @@ proma-v2/
 
 | 包 | 版本 | 职责 |
 | --- | --- | --- |
-| `@proma/electron` | `0.12.68` | Electron 桌面应用 |
+| `@proma/electron` | `0.12.69` | Electron 桌面应用 |
 | `@proma/shared` | `0.1.20` | 共享类型、IPC 常量、配置和工具 |
 | `@proma/core` | `0.2.9` | Provider Adapter、SSE、Shiki 高亮 |
 | `@proma/ui` | `0.1.6` | 共享 React UI 组件 |

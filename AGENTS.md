@@ -27,7 +27,7 @@ proma-v2/
 │   ├── core/       # AI Provider 适配器、代码高亮服务 (v0.2.9)
 │   └── ui/         # 共享 UI 组件 (CodeBlock, MermaidBlock) (v0.1.6)
 └── apps/
-    └── electron/   # Electron 桌面应用 (v0.12.68)
+    └── electron/   # Electron 桌面应用 (v0.12.69)
         └── src/
             ├── main/       # 主进程 + 服务层 (main/lib/)
             ├── preload/    # IPC 上下文桥接
@@ -56,7 +56,7 @@ proma-v2/
 - **依赖**：`@proma/core`、`beautiful-mermaid`、`mermaid`、`shiki`
 - **Peer 依赖**：`react@^18.3.0`、`react-dom@^18.3.0`
 
-#### @proma/electron (v0.12.68)
+#### @proma/electron (v0.12.69)
 - **职责**：Electron 桌面应用主体，集成所有包
 - **关键依赖**：
   - `@anthropic-ai/claude-agent-sdk@0.3.153` - Agent SDK
@@ -345,6 +345,7 @@ bun run generate:icons    # 生成应用图标
 - `apps/electron/electron-builder.yml` 的 `nsis.include` 必须指向 `resources/installer/windows-gitbash.nsh`，否则 Windows 安装时不会提示安装 Git for Windows。
 - 安装脚本在非静默安装时强制检测常见路径、`HKLM/HKCU\SOFTWARE\GitForWindows`、PATH 中的 Git Bash 以及 `wsl.exe --status`，未找到 Git Bash 或 WSL 时询问用户是否安装 Git for Windows。
 - 当前安装脚本使用 Git for Windows `2.54.0` x64 安装包，优先从 `npmmirror.com` 国内镜像下载，失败后回退到 GitHub 官方 release，并以 `/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS` 参数运行。
+- 安装器会将 Git Bash / WSL 检测、Git for Windows 下载源、PowerShell 下载异常和安装程序退出码写入 `%TEMP%\foodism-gravity-git-install.log`，下载或安装失败弹窗必须提示该日志路径。
 - 修改 Git for Windows 版本时，必须同步更新：
   1. `apps/electron/resources/installer/windows-gitbash.nsh`
   2. `apps/electron/src/main/lib/installer-manifest.ts` 的内置 fallback 清单
