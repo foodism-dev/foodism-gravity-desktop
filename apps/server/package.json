@@ -1,0 +1,33 @@
+{
+  "name": "@proma/server",
+  "version": "0.1.3",
+  "license": "AGPL-3.0-only",
+  "description": "Standalone Hono server for Proma",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "bun run typecheck",
+    "db:check-local": "bun run src/db/check-local-database.ts",
+    "db:create-local": "bun run src/db/create-local-database.ts",
+    "db:seed-local": "bun run src/db/seed-local-admin.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.26",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^5.0.0"
+  }
+}

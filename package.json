@@ -1,6 +1,6 @@
 {
   "name": "proma",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "The next gen ai software with general agents",
   "type": "module",
   "private": true,
@@ -13,6 +13,13 @@
     "electron:dev": "bun run --filter='@proma/electron' dev",
     "electron:build": "bun run --filter='@proma/electron' build",
     "electron:start": "bun run --filter='@proma/electron' start",
+    "server:dev": "bun run --filter='@proma/server' dev",
+    "server:start": "bun run --filter='@proma/server' start",
+    "server:typecheck": "bun run --filter='@proma/server' typecheck",
+    "server:db:generate": "bun run --filter='@proma/server' db:generate",
+    "server:db:migrate": "bun run --filter='@proma/server' db:migrate",
+    "server:db:push": "bun run --filter='@proma/server' db:push",
+    "server:db:studio": "bun run --filter='@proma/server' db:studio",
     "build": "bun run --filter='*' build",
     "typecheck": "bun run --filter='*' typecheck",
     "test": "bun test"

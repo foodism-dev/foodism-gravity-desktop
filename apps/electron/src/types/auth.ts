@@ -63,6 +63,8 @@ export interface AuthSession {
   isAuthenticated: boolean
   /** 登录来源 */
   provider?: AuthProvider
+  /** Hono API JWT token */
+  apiToken?: string
   /** 已登录用户 */
   user?: AuthUser
   /** 角色摘要 */
