@@ -1,39 +1,49 @@
 /**
  * LoginView - 应用登录页
- *
- * 使用 mock 接口登录，账号 admin / foodism123。
  */
 
 import * as React from 'react'
-import { ArrowRight, Loader2, LockKeyhole, UserRound } from 'lucide-react'
+import { ExternalLink, Loader2, LockKeyhole, QrCode } from 'lucide-react'
 import { useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { authSessionAtom } from '@/atoms/auth'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import foodismLogo from '@/assets/models/foodism.png'
 
 export function LoginView(): React.ReactElement {
   const setAuthSession = useSetAtom(authSessionAtom)
-  const [username, setUsername] = React.useState('admin')
-  const [password, setPassword] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [authorizeUrl, setAuthorizeUrl] = React.useState<string | null>(null)
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
+  React.useEffect(() => {
+    const cleanupCompleted = window.electronAPI.onAuthSsoCompleted?.((session) => {
+      setAuthSession(session)
+      setIsSubmitting(false)
+      setError(null)
+      toast.success('登录成功')
+    })
+    const cleanupError = window.electronAPI.onAuthSsoError?.((message) => {
+      setIsSubmitting(false)
+      setError(message)
+    })
+
+    return () => {
+      cleanupCompleted?.()
+      cleanupError?.()
+    }
+  }, [setAuthSession])
+
+  const handleSsoLogin = async (): Promise<void> => {
     setError(null)
     setIsSubmitting(true)
 
     try {
-      const session = await window.electronAPI.login({ username, password })
-      setAuthSession(session)
-      toast.success('登录成功')
+      const result = await window.electronAPI.startSsoLogin()
+      setAuthorizeUrl(result.authorizeUrl)
     } catch (loginError) {
       const message = loginError instanceof Error ? loginError.message : '登录失败'
       setError(message)
-    } finally {
       setIsSubmitting(false)
     }
   }
@@ -58,47 +68,29 @@ export function LoginView(): React.ReactElement {
           </section>
 
           <section className="flex min-h-[560px] items-center bg-dialog p-6 sm:p-10">
-            <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-sm flex-col gap-7">
+            <div className="mx-auto flex w-full max-w-sm flex-col gap-7">
               <div>
                 <div className="mb-5 inline-flex h-10 w-10 items-center justify-center rounded-[8px] bg-[#16a34a] text-white shadow-md md:hidden">
                   <LockKeyhole size={20} />
                 </div>
                 <h2 className="text-2xl font-semibold tracking-normal">登录万店引力</h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  使用分配的账号继续进入桌面端。
+                  使用 Gravity SSO 完成钉钉身份验证。
                 </p>
               </div>
 
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="login-username">账号</Label>
-                  <div className="relative">
-                    <UserRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="login-username"
-                      value={username}
-                      onChange={(event) => setUsername(event.target.value)}
-                      autoComplete="username"
-                      className="h-11 pl-9"
-                      disabled={isSubmitting}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="login-password">密码</Label>
-                  <div className="relative">
-                    <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="login-password"
-                      type="password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      autoComplete="current-password"
-                      className="h-11 pl-9"
-                      disabled={isSubmitting}
-                      autoFocus
-                    />
+                <div className="rounded-[8px] bg-muted/55 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[#16a34a]/10 text-[#15803d]">
+                      <QrCode size={20} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium">钉钉扫码登录</div>
+                      <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                        授权完成后会自动回到桌面端。
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -107,27 +99,34 @@ export function LoginView(): React.ReactElement {
                     {error}
                   </div>
                 )}
+
+                {authorizeUrl && isSubmitting && (
+                  <div className="break-all rounded-[8px] bg-[#16a34a]/10 px-3 py-2 text-xs leading-5 text-[#166534]">
+                    已打开浏览器授权：{authorizeUrl}
+                  </div>
+                )}
               </div>
 
               <Button
-                type="submit"
+                type="button"
                 size="lg"
                 className="h-11 w-full bg-[#16a34a] text-white shadow-[0_10px_24px_rgba(22,163,74,0.22)] hover:bg-[#15803d]"
+                onClick={handleSsoLogin}
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="animate-spin" />
-                    正在登录
+                    等待授权完成
                   </>
                 ) : (
                   <>
-                    登录
-                    <ArrowRight />
+                    打开钉钉 SSO
+                    <ExternalLink />
                   </>
                 )}
               </Button>
-            </form>
+            </div>
           </section>
         </div>
       </div>

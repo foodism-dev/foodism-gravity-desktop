@@ -111,7 +111,7 @@ import type {
   CreateAutomationInput,
   UpdateAutomationInput,
 } from '@proma/shared'
-import type { UserProfile, AppSettings, AuthSession, LoginInput } from '../types'
+import type { UserProfile, AppSettings, AuthSession, AuthSsoLoginResult, LoginInput } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
 import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
@@ -149,11 +149,12 @@ import {
 import { extractTextFromAttachment } from './lib/document-parser'
 import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
-import { getAuthSession, login, logout } from './lib/auth-service'
+import { getAuthSession, login, logout, saveAuthSession } from './lib/auth-service'
+import { createSsoOidcService, getDefaultSsoOidcConfig } from './lib/auth/sso-oidc-service'
+import type { SsoOidcService } from './lib/auth/sso-oidc-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
-
 import { checkEnvironment } from './lib/environment-checker'
 import { fetchInstallerManifest, findInstallerSource } from './lib/installer-manifest'
 import {
@@ -262,6 +263,29 @@ import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDin
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getWeChatConfig } from './lib/wechat-config'
 import { wechatBridge } from './lib/wechat-bridge'
+
+let ssoOidcService: SsoOidcService | null = null
+
+function broadcastAuthEvent(channel: string, payload: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(channel, payload)
+  }
+}
+
+function getSsoOidcService(): SsoOidcService {
+  ssoOidcService ??= createSsoOidcService({
+    config: getDefaultSsoOidcConfig(),
+    openExternal: (url) => shell.openExternal(url),
+    saveSession: saveAuthSession,
+    onCompleted: (session) => {
+      broadcastAuthEvent(AUTH_IPC_CHANNELS.SSO_COMPLETED, session)
+    },
+    onError: (message) => {
+      broadcastAuthEvent(AUTH_IPC_CHANNELS.SSO_ERROR, message)
+    },
+  })
+  return ssoOidcService
+}
 
 /** 文件浏览器中需要隐藏的系统文件 */
 const HIDDEN_FS_ENTRIES = new Set(['.DS_Store', 'Thumbs.db'])
@@ -1425,10 +1449,19 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 启动 Gravity SSO 登录
+  ipcMain.handle(
+    AUTH_IPC_CHANNELS.START_SSO_LOGIN,
+    async (): Promise<AuthSsoLoginResult> => {
+      return getSsoOidcService().startLogin()
+    }
+  )
+
   // 退出登录
   ipcMain.handle(
     AUTH_IPC_CHANNELS.LOGOUT,
     async (): Promise<AuthSession> => {
+      ssoOidcService?.stopCallbackServer()
       return logout()
     }
   )

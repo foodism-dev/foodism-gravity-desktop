@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createAuthService } from './auth-service'
+import { createAuthService, createAuthSessionFromGravityAccount } from './auth-service'
+import type { AuthSession } from '../../types'
 
 const tempDirs: string[] = []
 
@@ -18,7 +19,7 @@ afterEach(() => {
   }
 })
 
-describe('auth-service mock 登录', () => {
+describe('auth-service 登录会话', () => {
   test('Given 没有会话文件 When 获取登录状态 Then 返回未登录', () => {
     const service = createAuthService(createTempAuthPath())
 
@@ -52,5 +53,130 @@ describe('auth-service mock 登录', () => {
 
     expect(session).toEqual({ isAuthenticated: false })
     expect(service.getAuthSession()).toEqual({ isAuthenticated: false })
+  })
+
+  test('Given SSO 会话已落盘 When 获取登录状态 Then 保留用户、角色和过期时间', () => {
+    const path = createTempAuthPath()
+    const service = createAuthService(path)
+    const session: AuthSession = {
+      isAuthenticated: true,
+      provider: 'gravity-sso',
+      user: {
+        id: 'user-001',
+        username: 'zhangsan',
+        displayName: '张三',
+        email: 'zhangsan@example.com',
+        phoneMasked: '138****8000',
+      },
+      roles: [{ code: 'store-admin', name: '门店管理员', source: 'gravity' }],
+      identities: [{ provider: 'dingtalk', type: 'oauth', status: 'active', externalKey: 'dt-001', phoneMasked: '138****8000' }],
+      loggedInAt: '2026-06-22T08:00:00.000Z',
+      expiresAt: '2026-06-22T10:00:00.000Z',
+      refreshable: true,
+    }
+
+    writeFileSync(path, JSON.stringify(session, null, 2), 'utf-8')
+
+    expect(service.getAuthSession()).toEqual(session)
+  })
+
+  test('Given SSO 会话已过期 When 获取登录状态 Then 返回未登录', () => {
+    const path = createTempAuthPath()
+    const service = createAuthService(path)
+    const session: AuthSession = {
+      isAuthenticated: true,
+      provider: 'gravity-sso',
+      user: {
+        id: 'user-001',
+        username: 'zhangsan',
+        displayName: '张三',
+      },
+      loggedInAt: '2026-06-22T08:00:00.000Z',
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    }
+
+    writeFileSync(path, JSON.stringify(session, null, 2), 'utf-8')
+
+    expect(service.getAuthSession()).toEqual({ isAuthenticated: false })
+  })
+
+  test('Given SSO 会话 When 保存会话 Then 后续获取返回同一会话', () => {
+    const service = createAuthService(createTempAuthPath())
+    const session = {
+      isAuthenticated: true,
+      provider: 'gravity-sso' as const,
+      user: {
+        id: 'user-001',
+        username: 'zhangsan',
+        displayName: '张三',
+      },
+      loggedInAt: '2026-06-22T08:00:00.000Z',
+    }
+
+    service.saveSession(session)
+
+    expect(service.getAuthSession()).toEqual(session)
+  })
+
+  test('Given Gravity account payload When 创建登录会话 Then 映射用户、角色和身份摘要', () => {
+    const session = createAuthSessionFromGravityAccount(
+      {
+        token_type: 'Bearer',
+        expires_in: 7200,
+        refresh_token: 'refresh-token',
+      },
+      {
+        account: {
+          account: {
+            sub: 'user-001',
+            preferred_username: 'zhangsan',
+            display_name: '张三',
+            email: 'zhangsan@example.com',
+            tenant_id: 'foodism',
+          },
+          identities: [
+            {
+              provider: 'dingtalk',
+              identityType: 'oauth',
+              status: 'active',
+              externalKey: 'dt-001',
+              phone: '13812348000',
+              metadata: {
+                employeeNo: 'E-1001',
+                title: '店长',
+              },
+            },
+          ],
+          roles: [
+            {
+              roleCode: 'store-admin',
+              roleName: '门店管理员',
+              sourceType: 'gravity',
+            },
+          ],
+        },
+      },
+      new Date('2026-06-22T08:00:00.000Z')
+    )
+
+    expect(session).toEqual({
+      isAuthenticated: true,
+      provider: 'gravity-sso',
+      user: {
+        id: 'user-001',
+        username: 'zhangsan',
+        displayName: '张三',
+        email: 'zhangsan@example.com',
+        phoneMasked: '138****8000',
+        tenantId: 'foodism',
+        employeeNo: 'E-1001',
+        title: '店长',
+      },
+      roles: [{ code: 'store-admin', name: '门店管理员', source: 'gravity' }],
+      identities: [{ provider: 'dingtalk', type: 'oauth', status: 'active', externalKey: 'dt-001', phoneMasked: '138****8000' }],
+      loggedInAt: '2026-06-22T08:00:00.000Z',
+      expiresAt: '2026-06-22T10:00:00.000Z',
+      refreshable: true,
+    })
   })
 })

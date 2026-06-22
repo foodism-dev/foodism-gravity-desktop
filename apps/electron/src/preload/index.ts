@@ -108,6 +108,7 @@ import type {
 import type {
   UserProfile,
   AuthSession,
+  AuthSsoLoginResult,
   LoginInput,
   AppSettings,
   QuickTaskSubmitInput,
@@ -311,6 +312,15 @@ export interface ElectronAPI {
 
   /** mock 登录 */
   login: (input: LoginInput) => Promise<AuthSession>
+
+  /** 启动 Gravity SSO 登录 */
+  startSsoLogin: () => Promise<AuthSsoLoginResult>
+
+  /** 订阅 Gravity SSO 登录成功事件 */
+  onAuthSsoCompleted: (callback: (session: AuthSession) => void) => () => void
+
+  /** 订阅 Gravity SSO 登录失败事件 */
+  onAuthSsoError: (callback: (message: string) => void) => () => void
 
   /** 退出登录 */
   logout: () => Promise<AuthSession>
@@ -1281,6 +1291,22 @@ const electronAPI: ElectronAPI = {
 
   login: (input: LoginInput) => {
     return ipcRenderer.invoke(AUTH_IPC_CHANNELS.LOGIN, input)
+  },
+
+  startSsoLogin: () => {
+    return ipcRenderer.invoke(AUTH_IPC_CHANNELS.START_SSO_LOGIN)
+  },
+
+  onAuthSsoCompleted: (callback: (session: AuthSession) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, session: AuthSession): void => callback(session)
+    ipcRenderer.on(AUTH_IPC_CHANNELS.SSO_COMPLETED, listener)
+    return () => { ipcRenderer.removeListener(AUTH_IPC_CHANNELS.SSO_COMPLETED, listener) }
+  },
+
+  onAuthSsoError: (callback: (message: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, message: string): void => callback(message)
+    ipcRenderer.on(AUTH_IPC_CHANNELS.SSO_ERROR, listener)
+    return () => { ipcRenderer.removeListener(AUTH_IPC_CHANNELS.SSO_ERROR, listener) }
   },
 
   logout: () => {
