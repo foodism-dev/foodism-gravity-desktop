@@ -810,6 +810,7 @@ export interface WorkspaceMcpConfig {
 
 /** 从其他工作区导入的 Skill 来源元数据 */
 export interface SkillImportSource {
+  kind?: 'workspace'
   sourceWorkspaceSlug: string
   sourceWorkspaceName: string
   importedAt: string        // ISO 8601

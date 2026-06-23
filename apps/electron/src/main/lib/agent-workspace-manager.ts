@@ -761,6 +761,7 @@ export function importSkillFromWorkspace(
   // 写入来源元数据
   const sourceWorkspace = listAgentWorkspaces().find((w) => w.slug === sourceSlug)
   const importSource: SkillImportSource = {
+    kind: 'workspace',
     sourceWorkspaceSlug: sourceSlug,
     sourceWorkspaceName: sourceWorkspace?.name ?? sourceSlug,
     importedAt: new Date().toISOString(),
@@ -829,6 +830,7 @@ export function updateSkillFromSource(
   // 更新来源元数据（保留原始 importedAt）
   const sourceWorkspace = listAgentWorkspaces().find((w) => w.slug === existingSource.sourceWorkspaceSlug)
   const updatedSource: SkillImportSource = {
+    kind: 'workspace',
     sourceWorkspaceSlug: existingSource.sourceWorkspaceSlug,
     sourceWorkspaceName: sourceWorkspace?.name ?? existingSource.sourceWorkspaceName,
     importedAt: existingSource.importedAt,
