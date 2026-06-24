@@ -15,6 +15,13 @@
       "when": 1782269521434,
       "tag": "0001_careless_vulture",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782286338246,
+      "tag": "0002_left_wraith",
+      "breakpoints": true
     }
   ]
 }

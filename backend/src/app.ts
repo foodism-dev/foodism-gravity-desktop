@@ -19,6 +19,8 @@ import {
   type RebuildSupplyGoodsClient,
   type SupplyGoodsRecordRepository,
 } from "./rebuild/supplygoods.ts";
+import { getDefaultSkillPublisher, sha256Bytes, type SkillPublisher } from "./skill-publisher.ts";
+import { getDefaultSkillRepository, type MarketSkill, type SkillRepository } from "./skills.ts";
 import { getDefaultUserRepository, type UserRepository } from "./users.ts";
 
 interface ServerStatus {
@@ -34,6 +36,9 @@ interface ServerVariables {
 
 interface ServerAppOptions {
   userRepository?: UserRepository | null;
+  skillRepository?: SkillRepository | null;
+  skillPublisher?: SkillPublisher | null;
+  internalApiToken?: string | null;
   rebuildSupplyGoodsClient?: RebuildSupplyGoodsClient;
   supplyGoodsRecordRepository?: SupplyGoodsRecordRepository | null;
 }
@@ -106,10 +111,101 @@ function logSsoPayload(body: unknown, authAction: "create_user" | "sso_login"): 
   console.log(`[认证] SSO ${authAction} account.account 字段: ${getRecordKeys(getNestedRecord(body, ["account", "account"]))}`);
 }
 
+function toSkillListItem(skill: MarketSkill) {
+  return {
+    slug: skill.slug,
+    name: skill.name,
+    summary: skill.summary,
+    icon: skill.icon,
+    tags: skill.tags,
+    packageSha256: skill.packageSha256,
+    packageSizeBytes: skill.packageSizeBytes,
+    downloadCount: skill.downloadCount,
+    updatedAt: skill.updatedAt,
+  };
+}
+
+function toSkillDetail(skill: MarketSkill) {
+  return {
+    ...toSkillListItem(skill),
+    description: skill.description,
+    unpackedSizeBytes: skill.unpackedSizeBytes,
+    fileCount: skill.fileCount,
+    manifest: skill.manifest,
+  };
+}
+
+function resolveInternalApiToken(input: string | null | undefined): string | null {
+  if (input !== undefined) {
+    return input?.trim() || null;
+  }
+  return Bun.env.PROMA_INTERNAL_API_TOKEN?.trim() || null;
+}
+
+function isAuthorizedInternalRequest(context: Context, expectedToken: string): boolean {
+  const token = context.req.header("Authorization")?.trim();
+  return Boolean(token && token === `Bearer ${expectedToken}`);
+}
+
+function getFormString(formData: FormData, key: string): string | null {
+  const value = formData.get(key);
+  return typeof value === "string" ? value.trim() || null : null;
+}
+
+function parseFormInteger(formData: FormData, key: string): number | null {
+  const value = getFormString(formData, key);
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function parseTags(formData: FormData): string[] {
+  const raw = getFormString(formData, "tags");
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((value): value is string => typeof value === "string")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+    }
+  } catch {
+    // 兼容逗号分隔的简单运维输入。
+  }
+
+  return raw.split(",").map((tag) => tag.trim()).filter(Boolean);
+}
+
+function parseManifest(formData: FormData): Record<string, unknown> {
+  const raw = getFormString(formData, "manifest");
+  if (!raw) return {};
+
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("manifest 必须是 JSON 对象");
+  }
+  return parsed;
+}
+
+function parseMarketSkillStatus(value: string | null): MarketSkill["status"] {
+  if (!value) return "published";
+  if (value === "published" || value === "hidden" || value === "archived") return value;
+  throw new Error("status 无效");
+}
+
+function isValidSkillSlug(value: string): boolean {
+  return /^[a-z0-9][a-z0-9._-]{0,127}$/.test(value);
+}
+
 export function createServerApp(options: ServerAppOptions = {}) {
   const app = new Hono<{ Variables: ServerVariables }>();
   const jwtSecret = getJwtSecret();
   const userRepository = options.userRepository ?? getDefaultUserRepository();
+  const skillRepository = options.skillRepository ?? getDefaultSkillRepository();
+  const skillPublisher = options.skillPublisher ?? getDefaultSkillPublisher();
+  const internalApiToken = resolveInternalApiToken(options.internalApiToken);
   const rebuildSupplyGoodsClient = options.rebuildSupplyGoodsClient ?? createRebuildSupplyGoodsClient();
   const supplyGoodsRecordRepository =
     options.supplyGoodsRecordRepository ?? getDefaultSupplyGoodsRecordRepository();
@@ -129,6 +225,16 @@ export function createServerApp(options: ServerAppOptions = {}) {
     };
 
     return context.json(status);
+  });
+
+  app.use("/api/internal/*", async (context, next) => {
+    if (!internalApiToken) {
+      return context.json({ error: "Service Unavailable", message: "未配置内部接口 Token" }, 503);
+    }
+    if (!isAuthorizedInternalRequest(context, internalApiToken)) {
+      return context.json({ error: "Unauthorized", message: "内部接口 Token 无效" }, 401);
+    }
+    await next();
   });
 
   app.post("/api/auth/login", async (context) => {
@@ -219,6 +325,110 @@ export function createServerApp(options: ServerAppOptions = {}) {
 
   app.post("/api/rebuild/supplygoods/callback", handleSupplyGoodsCallback);
   app.post("/api/m/rebuild/saveReportSupplierGoodsInfo", handleSupplyGoodsCallback);
+
+  app.post("/api/internal/skills", async (context) => {
+    if (!skillRepository || !skillPublisher) {
+      return context.json({ error: "Service Unavailable", message: "Skill 市场发布服务未配置" }, 503);
+    }
+
+    let formData: FormData;
+    try {
+      formData = await context.req.formData();
+    } catch {
+      return context.json({ error: "Bad Request", message: "请求体必须是 multipart/form-data" }, 400);
+    }
+
+    const slug = getFormString(formData, "slug");
+    const name = getFormString(formData, "name");
+    const packageFile = formData.get("package");
+    if (!slug || !isValidSkillSlug(slug)) {
+      return context.json({ error: "Bad Request", message: "Skill slug 无效" }, 400);
+    }
+    if (!name) {
+      return context.json({ error: "Bad Request", message: "Skill name 不能为空" }, 400);
+    }
+    if (!(packageFile instanceof File)) {
+      return context.json({ error: "Bad Request", message: "必须上传 Skill package 文件" }, 400);
+    }
+
+    let manifest: Record<string, unknown>;
+    let status: MarketSkill["status"];
+    try {
+      manifest = parseManifest(formData);
+      status = parseMarketSkillStatus(getFormString(formData, "status"));
+    } catch (error) {
+      return context.json({ error: "Bad Request", message: error instanceof Error ? error.message : "发布参数无效" }, 400);
+    }
+
+    const packageBytes = new Uint8Array(await packageFile.arrayBuffer());
+    const packageSha256 = sha256Bytes(packageBytes);
+    const upload = await skillPublisher.publishSkillPackage({
+      slug,
+      packageBytes,
+      contentType: packageFile.type || "application/zip",
+      sha256: packageSha256,
+    });
+    const skill = await skillRepository.upsertSkill({
+      slug,
+      name,
+      summary: getFormString(formData, "summary"),
+      description: getFormString(formData, "description"),
+      icon: getFormString(formData, "icon"),
+      status,
+      packageUrl: upload.packageUrl,
+      packageSha256,
+      packageSizeBytes: packageBytes.byteLength,
+      unpackedSizeBytes: parseFormInteger(formData, "unpackedSizeBytes"),
+      fileCount: parseFormInteger(formData, "fileCount"),
+      manifest,
+      tags: parseTags(formData),
+    });
+
+    return context.json({ packageUrl: upload.packageUrl, skill: toSkillDetail(skill) }, 201);
+  });
+
+  app.get("/api/skills", async (context) => {
+    if (!skillRepository) {
+      return context.json({ skills: [] });
+    }
+
+    const skills = await skillRepository.listSkills({
+      query: context.req.query("query"),
+      tag: context.req.query("tag"),
+    });
+
+    return context.json({ skills: skills.map(toSkillListItem) });
+  });
+
+  app.get("/api/skills/:slug", async (context) => {
+    if (!skillRepository) {
+      return context.json({ error: "Not Found", message: "Skill 不存在" }, 404);
+    }
+
+    const skill = await skillRepository.getSkillBySlug(context.req.param("slug"));
+    if (!skill) {
+      return context.json({ error: "Not Found", message: "Skill 不存在" }, 404);
+    }
+
+    return context.json({ skill: toSkillDetail(skill) });
+  });
+
+  app.get("/api/skills/:slug/download", async (context) => {
+    if (!skillRepository) {
+      return context.json({ error: "Not Found", message: "Skill 不存在" }, 404);
+    }
+
+    const skill = await skillRepository.recordDownload(context.req.param("slug"));
+    if (!skill) {
+      return context.json({ error: "Not Found", message: "Skill 不存在" }, 404);
+    }
+
+    return context.json({
+      downloadUrl: skill.packageUrl,
+      packageSha256: skill.packageSha256,
+      packageSizeBytes: skill.packageSizeBytes,
+    });
+  });
 
   app.use(
     "/api/me",

@@ -11,7 +11,7 @@
 import { atom } from 'jotai'
 
 export type ActiveView = 'conversations' | 'work-orders' | 'automations' | 'agent-skills'
-export type AgentSkillsCapabilityTab = 'skills' | 'mcp'
+export type AgentSkillsCapabilityTab = 'skills' | 'market' | 'mcp'
 
 /** 当前活跃视图（不持久化，每次启动默认显示对话） */
 export const activeViewAtom = atom<ActiveView>('conversations')
