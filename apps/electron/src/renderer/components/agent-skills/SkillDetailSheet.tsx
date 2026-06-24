@@ -128,9 +128,11 @@ function SkillDetailBody({
 
   const sourceLabel = isBuiltin
     ? '内置'
-    : skill.importSource
-      ? `从 ${skill.importSource.sourceWorkspaceName} 导入`
-      : '当前工作区'
+    : skill.importSource?.kind === 'market'
+      ? '从市场安装'
+      : skill.importSource
+        ? `从 ${skill.importSource.sourceWorkspaceName} 导入`
+        : '当前工作区'
 
   return (
     <div className="flex h-full flex-col min-h-0">

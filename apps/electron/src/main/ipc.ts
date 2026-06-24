@@ -57,6 +57,10 @@ import type {
   StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
+  MarketSkillSummary,
+  MarketSkillDetail,
+  MarketSkillListInput,
+  MarketSkillInstallInput,
   WorkspaceCapabilities,
   FileEntry,
   FileSearchResult,
@@ -231,6 +235,7 @@ import {
   removeWorktreeRepo,
   cleanupStaleWorkspaceAttachedPaths,
 } from './lib/agent-workspace-manager'
+import { getMarketSkill, installMarketSkillFromMarket, listMarketSkills } from './lib/skill-market-service'
 import { getMemoryConfig, setMemoryConfig } from './lib/memory-service'
 import { getAllToolInfos } from './lib/chat-tool-registry'
 import { updateToolState, updateToolCredentials, getToolCredentials, addCustomTool, deleteCustomTool } from './lib/chat-tool-config'
@@ -2149,6 +2154,30 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.UPDATE_SKILL_FROM_SOURCE,
     async (_, targetSlug: string, skillSlug: string): Promise<SkillMeta> => {
       return updateSkillFromSource(targetSlug, skillSlug)
+    }
+  )
+
+  // 获取 Skill 市场列表
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.LIST_MARKET_SKILLS,
+    async (_, input: MarketSkillListInput = {}): Promise<MarketSkillSummary[]> => {
+      return listMarketSkills(input)
+    }
+  )
+
+  // 获取 Skill 市场详情
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_MARKET_SKILL,
+    async (_, slug: string): Promise<MarketSkillDetail> => {
+      return getMarketSkill(slug)
+    }
+  )
+
+  // 从 Skill 市场安装到工作区
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.INSTALL_MARKET_SKILL,
+    async (_, input: MarketSkillInstallInput): Promise<SkillMeta> => {
+      return installMarketSkillFromMarket(input)
     }
   )
 

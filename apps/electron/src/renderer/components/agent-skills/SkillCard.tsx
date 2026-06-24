@@ -21,6 +21,12 @@ interface SkillCardProps {
 }
 
 export function SkillCard({ skill, isBuiltin, updating, onOpen, onToggle, onUpdate }: SkillCardProps): React.ReactElement {
+  const sourceLabel = skill.importSource?.kind === 'market'
+    ? '来自市场'
+    : skill.importSource
+      ? `来自 ${skill.importSource.sourceWorkspaceName}`
+      : null
+
   return (
     <div
       role="button"
@@ -66,9 +72,9 @@ export function SkillCard({ skill, isBuiltin, updating, onOpen, onToggle, onUpda
       </p>
 
       <div className="mt-auto flex items-center gap-2">
-        {isBuiltin ? null : skill.importSource ? (
+        {isBuiltin ? null : sourceLabel ? (
           <span className="truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            来自 {skill.importSource.sourceWorkspaceName}
+            {sourceLabel}
           </span>
         ) : (
           <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">

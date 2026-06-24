@@ -22,7 +22,7 @@ import {
 } from './config-paths'
 import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import { listBuiltinMcpServers } from './builtin-mcp/catalog'
-import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
+import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, WorkspaceSkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
 
 interface AgentWorkspacesIndex {
   version: number
@@ -31,6 +31,10 @@ interface AgentWorkspacesIndex {
 
 const INDEX_VERSION = 2
 const DEPRECATED_DEFAULT_SKILL_SLUGS = new Set(['proma-coach'])
+
+function isWorkspaceSkillImportSource(source: SkillImportSource): source is WorkspaceSkillImportSource {
+  return source.kind === undefined || source.kind === 'workspace'
+}
 
 /** 读取工作区索引文件，自动执行版本迁移 */
 function readIndex(): AgentWorkspacesIndex {
@@ -641,10 +645,12 @@ function scanSkillsInDir(dir: string, enabled: boolean): SkillMeta[] {
         const importSource = readSkillImportSource(join(dir, entry.name))
         if (importSource) {
           meta.importSource = importSource
-          const sourceSkillDir = resolveSkillDir(importSource.sourceWorkspaceSlug, entry.name)
-          if (sourceSkillDir) {
-            const currentSourceVersion = parseSkillVersion(sourceSkillDir)
-            meta.hasUpdate = isNewerVersion(currentSourceVersion, importSource.sourceVersion)
+          if (isWorkspaceSkillImportSource(importSource)) {
+            const sourceSkillDir = resolveSkillDir(importSource.sourceWorkspaceSlug, entry.name)
+            if (sourceSkillDir) {
+              const currentSourceVersion = parseSkillVersion(sourceSkillDir)
+              meta.hasUpdate = isNewerVersion(currentSourceVersion, importSource.sourceVersion)
+            }
           }
         }
 
@@ -803,6 +809,9 @@ export function updateSkillFromSource(
   const existingSource = readSkillImportSource(targetPath)
   if (!existingSource) {
     throw new Error(`Skill ${skillSlug} 不是从其他工作区导入的，无法从源更新`)
+  }
+  if (!isWorkspaceSkillImportSource(existingSource)) {
+    throw new Error(`Skill ${skillSlug} 来自市场，请通过市场更新`)
   }
 
   const sourcePath = resolveSkillDir(existingSource.sourceWorkspaceSlug, skillSlug)

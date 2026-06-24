@@ -50,6 +50,10 @@ import type {
   StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
+  MarketSkillSummary,
+  MarketSkillDetail,
+  MarketSkillListInput,
+  MarketSkillInstallInput,
   OtherWorkspaceSkillsGroup,
   WorkspaceCapabilities,
   FileEntry,
@@ -567,6 +571,15 @@ export interface ElectronAPI {
 
   /** 从源工作区同步更新已导入的 Skill */
   updateSkillFromSource: (targetSlug: string, skillSlug: string) => Promise<SkillMeta>
+
+  /** 获取 Skill 市场列表 */
+  listMarketSkills: (input?: MarketSkillListInput) => Promise<MarketSkillSummary[]>
+
+  /** 获取 Skill 市场详情 */
+  getMarketSkill: (slug: string) => Promise<MarketSkillDetail>
+
+  /** 从 Skill 市场安装 Skill */
+  installMarketSkill: (input: MarketSkillInstallInput) => Promise<SkillMeta>
 
   /** 读取 SKILL.md 全文内容 */
   readSkillContent: (workspaceSlug: string, skillSlug: string) => Promise<string>
@@ -1642,6 +1655,18 @@ const electronAPI: ElectronAPI = {
       targetSlug,
       skillSlug,
     )
+  },
+
+  listMarketSkills: (input?: MarketSkillListInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MARKET_SKILLS, input ?? {})
+  },
+
+  getMarketSkill: (slug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MARKET_SKILL, slug)
+  },
+
+  installMarketSkill: (input: MarketSkillInstallInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.INSTALL_MARKET_SKILL, input)
   },
 
   readSkillContent: (workspaceSlug: string, skillSlug: string) => {

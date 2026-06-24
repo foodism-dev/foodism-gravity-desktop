@@ -809,13 +809,25 @@ export interface WorkspaceMcpConfig {
 // ===== Skill 元数据 =====
 
 /** 从其他工作区导入的 Skill 来源元数据 */
-export interface SkillImportSource {
+export interface WorkspaceSkillImportSource {
   kind?: 'workspace'
   sourceWorkspaceSlug: string
   sourceWorkspaceName: string
   importedAt: string        // ISO 8601
   sourceVersion: string     // 导入时源 Skill 的 version，无则 '0.0.0'
 }
+
+/** 从 Skill 市场安装的来源元数据 */
+export interface MarketSkillImportSource {
+  kind: 'market'
+  slug: string
+  name: string
+  packageSha256: string
+  packageSizeBytes: number
+  installedAt: string       // ISO 8601
+}
+
+export type SkillImportSource = WorkspaceSkillImportSource | MarketSkillImportSource
 
 /** 工作区 Skill 元数据 */
 export interface SkillMeta {
@@ -827,9 +839,9 @@ export interface SkillMeta {
   icon?: string
   version?: string
   enabled: boolean
-  /** 如果此 Skill 是从其他工作区导入的，则携带来源信息 */
+  /** 如果此 Skill 是从其他工作区或市场导入的，则携带来源信息 */
   importSource?: SkillImportSource
-  /** 是否有可用更新（源 Skill 版本 > importSource.sourceVersion） */
+  /** 是否有可用更新（工作区来源比较 version；市场来源比较 packageSha256） */
   hasUpdate?: boolean
 }
 
@@ -838,6 +850,37 @@ export interface OtherWorkspaceSkillsGroup {
   workspaceName: string
   workspaceSlug: string
   skills: SkillMeta[]
+}
+
+/** Skill 市场列表项 */
+export interface MarketSkillSummary {
+  slug: string
+  name: string
+  summary: string | null
+  icon: string | null
+  tags: string[]
+  packageSha256: string
+  packageSizeBytes: number
+  downloadCount: number
+  updatedAt: string
+}
+
+/** Skill 市场详情 */
+export interface MarketSkillDetail extends MarketSkillSummary {
+  description: string | null
+  unpackedSizeBytes: number | null
+  fileCount: number | null
+  manifest: Record<string, unknown>
+}
+
+export interface MarketSkillListInput {
+  query?: string
+  tag?: string
+}
+
+export interface MarketSkillInstallInput {
+  workspaceSlug: string
+  slug: string
 }
 
 /** Skill 目录下的文件/子目录节点（递归树） */
@@ -1416,6 +1459,12 @@ export const AGENT_IPC_CHANNELS = {
   IMPORT_SKILL_FROM_WORKSPACE: 'agent:import-skill-from-workspace',
   /** 从源工作区同步更新已导入的 Skill */
   UPDATE_SKILL_FROM_SOURCE: 'agent:update-skill-from-source',
+  /** 获取 Skill 市场列表 */
+  LIST_MARKET_SKILLS: 'agent:list-market-skills',
+  /** 获取 Skill 市场详情 */
+  GET_MARKET_SKILL: 'agent:get-market-skill',
+  /** 从 Skill 市场安装到工作区 */
+  INSTALL_MARKET_SKILL: 'agent:install-market-skill',
   /** 读取 SKILL.md 全文内容 */
   READ_SKILL_CONTENT: 'agent:read-skill-content',
   /** 写入 SKILL.md 全文内容 */
