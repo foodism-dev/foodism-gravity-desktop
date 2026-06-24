@@ -23,8 +23,10 @@ const LOGGED_OUT_SESSION: AuthSession = { isAuthenticated: false }
 
 interface GravityTokenSet {
   token_type?: string
+  access_token?: string
   expires_in?: number
   refresh_token?: string
+  id_token?: string
 }
 
 type JsonRecord = Record<string, unknown>
@@ -128,6 +130,16 @@ function parseStoredSession(raw: string): AuthSession {
   }
   if (expiresAt) session.expiresAt = expiresAt
   if (typeof data.refreshable === 'boolean') session.refreshable = data.refreshable
+  const apiToken = toStringValue(data.apiToken)
+  const accessToken = toStringValue(data.accessToken)
+  const refreshToken = toStringValue(data.refreshToken)
+  const idToken = toStringValue(data.idToken)
+  const tokenType = toStringValue(data.tokenType)
+  if (apiToken) session.apiToken = apiToken
+  if (accessToken) session.accessToken = accessToken
+  if (refreshToken) session.refreshToken = refreshToken
+  if (idToken) session.idToken = idToken
+  if (tokenType) session.tokenType = tokenType
   return session
 }
 
@@ -176,8 +188,7 @@ export function createAuthSessionFromGravityAccount(
   const metadata = toRecord(dingtalkIdentity?.metadata)
   const expiresIn = toNumberValue(tokenSet.expires_in)
   const expiresAt = expiresIn > 0 ? new Date(now.getTime() + expiresIn * 1000).toISOString() : undefined
-
-  return {
+  const session: AuthSession = {
     isAuthenticated: true,
     provider: 'gravity-sso',
     user: {
@@ -213,6 +224,12 @@ export function createAuthSessionFromGravityAccount(
     expiresAt,
     refreshable: Boolean(tokenSet.refresh_token),
   }
+
+  if (tokenSet.access_token) session.accessToken = tokenSet.access_token
+  if (tokenSet.refresh_token) session.refreshToken = tokenSet.refresh_token
+  if (tokenSet.id_token) session.idToken = tokenSet.id_token
+  if (tokenSet.token_type) session.tokenType = tokenSet.token_type
+  return session
 }
 
 export function createAuthService(sessionPath: string): AuthService {

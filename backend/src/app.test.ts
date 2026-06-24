@@ -2,13 +2,25 @@ import { describe, expect, test } from "bun:test";
 
 import { createServerApp } from "./app.ts";
 import type { ApiUser } from "./auth.ts";
-import type { PublishSkillPackageInput, SkillPublisher } from "./skill-publisher.ts";
+import {
+  normalizeRebuildClassificationOptions,
+  normalizeRebuildFieldOptions,
+} from "./rebuild/fields.ts";
+import type {
+  RebuildFieldMetadata,
+  RebuildFieldMetadataRepository,
+  RebuildFieldOptionMetadata,
+  RebuildMetadataClient,
+} from "./rebuild/fields.ts";
 import { SUPPLY_GOODS_SYNC_FIELDS } from "./rebuild/supplygoods.ts";
+import { createRebuildSupplyGoodsClient } from "./rebuild/supplygoods.ts";
 import type {
   RebuildSupplyGoodsClient,
   SupplyGoodsRecordRepository,
   SupplyGoodsRecordUpsertInput,
 } from "./rebuild/supplygoods.ts";
+import type { PublishSkillPackageInput, SkillPublisher } from "./skill-publisher.ts";
+import type { TicketQuery, TicketRepository, TicketWithSupplyGoods } from "./tickets.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
 
 process.env.DATABASE_URL = "";
@@ -93,8 +105,56 @@ interface PublishSkillResponse {
 
 interface SupplyGoodsCallbackResponse {
   ok: boolean;
-  record_id: string;
-  synced_at: string;
+  supply_goods_id: string;
+  updated_at: string;
+}
+
+interface TicketsResponse {
+  tickets: Array<{
+    id: number;
+    supply_goods_id: string;
+    approval_state: string;
+    payload: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+  }>;
+  total: number;
+  pageNo: number;
+  pageSize: number;
+}
+
+interface TicketDetailResponse {
+  ticket: TicketsResponse["tickets"][number];
+  field_options: Record<
+    string,
+    Array<{
+      value: string;
+      label: string;
+      sort_order: number | null;
+      is_default: boolean;
+    }>
+  >;
+  field_metadata: Record<
+    string,
+    {
+      label: string;
+      field_type: string;
+    }
+  >;
+}
+
+interface RebuildFieldOptionsResponse {
+  entity: string;
+  field: string;
+  options: TicketDetailResponse["field_options"][string];
+}
+
+interface RebuildFieldSyncResponse {
+  ok: boolean;
+  entity: string;
+  fields: number;
+  options: number;
+  updated_at: string;
 }
 
 interface MemoryMarketSkill {
@@ -228,6 +288,65 @@ function createMemorySupplyGoodsRepository(): {
   };
 }
 
+function createMemoryTicketRepository(records: TicketWithSupplyGoods[]): {
+  repository: TicketRepository;
+  queries: TicketQuery[];
+} {
+  const queries: TicketQuery[] = [];
+  return {
+    queries,
+    repository: {
+      async listTickets(query: TicketQuery) {
+        queries.push(query);
+        return {
+          tickets: records,
+          total: records.length,
+          pageNo: query.pageNo,
+          pageSize: query.pageSize,
+        };
+      },
+
+      async getTicket(supplyGoodsId: string) {
+        return records.find((record) => record.supplyGoodsId === supplyGoodsId) ?? null;
+      },
+    },
+  };
+}
+
+function createMemoryFieldRepository(initialOptions: RebuildFieldOptionMetadata[] = []): {
+  repository: RebuildFieldMetadataRepository;
+  fields: RebuildFieldMetadata[];
+  options: RebuildFieldOptionMetadata[];
+} {
+  const fields: RebuildFieldMetadata[] = [];
+  const options: RebuildFieldOptionMetadata[] = [...initialOptions];
+  return {
+    fields,
+    options,
+    repository: {
+      async upsertFields(nextFields: RebuildFieldMetadata[]): Promise<void> {
+        fields.push(...nextFields);
+      },
+
+      async upsertFieldOptions(nextOptions: RebuildFieldOptionMetadata[]): Promise<void> {
+        options.push(...nextOptions);
+      },
+
+      async listFieldOptions(entityName: string, fieldName: string): Promise<RebuildFieldOptionMetadata[]> {
+        return options.filter((option) => option.entityName === entityName && option.fieldName === fieldName);
+      },
+
+      async listFieldsByEntity(entityName: string): Promise<RebuildFieldMetadata[]> {
+        return fields.filter((field) => field.entityName === entityName);
+      },
+
+      async listFields(entityName: string, fieldNames: string[]): Promise<RebuildFieldMetadata[]> {
+        return fields.filter((field) => field.entityName === entityName && fieldNames.includes(field.fieldName));
+      },
+    },
+  };
+}
+
 describe("server app", () => {
   test("Given SupplyGoods sync fields, When querying REBUILD, Then it requests rich record data", () => {
     expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("mainPic");
@@ -242,7 +361,81 @@ describe("server app", () => {
     expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("approvalId");
     expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("rejectRemark");
     expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("bdAuditor");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("targetGoods");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("holidayLimit");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("reservationMark");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("owningUser");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("createdBy");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("hasPushedMiddleSide");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("regionRatingCertificate");
     expect(new Set(SUPPLY_GOODS_SYNC_FIELDS).size).toBe(SUPPLY_GOODS_SYNC_FIELDS.length);
+  });
+
+  test("Given SupplyGoods fields stored in database, When querying REBUILD twice, Then it uses cached database fields", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalBaseUrl = Bun.env.REBUILD_BASE_URL;
+    const originalAppId = Bun.env.REBUILD_APP_ID;
+    const originalAppSecret = Bun.env.REBUILD_APP_SECRET;
+    const queriedFields: string[] = [];
+    let fieldReads = 0;
+
+    Bun.env.REBUILD_BASE_URL = "https://rebuild.example.com";
+    Bun.env.REBUILD_APP_ID = "app-id";
+    Bun.env.REBUILD_APP_SECRET = "app-secret";
+    const fetchMock = async (...args: Parameters<typeof fetch>): Promise<Response> => {
+      const [input] = args;
+      const url = new URL(String(input));
+      queriedFields.push(url.searchParams.get("fields") ?? "");
+      return new Response(JSON.stringify({
+        error_code: 0,
+        error_msg: "",
+        data: { SupplyGoodsId: url.searchParams.get("id") ?? "", mealType: { text: "主套餐A" } },
+      }));
+    };
+    globalThis.fetch = Object.assign(fetchMock, { preconnect: originalFetch.preconnect });
+
+    const fieldRepository = {
+      async listFieldsByEntity(entityName: string): Promise<RebuildFieldMetadata[]> {
+        fieldReads += 1;
+        return [
+          {
+            entityName,
+            fieldName: "SupplyGoodsId",
+            label: "商品ID",
+            fieldType: "TEXT",
+            raw: { name: "SupplyGoodsId", type: "TEXT" },
+          },
+          {
+            entityName,
+            fieldName: "mealType",
+            label: "套餐类型",
+            fieldType: "PICKLIST",
+            raw: { name: "mealType", displayType: "PICKLIST" },
+          },
+        ];
+      },
+    } as unknown as RebuildFieldMetadataRepository;
+
+    try {
+      const client = createRebuildSupplyGoodsClient({
+        fieldMetadataRepository: fieldRepository,
+        fieldCacheTtlMs: 60_000,
+      });
+
+      await client.getSupplyGoods("944-first");
+      await client.getSupplyGoods("944-second");
+    } finally {
+      globalThis.fetch = originalFetch;
+      Bun.env.REBUILD_BASE_URL = originalBaseUrl;
+      Bun.env.REBUILD_APP_ID = originalAppId;
+      Bun.env.REBUILD_APP_SECRET = originalAppSecret;
+    }
+
+    expect(fieldReads).toBe(1);
+    expect(queriedFields).toHaveLength(2);
+    expect(queriedFields[0]?.split(",")).toContain("mealType");
+    expect(queriedFields[0]?.split(",")).toContain("mealType.text");
+    expect(queriedFields[1]).toBe(queriedFields[0]);
   });
 
   test("Given the server is running, When health is requested, Then it returns ok", async () => {
@@ -667,14 +860,14 @@ describe("server app", () => {
     expect(skillPublisher.uploads).toHaveLength(0);
   });
 
-  test("Given a SupplyGoods callback, When record_id is provided, Then it refreshes and saves the latest REBUILD record", async () => {
+  test("Given a SupplyGoods callback, When supply_goods_id is provided, Then it refreshes and saves the latest REBUILD record", async () => {
     const { repository, saved } = createMemorySupplyGoodsRepository();
     const queriedIds: string[] = [];
     const rebuildClient: RebuildSupplyGoodsClient = {
-      async getSupplyGoods(recordId: string): Promise<Record<string, unknown>> {
-        queriedIds.push(recordId);
+      async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
+        queriedIds.push(supplyGoodsId);
         return {
-          SupplyGoodsId: recordId,
+          SupplyGoodsId: supplyGoodsId,
           goodsName: "测试商品",
           approvalState: { value: 2, text: "审批中" },
         };
@@ -688,19 +881,19 @@ describe("server app", () => {
     const response = await app.request("/api/rebuild/supplygoods/callback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ record_id: "944-019eee7db58948ec" }),
+      body: JSON.stringify({ supply_goods_id: "944-019eee7db58948ec" }),
     });
     const body = (await response.json()) as SupplyGoodsCallbackResponse;
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.record_id).toBe("944-019eee7db58948ec");
-    expect(typeof body.synced_at).toBe("string");
+    expect(body.supply_goods_id).toBe("944-019eee7db58948ec");
+    expect(typeof body.updated_at).toBe("string");
     expect(queriedIds).toEqual(["944-019eee7db58948ec"]);
     expect(saved).toHaveLength(1);
     const savedRecord = saved[0];
     expect(savedRecord).toBeDefined();
-    expect(savedRecord?.recordId).toBe("944-019eee7db58948ec");
+    expect(savedRecord?.supplyGoodsId).toBe("944-019eee7db58948ec");
     expect(savedRecord?.payload).toEqual({
       SupplyGoodsId: "944-019eee7db58948ec",
       goodsName: "测试商品",
@@ -712,10 +905,10 @@ describe("server app", () => {
     const { repository, saved } = createMemorySupplyGoodsRepository();
     const queriedIds: string[] = [];
     const rebuildClient: RebuildSupplyGoodsClient = {
-      async getSupplyGoods(recordId: string): Promise<Record<string, unknown>> {
-        queriedIds.push(recordId);
+      async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
+        queriedIds.push(supplyGoodsId);
         return {
-          SupplyGoodsId: recordId,
+          SupplyGoodsId: supplyGoodsId,
           goodsName: "兼容路径商品",
         };
       },
@@ -734,7 +927,7 @@ describe("server app", () => {
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.record_id).toBe("944-compatible");
+    expect(body.supply_goods_id).toBe("944-compatible");
     expect(queriedIds).toEqual(["944-compatible"]);
     expect(saved).toHaveLength(1);
     expect(saved[0]?.payload).toEqual({
@@ -743,7 +936,247 @@ describe("server app", () => {
     });
   });
 
-  test("Given a SupplyGoods callback, When record_id is missing, Then it rejects the request", async () => {
+  test("Given tickets exist, When list API is filtered, Then it delegates query and returns SupplyGoods payload", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository, queries } = createMemoryTicketRepository([
+      {
+        id: 1,
+        supplyGoodsId: "944-019b72fc5f247d73",
+        approvalState: "审批中",
+        payload: {
+          SupplyGoodsId: "944-019b72fc5f247d73",
+          hostNameInput: "禧聚晟宴",
+          goodsNameInput: "3-4人餐",
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets?approvalState=%E5%AE%A1%E6%89%B9%E4%B8%AD&q=%E7%A6%A7&pageNo=2&pageSize=10");
+    const body = (await response.json()) as TicketsResponse;
+
+    expect(response.status).toBe(200);
+    expect(queries).toEqual([
+      {
+        approvalState: "审批中",
+        q: "禧",
+        pageNo: 2,
+        pageSize: 10,
+      },
+    ]);
+    expect(body.total).toBe(1);
+    expect(body.tickets[0]?.supply_goods_id).toBe("944-019b72fc5f247d73");
+    expect(body.tickets[0]?.payload.hostNameInput).toBe("禧聚晟宴");
+  });
+
+  test("Given a ticket exists, When detail API is requested, Then it returns that ticket", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 2,
+        supplyGoodsId: "944-detail",
+        approvalState: "通过",
+        payload: {
+          SupplyGoodsId: "944-detail",
+          goodsNameInput: "详情套餐",
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-detail");
+    const body = (await response.json()) as TicketDetailResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ticket.supply_goods_id).toBe("944-detail");
+    expect(body.ticket.approval_state).toBe("通过");
+    expect(body.field_options).toEqual({});
+    expect(body.field_metadata).toEqual({});
+  });
+
+  test("Given field options exist, When ticket detail API is requested, Then it returns option labels for rendering", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository: ticketRepository } = createMemoryTicketRepository([
+      {
+        id: 3,
+        supplyGoodsId: "944-show-channel",
+        approvalState: "审批中",
+        payload: {
+          SupplyGoodsId: "944-show-channel",
+          goodsNameInput: "渠道商品",
+          showChannel: "show-douyin",
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const { repository: fieldRepository, fields } = createMemoryFieldRepository([
+      {
+        entityName: "SupplyGoods",
+        fieldName: "showChannel",
+        optionValue: "show-douyin",
+        optionLabel: "抖音来客（闭环）",
+        sortOrder: 1,
+        isDefault: false,
+        raw: { id: "show-douyin", text: "抖音来客（闭环）" },
+      },
+    ]);
+    fields.push({
+      entityName: "SupplyGoods",
+      fieldName: "showChannel",
+      label: "商品计划上线渠道",
+      fieldType: "PICKLIST",
+      raw: { name: "showChannel", label: "商品计划上线渠道", type: "PICKLIST" },
+    });
+    const app = createServerApp({
+      ticketRepository,
+      rebuildFieldMetadataRepository: fieldRepository,
+    });
+
+    const response = await app.request("/api/tickets/944-show-channel");
+    const body = (await response.json()) as TicketDetailResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.field_options.showChannel?.[0]).toEqual({
+      value: "show-douyin",
+      label: "抖音来客（闭环）",
+      sort_order: 1,
+      is_default: false,
+    });
+    expect(body.field_metadata.showChannel).toEqual({
+      label: "商品计划上线渠道",
+      field_type: "PICKLIST",
+    });
+  });
+
+  test("Given REBUILD metadata client, When syncing SupplyGoods fields, Then it stores fields and options in pg repository", async () => {
+    const { repository, fields, options } = createMemoryFieldRepository();
+    const metadataClient: RebuildMetadataClient = {
+      async listFields(entityName: string): Promise<RebuildFieldMetadata[]> {
+        return [
+          {
+            entityName,
+            fieldName: "showChannel",
+            label: "商品计划上线渠道",
+            fieldType: "PICKLIST",
+            raw: {
+              name: "showChannel",
+              label: "商品计划上线渠道",
+              displayType: "PICKLIST",
+              options: [{ id: "show-douyin", text: "抖音来客（闭环）" }],
+            },
+          },
+          {
+            entityName,
+            fieldName: "channelLimit",
+            label: "投放渠道",
+            fieldType: "MULTISELECT",
+            raw: {
+              name: "channelLimit",
+              label: "投放渠道",
+              displayType: "MULTISELECT",
+              options: [{ text: "直播间", mask: 1 }],
+            },
+          },
+          {
+            entityName,
+            fieldName: "classification",
+            label: "商品类目",
+            fieldType: "CLASSIFICATION",
+            raw: {
+              name: "classification",
+              label: "商品类目",
+              displayType: "CLASSIFICATION",
+            },
+          },
+        ];
+      },
+
+      async listPicklistOptions(entityName: string, fieldName: string): Promise<RebuildFieldOptionMetadata[]> {
+        if (fieldName !== "showChannel") return [];
+        return [
+          {
+            entityName,
+            fieldName,
+            optionValue: "show-douyin",
+            optionLabel: "抖音来客（闭环）",
+            sortOrder: 0,
+            isDefault: false,
+            raw: { id: "show-douyin", text: "抖音来客（闭环）" },
+          },
+        ];
+      },
+
+      async listMultiselectOptions(entityName: string, fieldName: string): Promise<RebuildFieldOptionMetadata[]> {
+        if (fieldName !== "channelLimit") return [];
+        return normalizeRebuildFieldOptions(entityName, fieldName, [{ text: "直播间", mask: 1 }]);
+      },
+
+      async listClassificationOptions(entityName: string, fieldName: string): Promise<RebuildFieldOptionMetadata[]> {
+        if (fieldName !== "classification") return [];
+        return normalizeRebuildClassificationOptions(entityName, fieldName, [
+          {
+            id: "cat-food",
+            text: "同城玩享",
+            children: [{ id: "cat-sport", text: "运动健身" }],
+          },
+        ]);
+      },
+    };
+    const app = createServerApp({
+      rebuildMetadataClient: metadataClient,
+      rebuildFieldMetadataRepository: repository,
+    });
+
+    const response = await app.request("/api/rebuild/supplygoods/fields/sync", { method: "POST" });
+    const body = (await response.json()) as RebuildFieldSyncResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.entity).toBe("SupplyGoods");
+    expect(body.fields).toBe(3);
+    expect(body.options).toBe(4);
+    expect(fields[0]?.fieldName).toBe("showChannel");
+    expect(options.map((option) => option.optionLabel)).toContain("抖音来客（闭环）");
+    expect(options.map((option) => option.optionLabel)).toContain("直播间");
+    expect(options.map((option) => option.optionLabel)).toContain("同城玩享 / 运动健身");
+  });
+
+  test("Given stored field options, When options API is requested, Then it returns option values", async () => {
+    const { repository } = createMemoryFieldRepository([
+      {
+        entityName: "SupplyGoods",
+        fieldName: "showChannel",
+        optionValue: "show-douyin",
+        optionLabel: "抖音来客（闭环）",
+        sortOrder: 2,
+        isDefault: true,
+        raw: { id: "show-douyin", text: "抖音来客（闭环）" },
+      },
+    ]);
+    const app = createServerApp({ rebuildFieldMetadataRepository: repository });
+
+    const response = await app.request("/api/rebuild/fields/options?entity=SupplyGoods&field=showChannel");
+    const body = (await response.json()) as RebuildFieldOptionsResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.entity).toBe("SupplyGoods");
+    expect(body.field).toBe("showChannel");
+    expect(body.options).toEqual([
+      {
+        value: "show-douyin",
+        label: "抖音来客（闭环）",
+        sort_order: 2,
+        is_default: true,
+      },
+    ]);
+  });
+
+  test("Given a SupplyGoods callback, When supply_goods_id is missing, Then it rejects the request", async () => {
     const { repository, saved } = createMemorySupplyGoodsRepository();
     const rebuildClient: RebuildSupplyGoodsClient = {
       async getSupplyGoods(): Promise<Record<string, unknown>> {
@@ -764,7 +1197,7 @@ describe("server app", () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe("Bad Request");
-    expect(body.message).toBe("record_id 不能为空");
+    expect(body.message).toBe("supply_goods_id 不能为空");
     expect(saved).toHaveLength(0);
   });
 });

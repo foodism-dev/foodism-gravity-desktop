@@ -19,7 +19,7 @@ import { TabContent } from './TabContent'
 import { AutomationFormView } from '@/components/automation/AutomationFormView'
 import { AutomationsListView } from '@/components/automation/AutomationsListView'
 import { AgentSkillsView } from '@/components/agent-skills/AgentSkillsView'
-import { WorkOrdersView } from '@/components/work-orders/WorkOrdersView'
+import { WorkOrdersWebView } from '@/components/work-orders/WorkOrdersWebView'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 
@@ -163,8 +163,8 @@ export function MainArea(): React.ReactElement {
                 <AutomationsListView />
               )
             ) : activeView === 'work-orders' ? (
-              // 我的工单视图：全屏取代 TabBar + TabContent
-              <WorkOrdersView />
+              // 我的工单 Web 视图：在右侧工作区内承载 frontend 工单台。
+              <WorkOrdersWebView />
             ) : activeView === 'agent-skills' ? (
               // Agent 技能视图：全屏取代 TabBar + TabContent
               <AgentSkillsView />

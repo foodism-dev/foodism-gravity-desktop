@@ -13,12 +13,32 @@ import {
 } from "./auth.ts";
 import {
   createRebuildSupplyGoodsClient,
-  extractSupplyGoodsRecordId,
+  extractSupplyGoodsId,
   getDefaultSupplyGoodsRecordRepository,
   syncSupplyGoodsFromCallback,
   type RebuildSupplyGoodsClient,
   type SupplyGoodsRecordRepository,
 } from "./rebuild/supplygoods.ts";
+import {
+  createRebuildMetadataClient,
+  getDefaultRebuildFieldMetadataRepository,
+  getSupplyGoodsOptionFieldNames,
+  syncSupplyGoodsFieldMetadata,
+  type RebuildFieldMetadata,
+  type RebuildFieldMetadataRepository,
+  type RebuildMetadataClient,
+} from "./rebuild/fields.ts";
+import {
+  getDefaultTicketRepository,
+  parseTicketQuery,
+  serializeFieldOption,
+  serializeFieldMetadata,
+  serializeTicket,
+  serializeTicketList,
+  type TicketFieldMetadataApiMap,
+  type TicketFieldOptionsApiMap,
+  type TicketRepository,
+} from "./tickets.ts";
 import { getDefaultSkillPublisher, sha256Bytes, type SkillPublisher } from "./skill-publisher.ts";
 import { getDefaultSkillRepository, type MarketSkill, type SkillRepository } from "./skills.ts";
 import { getDefaultUserRepository, type UserRepository } from "./users.ts";
@@ -40,7 +60,10 @@ interface ServerAppOptions {
   skillPublisher?: SkillPublisher | null;
   internalApiToken?: string | null;
   rebuildSupplyGoodsClient?: RebuildSupplyGoodsClient;
+  rebuildMetadataClient?: RebuildMetadataClient;
   supplyGoodsRecordRepository?: SupplyGoodsRecordRepository | null;
+  rebuildFieldMetadataRepository?: RebuildFieldMetadataRepository | null;
+  ticketRepository?: TicketRepository | null;
 }
 
 const SENSITIVE_LOG_KEYS = new Set([
@@ -206,9 +229,16 @@ export function createServerApp(options: ServerAppOptions = {}) {
   const skillRepository = options.skillRepository ?? getDefaultSkillRepository();
   const skillPublisher = options.skillPublisher ?? getDefaultSkillPublisher();
   const internalApiToken = resolveInternalApiToken(options.internalApiToken);
-  const rebuildSupplyGoodsClient = options.rebuildSupplyGoodsClient ?? createRebuildSupplyGoodsClient();
+  const rebuildMetadataClient = options.rebuildMetadataClient ?? createRebuildMetadataClient();
   const supplyGoodsRecordRepository =
     options.supplyGoodsRecordRepository ?? getDefaultSupplyGoodsRecordRepository();
+  const rebuildFieldMetadataRepository =
+    options.rebuildFieldMetadataRepository ?? getDefaultRebuildFieldMetadataRepository();
+  const rebuildSupplyGoodsClient = options.rebuildSupplyGoodsClient ?? createRebuildSupplyGoodsClient({
+    fieldMetadataRepository: rebuildFieldMetadataRepository,
+  });
+  const listSupplyGoodsFields = createCachedSupplyGoodsFieldLoader(rebuildFieldMetadataRepository);
+  const ticketRepository = options.ticketRepository ?? getDefaultTicketRepository();
 
   app.use("/api/*", cors());
 
@@ -296,9 +326,9 @@ export function createServerApp(options: ServerAppOptions = {}) {
     }
     console.log(`[REBUILD] SupplyGoods callback payload（已脱敏）=${stringifyForLog(sanitizeForLog(body))}`);
 
-    const recordId = extractSupplyGoodsRecordId(body);
-    if (!recordId) {
-      return context.json({ error: "Bad Request", message: "record_id 不能为空" }, 400);
+    const supplyGoodsId = extractSupplyGoodsId(body);
+    if (!supplyGoodsId) {
+      return context.json({ error: "Bad Request", message: "supply_goods_id 不能为空" }, 400);
     }
 
     if (!supplyGoodsRecordRepository) {
@@ -307,15 +337,15 @@ export function createServerApp(options: ServerAppOptions = {}) {
 
     try {
       const result = await syncSupplyGoodsFromCallback({
-        recordId,
+        supplyGoodsId,
         rebuildClient: rebuildSupplyGoodsClient,
         repository: supplyGoodsRecordRepository,
       });
-      console.log(`[REBUILD] SupplyGoods 已同步: ${result.recordId}`);
+      console.log(`[REBUILD] SupplyGoods 已同步: ${result.supplyGoodsId}`);
       return context.json({
         ok: true,
-        record_id: result.recordId,
-        synced_at: result.syncedAt.toISOString(),
+        supply_goods_id: result.supplyGoodsId,
+        updated_at: result.updatedAt.toISOString(),
       });
     } catch (error) {
       console.error(`[REBUILD] SupplyGoods 回调同步失败: ${getErrorMessage(error)}`);
@@ -430,6 +460,82 @@ export function createServerApp(options: ServerAppOptions = {}) {
     });
   });
 
+  app.post("/api/rebuild/supplygoods/fields/sync", async (context) => {
+    if (!rebuildFieldMetadataRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    try {
+      const result = await syncSupplyGoodsFieldMetadata({
+        metadataClient: rebuildMetadataClient,
+        repository: rebuildFieldMetadataRepository,
+      });
+      rebuildSupplyGoodsClient.clearFieldCache?.();
+      listSupplyGoodsFields.clearCache();
+      return context.json({
+        ok: true,
+        entity: result.entityName,
+        fields: result.fieldCount,
+        options: result.optionCount,
+        updated_at: result.updatedAt.toISOString(),
+      });
+    } catch (error) {
+      console.error(`[REBUILD] SupplyGoods 字段元数据同步失败: ${getErrorMessage(error)}`);
+      return context.json({ error: "Bad Gateway", message: "同步 SupplyGoods 字段元数据失败" }, 502);
+    }
+  });
+
+  app.get("/api/rebuild/fields/options", async (context) => {
+    if (!rebuildFieldMetadataRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    const entityName = context.req.query("entity")?.trim() || "SupplyGoods";
+    const fieldName = context.req.query("field")?.trim();
+    if (!fieldName) {
+      return context.json({ error: "Bad Request", message: "field 不能为空" }, 400);
+    }
+
+    const options = await rebuildFieldMetadataRepository.listFieldOptions(entityName, fieldName);
+    return context.json({
+      entity: entityName,
+      field: fieldName,
+      options: options.map(serializeFieldOption),
+    });
+  });
+
+  app.get("/api/tickets", async (context) => {
+    if (!ticketRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    const query = parseTicketQuery({
+      approvalState: context.req.query("approvalState"),
+      q: context.req.query("q"),
+      pageNo: context.req.query("pageNo"),
+      pageSize: context.req.query("pageSize"),
+    });
+    return context.json(serializeTicketList(await ticketRepository.listTickets(query)));
+  });
+
+  app.get("/api/tickets/:supplyGoodsId", async (context) => {
+    if (!ticketRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    const supplyGoodsId = context.req.param("supplyGoodsId").trim();
+    const ticket = await ticketRepository.getTicket(supplyGoodsId);
+    if (!ticket) {
+      return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+    }
+
+    return context.json({
+      ticket: serializeTicket(ticket),
+      field_options: await buildTicketFieldOptionsMap(rebuildFieldMetadataRepository, listSupplyGoodsFields),
+      field_metadata: await buildTicketFieldMetadataMap(rebuildFieldMetadataRepository, ticket.payload, listSupplyGoodsFields),
+    });
+  });
+
   app.use(
     "/api/me",
     jwt({
@@ -457,3 +563,67 @@ export function createServerApp(options: ServerAppOptions = {}) {
 }
 
 export type ServerApp = ReturnType<typeof createServerApp>;
+
+interface CachedSupplyGoodsFieldLoader {
+  (): Promise<RebuildFieldMetadata[]>;
+  clearCache: () => void;
+}
+
+const SUPPLY_GOODS_FIELD_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function createCachedSupplyGoodsFieldLoader(
+  repository: RebuildFieldMetadataRepository | null,
+): CachedSupplyGoodsFieldLoader {
+  let cache: { expiresAt: number; fields: RebuildFieldMetadata[] } | null = null;
+  const loader = async () => {
+    if (!repository) return [];
+    const now = Date.now();
+    if (cache && cache.expiresAt > now) {
+      return cache.fields;
+    }
+
+    const fields = await repository.listFieldsByEntity("SupplyGoods");
+    cache = {
+      fields,
+      expiresAt: now + SUPPLY_GOODS_FIELD_CACHE_TTL_MS,
+    };
+    return fields;
+  };
+  loader.clearCache = () => {
+    cache = null;
+  };
+  return loader;
+}
+
+async function buildTicketFieldOptionsMap(
+  repository: RebuildFieldMetadataRepository | null,
+  listSupplyGoodsFields: CachedSupplyGoodsFieldLoader,
+): Promise<TicketFieldOptionsApiMap> {
+  if (!repository) return {};
+  const fields = await listSupplyGoodsFields();
+  const entries = await Promise.all(
+    getSupplyGoodsOptionFieldNames(fields).map(async (fieldName) => {
+      const options = await repository.listFieldOptions("SupplyGoods", fieldName);
+      return [fieldName, options.map(serializeFieldOption)] as const;
+    }),
+  );
+  return Object.fromEntries(entries.filter(([, options]) => options.length > 0));
+}
+
+async function buildTicketFieldMetadataMap(
+  repository: RebuildFieldMetadataRepository | null,
+  payload: Record<string, unknown>,
+  listSupplyGoodsFields: CachedSupplyGoodsFieldLoader,
+): Promise<TicketFieldMetadataApiMap> {
+  if (!repository) return {};
+  const allFields = await listSupplyGoodsFields();
+  const optionFieldNames = getSupplyGoodsOptionFieldNames(allFields);
+  const selectedFields = await repository.listFields("SupplyGoods", [
+    ...new Set([...Object.keys(payload).map(normalizePayloadFieldName), ...optionFieldNames]),
+  ]);
+  return serializeFieldMetadata(selectedFields);
+}
+
+function normalizePayloadFieldName(fieldName: string): string {
+  return fieldName.includes(".") ? fieldName.split(".")[0] ?? fieldName : fieldName;
+}

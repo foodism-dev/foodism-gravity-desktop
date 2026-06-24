@@ -271,6 +271,9 @@ import { getWeChatConfig } from './lib/wechat-config'
 import { wechatBridge } from './lib/wechat-bridge'
 
 let ssoOidcService: SsoOidcService | null = null
+let ssoLoginWindow: BrowserWindow | null = null
+const HTTP_URL_PATTERN = /^https?:\/\//i
+const DINGTALK_URL_PATTERN = /^(dingtalk|dingding):\/\//i
 
 function broadcastAuthEvent(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -278,12 +281,93 @@ function broadcastAuthEvent(channel: string, payload: unknown): void {
   }
 }
 
+function isHttpUrl(url: string): boolean {
+  return HTTP_URL_PATTERN.test(url)
+}
+
+function isDingTalkUrl(url: string): boolean {
+  return DINGTALK_URL_PATTERN.test(url)
+}
+
+function closeSsoLoginWindow(): void {
+  const window = ssoLoginWindow
+  ssoLoginWindow = null
+  if (window && !window.isDestroyed()) {
+    window.close()
+  }
+}
+
+async function openSsoLoginWindow(url: string): Promise<void> {
+  const parentWindow = BrowserWindow.getFocusedWindow()
+    ?? BrowserWindow.getAllWindows().find((window) => !window.isDestroyed())
+  const existingWindow = ssoLoginWindow && !ssoLoginWindow.isDestroyed() ? ssoLoginWindow : null
+
+  if (existingWindow) {
+    existingWindow.show()
+    existingWindow.focus()
+    await existingWindow.loadURL(url)
+    return
+  }
+
+  const loginWindow = new BrowserWindow({
+    width: 520,
+    height: 720,
+    minWidth: 420,
+    minHeight: 560,
+    title: 'Gravity SSO 登录',
+    parent: parentWindow ?? undefined,
+    modal: Boolean(parentWindow),
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#f7fbf9',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+    },
+  })
+
+  ssoLoginWindow = loginWindow
+  loginWindow.once('ready-to-show', () => {
+    if (!loginWindow.isDestroyed()) {
+      loginWindow.show()
+    }
+  })
+  loginWindow.on('closed', () => {
+    if (ssoLoginWindow === loginWindow) {
+      ssoLoginWindow = null
+    }
+  })
+  loginWindow.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
+    if (isHttpUrl(popupUrl)) {
+      void loginWindow.loadURL(popupUrl)
+    } else if (isDingTalkUrl(popupUrl)) {
+      void shell.openExternal(popupUrl)
+    }
+    return { action: 'deny' }
+  })
+  loginWindow.webContents.on('will-navigate', (event, nextUrl) => {
+    if (isHttpUrl(nextUrl)) return
+    if (isDingTalkUrl(nextUrl)) {
+      event.preventDefault()
+      void shell.openExternal(nextUrl)
+      return
+    }
+    event.preventDefault()
+    console.warn(`[SSO] 已阻止非 HTTP(S) 跳转: ${nextUrl}`)
+  })
+
+  await loginWindow.loadURL(url)
+}
+
 function getSsoOidcService(): SsoOidcService {
   ssoOidcService ??= createSsoOidcService({
     config: getDefaultSsoOidcConfig(),
-    openExternal: (url) => shell.openExternal(url),
+    openExternal: openSsoLoginWindow,
     saveSession: saveAuthSession,
     onCompleted: (session) => {
+      closeSsoLoginWindow()
       broadcastAuthEvent(AUTH_IPC_CHANNELS.SSO_COMPLETED, session)
     },
     onError: (message) => {

@@ -3,7 +3,7 @@
  */
 
 import * as React from 'react'
-import { ExternalLink, Loader2, LockKeyhole, QrCode } from 'lucide-react'
+import { Loader2, LockKeyhole, QrCode, ScanLine } from 'lucide-react'
 import { useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { authSessionAtom } from '@/atoms/auth'
@@ -102,7 +102,7 @@ export function LoginView(): React.ReactElement {
 
                 {authorizeUrl && isSubmitting && (
                   <div className="break-all rounded-[8px] bg-[#16a34a]/10 px-3 py-2 text-xs leading-5 text-[#166534]">
-                    已打开浏览器授权：{authorizeUrl}
+                    已在应用内打开授权窗口：{authorizeUrl}
                   </div>
                 )}
               </div>
@@ -121,8 +121,8 @@ export function LoginView(): React.ReactElement {
                   </>
                 ) : (
                   <>
-                    打开钉钉 SSO
-                    <ExternalLink />
+                    应用内打开钉钉 SSO
+                    <ScanLine />
                   </>
                 )}
               </Button>

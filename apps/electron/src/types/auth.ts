@@ -65,6 +65,14 @@ export interface AuthSession {
   provider?: AuthProvider
   /** Hono API JWT token */
   apiToken?: string
+  /** OIDC access_token */
+  accessToken?: string
+  /** OIDC refresh_token */
+  refreshToken?: string
+  /** OIDC id_token */
+  idToken?: string
+  /** OIDC token_type */
+  tokenType?: string
   /** 已登录用户 */
   user?: AuthUser
   /** 角色摘要 */

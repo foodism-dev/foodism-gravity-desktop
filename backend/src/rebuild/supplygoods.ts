@@ -1,11 +1,12 @@
-import { createHash } from "node:crypto";
 import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../db/client.ts";
-import { rebuildSupplyGoodsRecords } from "../db/schema.ts";
+import { rebuildSupplyGoods, tickets } from "../db/schema.ts";
+import { buildRebuildOpenApiUrl, readJsonResponse } from "./openapi.ts";
+import type { RebuildFieldMetadata, RebuildFieldMetadataRepository } from "./fields.ts";
 
 export interface SupplyGoodsRecordUpsertInput {
-  recordId: string;
+  supplyGoodsId: string;
   payload: Record<string, unknown>;
-  syncedAt: Date;
+  updatedAt: Date;
 }
 
 export interface SupplyGoodsRecordRepository {
@@ -13,29 +14,23 @@ export interface SupplyGoodsRecordRepository {
 }
 
 export interface RebuildSupplyGoodsClient {
-  getSupplyGoods: (recordId: string) => Promise<Record<string, unknown>>;
+  getSupplyGoods: (supplyGoodsId: string) => Promise<Record<string, unknown>>;
+  clearFieldCache?: () => void;
+}
+
+export interface RebuildSupplyGoodsClientOptions {
+  fieldMetadataRepository?: RebuildFieldMetadataRepository | null;
+  fieldCacheTtlMs?: number;
+  now?: () => number;
 }
 
 export interface SupplyGoodsCallbackResult {
-  recordId: string;
-  syncedAt: Date;
+  supplyGoodsId: string;
+  updatedAt: Date;
 }
 
-interface RebuildSignedQueryInput {
-  appId: string;
-  appSecret: string;
-  timestamp?: number;
-  params: Record<string, string | number | boolean | null | undefined>;
-}
-
-interface RebuildOpenApiResponse<T> {
-  error_code: number;
-  error_msg: string;
-  data?: T;
-  error_data?: unknown;
-}
-
-const SUPPLY_GOODS_ENTITY = "SupplyGoods";
+export const SUPPLY_GOODS_ENTITY = "SupplyGoods";
+const DEFAULT_FIELD_CACHE_TTL_MS = 5 * 60 * 1000;
 export const SUPPLY_GOODS_SYNC_FIELDS = [
   "SupplyGoodsId",
   "supplyGoodsId",
@@ -45,10 +40,14 @@ export const SUPPLY_GOODS_SYNC_FIELDS = [
   "goodsName",
   "goodsNameInput",
   "hostNameInput",
+  "targetGoods",
   "majorType",
   "selfRating",
   "selfRatingNew.text",
   "isTpGoods",
+  "previewUrl",
+  "presentingRemindWords",
+  "presentingRemindConfirm",
   "signCity",
   "mainPic",
   "rbimages",
@@ -60,23 +59,32 @@ export const SUPPLY_GOODS_SYNC_FIELDS = [
   "businessLicenseNo",
   "foodLicense",
   "packageContract",
+  "publicityContract",
   "freeSettleAmount",
+  "freeSettleRatio",
+  "freeSettleNote",
   "channelLimit",
   "guideline",
   "packages",
   "reservationRule",
   "reservationRule.text",
+  "reservationType",
+  "reservationMark",
+  "reservation",
   "originPrice",
   "price",
+  "discount",
   "supplyPrice",
   "classification",
   "signAmount",
   "excludeHost",
   "saleUntil",
+  "holidayLimit",
   "reservationDays",
   "rbhost",
   "rbhost.hostId",
   "rbhost.hostName",
+  "hostNum",
   "company",
   "company.SupplyCompanyId",
   "companyName",
@@ -93,7 +101,11 @@ export const SUPPLY_GOODS_SYNC_FIELDS = [
   "OAApprovalNo",
   "OAApprovalType",
   "rejectRemark",
+  "rejectOptions",
   "bdAuditor",
+  "productAuditors",
+  "saleAuditor",
+  "isRejectedBySaleSupport",
   "limitation",
   "singleUserPurchaseLimit",
   "hostTpRightsBind.curTpRightsOrderNo",
@@ -103,7 +115,11 @@ export const SUPPLY_GOODS_SYNC_FIELDS = [
   "hostTpRightsBind.tpRightsBindSupplyCompany.payScene",
   "supplyTpChannel.text",
   "supplyTpChannel.seq",
+  "latestTpRights",
+  "supplyTpOrder",
   "goodsFeatures",
+  "salePoint",
+  "hotReason",
   "useEndTime",
   "isPackage",
   "isUseBox",
@@ -128,104 +144,123 @@ export const SUPPLY_GOODS_SYNC_FIELDS = [
   "onlineChannel",
   "settleType.text",
   "showChannel.text",
+  "stockTime",
+  "hasAchivedAll",
+  "isHotPlanned",
+  "hasSumitted",
+  "isHostPOIIDMatch",
+  "hasPushedMiddleSide",
+  "hasOnlinePush",
+  "hasCreateStorage",
+  "hasBrief",
+  "regionRatingCertificate",
   "isLimitSexNew.text",
   "isLimitHairNew.text",
   "modifiedOn",
+  "modifiedBy",
   "createdOn",
+  "createdBy",
+  "owningUser",
+  "owningDept",
   "validUntil",
   "saleBegin",
   "bdCity",
   "bdGroup",
+  "bdRegion",
+  "bdSubRegion",
 ];
+
+interface CachedSupplyGoodsFields {
+  expiresAt: number;
+  fields: string[];
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function normalizeRebuildBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  if (!trimmed) {
-    throw new Error("REBUILD_BASE_URL 不能为空");
+function readString(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
   }
-  if (trimmed.endsWith("/gw/api")) {
-    return `${trimmed}/`;
-  }
-  return `${trimmed}/gw/api/`;
+  return "";
 }
 
-function readRequiredEnv(name: string): string {
-  const value = Bun.env[name]?.trim();
-  if (!value) {
-    throw new Error(`缺少 REBUILD OpenAPI 配置: ${name}`);
+function shouldRequestTextCompanion(field: RebuildFieldMetadata): boolean {
+  const signature = [
+    field.fieldType,
+    readString(field.raw, ["displayType", "type", "typeName", "fieldType"]),
+  ].join(" ").toLowerCase();
+  return (
+    signature.includes("picklist")
+    || signature.includes("multiselect")
+    || signature.includes("multi-select")
+    || signature.includes("classification")
+    || signature.includes("选项")
+    || signature.includes("下拉")
+    || signature.includes("多选")
+    || signature.includes("分类")
+  );
+}
+
+function buildSupplyGoodsSyncFieldsFromMetadata(fields: RebuildFieldMetadata[]): string[] {
+  const names = new Set<string>();
+  for (const field of fields) {
+    const fieldName = field.fieldName.trim();
+    if (!fieldName) continue;
+    names.add(fieldName);
+    if (shouldRequestTextCompanion(field)) {
+      names.add(`${fieldName}.text`);
+    }
   }
-  return value;
+  return [...names];
 }
 
-function stringifyParam(value: string | number | boolean | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
-  return String(value);
-}
+async function resolveSupplyGoodsSyncFields(input: {
+  repository: RebuildFieldMetadataRepository | null | undefined;
+  cache: CachedSupplyGoodsFields | null;
+  cacheTtlMs: number;
+  now: () => number;
+  setCache: (cache: CachedSupplyGoodsFields) => void;
+}): Promise<string[]> {
+  if (!input.repository) return SUPPLY_GOODS_SYNC_FIELDS;
 
-function buildRebuildSignedQuery(input: RebuildSignedQueryInput): Record<string, string> {
-  const timestamp = String(input.timestamp ?? Math.floor(Date.now() / 1000));
-  const params: Record<string, string> = {};
-
-  for (const [key, value] of Object.entries(input.params)) {
-    const normalized = stringifyParam(value);
-    if (normalized !== null) params[key] = normalized;
+  const currentTime = input.now();
+  if (input.cache && input.cache.expiresAt > currentTime) {
+    return input.cache.fields;
   }
 
-  params.appid = input.appId;
-  params.timestamp = timestamp;
-  params.sign_type = "MD5";
+  const metadataFields = await input.repository.listFieldsByEntity(SUPPLY_GOODS_ENTITY);
+  const fields = buildSupplyGoodsSyncFieldsFromMetadata(metadataFields);
+  if (fields.length === 0) {
+    console.warn("[REBUILD] SupplyGoods 字段元数据为空，回退使用内置字段列表");
+    input.setCache({
+      fields: SUPPLY_GOODS_SYNC_FIELDS,
+      expiresAt: currentTime + input.cacheTtlMs,
+    });
+    return SUPPLY_GOODS_SYNC_FIELDS;
+  }
 
-  const signBody = Object.keys(params)
-    .sort()
-    .map((key) => `${key}=${params[key]}`)
-    .join("&");
-  params.sign = createHash("md5")
-    .update(`${signBody}&${input.appId}.${input.appSecret}`)
-    .digest("hex");
-
-  return params;
-}
-
-function buildSupplyGoodsGetUrl(recordId: string): URL {
-  const params = buildRebuildSignedQuery({
-    appId: readRequiredEnv("REBUILD_APP_ID"),
-    appSecret: readRequiredEnv("REBUILD_APP_SECRET"),
-    params: {
-      entity: SUPPLY_GOODS_ENTITY,
-      id: recordId,
-      fields: SUPPLY_GOODS_SYNC_FIELDS.join(","),
-    },
+  input.setCache({
+    fields,
+    expiresAt: currentTime + input.cacheTtlMs,
   });
-
-  const url = new URL("entity/get", normalizeRebuildBaseUrl(readRequiredEnv("REBUILD_BASE_URL")));
-  for (const [key, value] of Object.entries(params).sort(([left], [right]) => left.localeCompare(right))) {
-    url.searchParams.set(key, value);
-  }
-  return url;
+  return fields;
 }
 
-async function readJsonResponse<T>(response: Response): Promise<RebuildOpenApiResponse<T>> {
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`REBUILD OpenAPI 请求失败 (${response.status}): ${text || response.statusText}`);
-  }
-
-  try {
-    return JSON.parse(text) as RebuildOpenApiResponse<T>;
-  } catch (error) {
-    console.error("[REBUILD] 响应不是合法 JSON:", error);
-    throw new Error("REBUILD OpenAPI 返回格式错误");
-  }
+function buildSupplyGoodsGetUrl(supplyGoodsId: string, fields: string[]): URL {
+  return buildRebuildOpenApiUrl("entity/get", {
+    entity: SUPPLY_GOODS_ENTITY,
+    id: supplyGoodsId,
+    fields: fields.join(","),
+  });
 }
 
-export function extractSupplyGoodsRecordId(body: unknown): string | null {
+export function extractSupplyGoodsId(body: unknown): string | null {
   if (!isRecord(body)) return null;
 
-  const candidates = [body.record_id, body.recordId, body.primaryId, body.id, body.supplyGoodsId];
+  const candidates = [body.supply_goods_id, body.supplyGoodsId, body.record_id, body.recordId, body.primaryId, body.id];
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) {
       return candidate.trim();
@@ -235,11 +270,28 @@ export function extractSupplyGoodsRecordId(body: unknown): string | null {
   return null;
 }
 
-export function createRebuildSupplyGoodsClient(): RebuildSupplyGoodsClient {
+export function createRebuildSupplyGoodsClient(options: RebuildSupplyGoodsClientOptions = {}): RebuildSupplyGoodsClient {
+  let fieldCache: CachedSupplyGoodsFields | null = null;
+  const fieldCacheTtlMs = options.fieldCacheTtlMs ?? DEFAULT_FIELD_CACHE_TTL_MS;
+  const now = options.now ?? Date.now;
+
   return {
-    async getSupplyGoods(recordId: string): Promise<Record<string, unknown>> {
-      const url = buildSupplyGoodsGetUrl(recordId);
-      console.log(`[REBUILD] 回调同步 SupplyGoods: ${recordId}`);
+    clearFieldCache(): void {
+      fieldCache = null;
+    },
+
+    async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
+      const fields = await resolveSupplyGoodsSyncFields({
+        repository: options.fieldMetadataRepository,
+        cache: fieldCache,
+        cacheTtlMs: fieldCacheTtlMs,
+        now,
+        setCache: (nextCache) => {
+          fieldCache = nextCache;
+        },
+      });
+      const url = buildSupplyGoodsGetUrl(supplyGoodsId, fields);
+      console.log(`[REBUILD] 回调同步 SupplyGoods: ${supplyGoodsId}`);
       const result = await readJsonResponse<Record<string, unknown>>(await fetch(url));
       if (result.error_code !== 0) {
         throw new Error(result.error_msg || `REBUILD OpenAPI 调用失败: ${result.error_code}`);
@@ -256,19 +308,31 @@ export function createDrizzleSupplyGoodsRecordRepository(db: ServerDatabase): Su
   return {
     async upsertRecord(input: SupplyGoodsRecordUpsertInput): Promise<void> {
       await db
-        .insert(rebuildSupplyGoodsRecords)
+        .insert(rebuildSupplyGoods)
         .values({
-          recordId: input.recordId,
+          supplyGoodsId: input.supplyGoodsId,
           payload: input.payload,
-          syncedAt: input.syncedAt,
-          updatedAt: input.syncedAt,
+          updatedAt: input.updatedAt,
         })
         .onConflictDoUpdate({
-          target: rebuildSupplyGoodsRecords.recordId,
+          target: rebuildSupplyGoods.supplyGoodsId,
           set: {
             payload: input.payload,
-            syncedAt: input.syncedAt,
-            updatedAt: input.syncedAt,
+            updatedAt: input.updatedAt,
+          },
+        });
+      await db
+        .insert(tickets)
+        .values({
+          supplyGoodsId: input.supplyGoodsId,
+          approvalState: readApprovalState(input.payload),
+          updatedAt: input.updatedAt,
+        })
+        .onConflictDoUpdate({
+          target: tickets.supplyGoodsId,
+          set: {
+            approvalState: readApprovalState(input.payload),
+            updatedAt: input.updatedAt,
           },
         });
     },
@@ -294,20 +358,38 @@ export function getDefaultSupplyGoodsRecordRepository(): SupplyGoodsRecordReposi
 }
 
 export async function syncSupplyGoodsFromCallback(input: {
-  recordId: string;
+  supplyGoodsId: string;
   rebuildClient: RebuildSupplyGoodsClient;
   repository: SupplyGoodsRecordRepository;
 }): Promise<SupplyGoodsCallbackResult> {
-  const payload = await input.rebuildClient.getSupplyGoods(input.recordId);
-  const syncedAt = new Date();
+  const payload = await input.rebuildClient.getSupplyGoods(input.supplyGoodsId);
+  const updatedAt = new Date();
   await input.repository.upsertRecord({
-    recordId: input.recordId,
+    supplyGoodsId: input.supplyGoodsId,
     payload,
-    syncedAt,
+    updatedAt,
   });
 
   return {
-    recordId: input.recordId,
-    syncedAt,
+    supplyGoodsId: input.supplyGoodsId,
+    updatedAt,
   };
+}
+
+function readApprovalState(payload: Record<string, unknown>): string {
+  const value = payload.approvalState;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (isRecord(value)) {
+    const text = value.text;
+    if (typeof text === "string" || typeof text === "number" || typeof text === "boolean") {
+      return String(text);
+    }
+    const rawValue = value.value;
+    if (typeof rawValue === "string" || typeof rawValue === "number" || typeof rawValue === "boolean") {
+      return String(rawValue);
+    }
+  }
+  return "unknown";
 }

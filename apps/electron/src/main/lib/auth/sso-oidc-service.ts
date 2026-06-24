@@ -245,10 +245,10 @@ export function createSsoOidcService(options: CreateSsoOidcServiceOptions): SsoO
             issueInternalToken,
           })
           options.saveSession(session)
-          options.onCompleted?.(session)
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
           currentPkce = null
           res.end(renderCallbackSuccess(session), () => {
+            options.onCompleted?.(session)
             stopCallbackServer()
           })
         } catch (error) {
@@ -496,7 +496,7 @@ function renderCallbackSuccess(session: AuthSession): string {
   <main>
     <div class="check">✓</div>
     <h1>登录完成</h1>
-    <p>${name} 已通过 Gravity SSO 校验。你可以关闭这个浏览器页面，回到万店引力桌面端继续操作。</p>
+    <p>${name} 已通过 Gravity SSO 校验。你可以关闭这个授权窗口，回到万店引力桌面端继续操作。</p>
   </main>
 </body>
 </html>`

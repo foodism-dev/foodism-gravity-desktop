@@ -55,12 +55,17 @@ describe('auth-service 登录会话', () => {
     expect(service.getAuthSession()).toEqual({ isAuthenticated: false })
   })
 
-  test('Given SSO 会话已落盘 When 获取登录状态 Then 保留用户、角色和过期时间', () => {
+  test('Given SSO 会话已落盘 When 获取登录状态 Then 保留用户、角色、JWT 和 OIDC token', () => {
     const path = createTempAuthPath()
     const service = createAuthService(path)
     const session: AuthSession = {
       isAuthenticated: true,
       provider: 'gravity-sso',
+      apiToken: 'api-jwt-token',
+      accessToken: 'oidc-access-token',
+      refreshToken: 'oidc-refresh-token',
+      idToken: 'oidc-id-token',
+      tokenType: 'Bearer',
       user: {
         id: 'user-001',
         username: 'zhangsan',
@@ -71,7 +76,7 @@ describe('auth-service 登录会话', () => {
       roles: [{ code: 'store-admin', name: '门店管理员', source: 'gravity' }],
       identities: [{ provider: 'dingtalk', type: 'oauth', status: 'active', externalKey: 'dt-001', phoneMasked: '138****8000' }],
       loggedInAt: '2026-06-22T08:00:00.000Z',
-      expiresAt: '2026-06-22T10:00:00.000Z',
+      expiresAt: '2099-06-22T10:00:00.000Z',
       refreshable: true,
     }
 
@@ -122,6 +127,8 @@ describe('auth-service 登录会话', () => {
     const session = createAuthSessionFromGravityAccount(
       {
         token_type: 'Bearer',
+        access_token: 'oidc-access-token',
+        id_token: 'oidc-id-token',
         expires_in: 7200,
         refresh_token: 'refresh-token',
       },
@@ -162,6 +169,10 @@ describe('auth-service 登录会话', () => {
     expect(session).toEqual({
       isAuthenticated: true,
       provider: 'gravity-sso',
+      accessToken: 'oidc-access-token',
+      refreshToken: 'refresh-token',
+      idToken: 'oidc-id-token',
+      tokenType: 'Bearer',
       user: {
         id: 'user-001',
         username: 'zhangsan',
