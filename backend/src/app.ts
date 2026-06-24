@@ -19,6 +19,7 @@ import {
   type RebuildSupplyGoodsClient,
   type SupplyGoodsRecordRepository,
 } from "./rebuild/supplygoods.ts";
+import { getDefaultRebuildAssetUploader, type RebuildAssetUploader } from "./rebuild/assets.ts";
 import {
   createRebuildMetadataClient,
   getDefaultRebuildFieldMetadataRepository,
@@ -61,6 +62,7 @@ interface ServerAppOptions {
   internalApiToken?: string | null;
   rebuildSupplyGoodsClient?: RebuildSupplyGoodsClient;
   rebuildMetadataClient?: RebuildMetadataClient;
+  rebuildAssetUploader?: RebuildAssetUploader | null;
   supplyGoodsRecordRepository?: SupplyGoodsRecordRepository | null;
   rebuildFieldMetadataRepository?: RebuildFieldMetadataRepository | null;
   ticketRepository?: TicketRepository | null;
@@ -238,6 +240,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
     fieldMetadataRepository: rebuildFieldMetadataRepository,
   });
   const listSupplyGoodsFields = createCachedSupplyGoodsFieldLoader(rebuildFieldMetadataRepository);
+  const rebuildAssetUploader = options.rebuildAssetUploader ?? getDefaultRebuildAssetUploader();
   const ticketRepository = options.ticketRepository ?? getDefaultTicketRepository();
 
   app.use("/api/*", cors());
@@ -340,6 +343,8 @@ export function createServerApp(options: ServerAppOptions = {}) {
         supplyGoodsId,
         rebuildClient: rebuildSupplyGoodsClient,
         repository: supplyGoodsRecordRepository,
+        assetUploader: rebuildAssetUploader,
+        listFields: listSupplyGoodsFields,
       });
       console.log(`[REBUILD] SupplyGoods 已同步: ${result.supplyGoodsId}`);
       return context.json({
@@ -518,6 +523,14 @@ export function createServerApp(options: ServerAppOptions = {}) {
     return context.json(serializeTicketList(await ticketRepository.listTickets(query)));
   });
 
+  app.get("/api/tickets/metadata", async (context) => {
+    if (!rebuildFieldMetadataRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    return context.json(await buildTicketMetadataMap(rebuildFieldMetadataRepository, listSupplyGoodsFields));
+  });
+
   app.get("/api/tickets/:supplyGoodsId", async (context) => {
     if (!ticketRepository) {
       return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
@@ -531,8 +544,6 @@ export function createServerApp(options: ServerAppOptions = {}) {
 
     return context.json({
       ticket: serializeTicket(ticket),
-      field_options: await buildTicketFieldOptionsMap(rebuildFieldMetadataRepository, listSupplyGoodsFields),
-      field_metadata: await buildTicketFieldMetadataMap(rebuildFieldMetadataRepository, ticket.payload, listSupplyGoodsFields),
     });
   });
 
@@ -610,20 +621,22 @@ async function buildTicketFieldOptionsMap(
   return Object.fromEntries(entries.filter(([, options]) => options.length > 0));
 }
 
-async function buildTicketFieldMetadataMap(
+async function buildTicketMetadataMap(
   repository: RebuildFieldMetadataRepository | null,
-  payload: Record<string, unknown>,
   listSupplyGoodsFields: CachedSupplyGoodsFieldLoader,
-): Promise<TicketFieldMetadataApiMap> {
-  if (!repository) return {};
+): Promise<{
+  field_options: TicketFieldOptionsApiMap;
+  field_metadata: TicketFieldMetadataApiMap;
+}> {
+  if (!repository) {
+    return {
+      field_options: {},
+      field_metadata: {},
+    };
+  }
   const allFields = await listSupplyGoodsFields();
-  const optionFieldNames = getSupplyGoodsOptionFieldNames(allFields);
-  const selectedFields = await repository.listFields("SupplyGoods", [
-    ...new Set([...Object.keys(payload).map(normalizePayloadFieldName), ...optionFieldNames]),
-  ]);
-  return serializeFieldMetadata(selectedFields);
-}
-
-function normalizePayloadFieldName(fieldName: string): string {
-  return fieldName.includes(".") ? fieldName.split(".")[0] ?? fieldName : fieldName;
+  return {
+    field_options: await buildTicketFieldOptionsMap(repository, listSupplyGoodsFields),
+    field_metadata: serializeFieldMetadata(allFields),
+  };
 }

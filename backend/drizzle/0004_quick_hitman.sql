@@ -1,0 +1,1 @@
+ALTER TABLE "rebuild_supply_goods" ADD COLUMN "assets" jsonb DEFAULT '{}'::jsonb NOT NULL;

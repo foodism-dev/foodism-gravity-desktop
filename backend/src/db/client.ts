@@ -4,13 +4,20 @@ import * as schema from "./schema.ts";
 
 export type ServerDatabase = ReturnType<typeof createDatabase>;
 
-export function createDatabase(databaseUrl: string) {
+export function createDatabaseClient(databaseUrl: string) {
   const client = postgres(databaseUrl, {
     max: 10,
     prepare: false,
   });
 
-  return drizzle(client, { schema });
+  return {
+    db: drizzle(client, { schema }),
+    close: () => client.end(),
+  };
+}
+
+export function createDatabase(databaseUrl: string) {
+  return createDatabaseClient(databaseUrl).db;
 }
 
 export function getDatabaseUrl() {

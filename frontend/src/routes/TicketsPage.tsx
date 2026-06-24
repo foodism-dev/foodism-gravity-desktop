@@ -1,8 +1,10 @@
 import { AlertCircle, Clock3, Filter, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
+import { useSetAtom } from "jotai";
 
 import type { AuthState } from "@/App.tsx";
+import { ensureTicketMetadataAtom } from "@/atoms/ticket-metadata.ts";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
@@ -33,6 +35,7 @@ const APPROVAL_OPTIONS = [
 ] as const;
 
 export function TicketsPage({ authState }: TicketsPageProps) {
+  const ensureTicketMetadata = useSetAtom(ensureTicketMetadataAtom);
   const [tickets, setTickets] = useState<TicketRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -41,6 +44,10 @@ export function TicketsPage({ authState }: TicketsPageProps) {
   const [approvalState, setApprovalState] = useState<string>("all");
 
   const approvalStateParam = approvalState === "all" ? undefined : approvalState;
+
+  useEffect(() => {
+    void ensureTicketMetadata();
+  }, [ensureTicketMetadata]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {

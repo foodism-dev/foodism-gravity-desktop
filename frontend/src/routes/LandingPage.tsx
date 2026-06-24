@@ -72,7 +72,7 @@ export function LandingPage({ authState }: LandingPageProps) {
       <section className="grid gap-4 md:grid-cols-3">
         <StatusCard icon={DatabaseZap} title="回调落库" value="supply_goods_id 唯一键" />
         <StatusCard icon={ShieldCheck} title="审核状态" value="approvalState" />
-        <StatusCard icon={Boxes} title="附件链路" value="gateway 下载地址" />
+        <StatusCard icon={Boxes} title="附件链路" value="R2 镜像链接" />
       </section>
     </div>
   );

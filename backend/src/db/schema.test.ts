@@ -7,6 +7,7 @@ describe("数据库 schema", () => {
   test("SupplyGoods 落库表使用业务命名与 supply_goods_id 唯一键", () => {
     expect(getTableName(rebuildSupplyGoods)).toBe("rebuild_supply_goods");
     expect(rebuildSupplyGoods.supplyGoodsId.name).toBe("supply_goods_id");
+    expect(rebuildSupplyGoods.assets.name).toBe("assets");
     expect("syncedAt" in rebuildSupplyGoods).toBe(false);
   });
 

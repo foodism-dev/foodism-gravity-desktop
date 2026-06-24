@@ -76,6 +76,7 @@ export const rebuildSupplyGoods = pgTable(
     id: bigserial("id", { mode: "number" }).primaryKey(),
     supplyGoodsId: text("supply_goods_id").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    assets: jsonb("assets").$type<Record<string, Array<{ source: string; url: string }>>>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

@@ -1,6 +1,7 @@
 import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { createDatabase, getDatabaseUrl, type ServerDatabase } from "./db/client.ts";
 import { rebuildSupplyGoods, tickets } from "./db/schema.ts";
+import { replacePayloadAssetUrls, type RebuildAssetMap } from "./rebuild/assets.ts";
 import type { RebuildFieldMetadata, RebuildFieldOptionMetadata } from "./rebuild/fields.ts";
 
 export interface TicketQuery {
@@ -15,6 +16,7 @@ export interface TicketWithSupplyGoods {
   supplyGoodsId: string;
   approvalState: string;
   payload: Record<string, unknown>;
+  assets?: RebuildAssetMap;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,6 +38,7 @@ export interface TicketApiRecord {
   supply_goods_id: string;
   approval_state: string;
   payload: Record<string, unknown>;
+  assets: RebuildAssetMap;
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +68,9 @@ export interface TicketListApiResponse {
 
 export interface TicketDetailApiResponse {
   ticket: TicketApiRecord;
+}
+
+export interface TicketMetadataApiResponse {
   field_options: TicketFieldOptionsApiMap;
   field_metadata: TicketFieldMetadataApiMap;
 }
@@ -96,11 +102,13 @@ export function parseTicketQuery(input: {
 }
 
 export function serializeTicket(ticket: TicketWithSupplyGoods): TicketApiRecord {
+  const assets = ticket.assets ?? {};
   return {
     id: ticket.id,
     supply_goods_id: ticket.supplyGoodsId,
     approval_state: ticket.approvalState,
-    payload: ticket.payload,
+    payload: replacePayloadAssetUrls(ticket.payload, assets),
+    assets,
     created_at: ticket.createdAt.toISOString(),
     updated_at: ticket.updatedAt.toISOString(),
   };
@@ -165,6 +173,7 @@ export function createDrizzleTicketRepository(db: ServerDatabase): TicketReposit
           supplyGoodsId: tickets.supplyGoodsId,
           approvalState: tickets.approvalState,
           payload: rebuildSupplyGoods.payload,
+          assets: rebuildSupplyGoods.assets,
           createdAt: tickets.createdAt,
           updatedAt: tickets.updatedAt,
         })
@@ -196,6 +205,7 @@ export function createDrizzleTicketRepository(db: ServerDatabase): TicketReposit
           supplyGoodsId: tickets.supplyGoodsId,
           approvalState: tickets.approvalState,
           payload: rebuildSupplyGoods.payload,
+          assets: rebuildSupplyGoods.assets,
           createdAt: tickets.createdAt,
           updatedAt: tickets.updatedAt,
         })

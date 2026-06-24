@@ -5,19 +5,44 @@ import {
   FileText,
   ImageIcon,
   LinkIcon,
+  Maximize2,
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
+import { useAtomValue, useSetAtom } from "jotai";
+import { Document, Page, pdfjs } from "react-pdf";
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
 
 import type { AuthState } from "@/App.tsx";
+import { ensureTicketMetadataAtom, ticketMetadataStateAtom } from "@/atoms/ticket-metadata.ts";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
-import { getTicket, type TicketRecord } from "@/lib/api.ts";
-import { getPayloadDisplayText, getPayloadMediaItems, type FieldDisplayContext } from "@/lib/field-display.ts";
+import { getTicket, type TicketMetadata, type TicketRecord } from "@/lib/api.ts";
+import { getPayloadDisplayText, type FieldDisplayContext } from "@/lib/field-display.ts";
+import { buildMediaPreviewItems, type MediaPreviewItem, type MediaPreviewKind } from "@/lib/media-preview.ts";
 import { cn } from "@/lib/utils.ts";
+
+pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+
+const PDF_PREVIEW_OPTIONS = {
+  disableAutoFetch: true,
+  disableRange: true,
+  disableStream: true,
+};
+
+const PDF_PREVIEW_CACHE_BUST = "20260624-cors";
 
 interface TicketDetailPageProps {
   authState: AuthState;
@@ -34,6 +59,7 @@ interface DetailField {
 interface MediaField {
   label: string;
   fields: string[];
+  kindHint?: MediaPreviewKind;
 }
 
 interface DetailSection {
@@ -146,12 +172,14 @@ const MEDIA_FIELDS: MediaField[] = [
   { label: "商品轮播图", fields: ["rbimages"] },
   { label: "套餐详情页配图", fields: ["detailImages"] },
   { label: "商户近30天经营流水", fields: ["regionRatingCertificate"] },
-  { label: "套餐合同", fields: ["packageContract"] },
+  { label: "套餐合同", fields: ["packageContract"], kindHint: "pdf" },
   { label: "营业执照", fields: ["businessLicensePicture"] },
   { label: "食品经营许可证", fields: ["foodLicense"] },
 ];
 
 export function TicketDetailPage({ authState, ticketId }: TicketDetailPageProps) {
+  const metadataState = useAtomValue(ticketMetadataStateAtom);
+  const ensureTicketMetadata = useSetAtom(ensureTicketMetadataAtom);
   const [ticket, setTicket] = useState<TicketRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -159,6 +187,10 @@ export function TicketDetailPage({ authState, ticketId }: TicketDetailPageProps)
   useEffect(() => {
     void refreshTicket(ticketId);
   }, [ticketId]);
+
+  useEffect(() => {
+    void ensureTicketMetadata();
+  }, [ensureTicketMetadata]);
 
   async function refreshTicket(nextTicketId = ticketId) {
     setIsLoading(true);
@@ -173,29 +205,39 @@ export function TicketDetailPage({ authState, ticketId }: TicketDetailPageProps)
     }
   }
 
-  if (isLoading) {
+  if (isLoading || (metadataState.isLoading && !metadataState.data)) {
     return <DetailSkeleton />;
   }
 
-  if (!ticket) {
-    return <MissingTicket errorMessage={errorMessage} />;
+  const metadata = metadataState.data;
+  if (!ticket || !metadata) {
+    return <MissingTicket errorMessage={errorMessage || metadataState.errorMessage} />;
   }
 
-  return <LoadedTicketDetail ticket={ticket} authState={authState} onRefresh={() => void refreshTicket()} />;
+  return (
+    <LoadedTicketDetail
+      ticket={ticket}
+      metadata={metadata}
+      authState={authState}
+      onRefresh={() => void refreshTicket()}
+    />
+  );
 }
 
 function LoadedTicketDetail({
   ticket,
+  metadata,
   authState,
   onRefresh,
 }: {
   ticket: TicketRecord;
+  metadata: TicketMetadata;
   authState: AuthState;
   onRefresh: () => void;
 }) {
   const payload = ticket.payload;
-  const title = displayPayloadText(ticket, "goodsName", "goodsNameInput") || "未命名商品";
-  const merchant = displayPayloadText(ticket, "hostNameInput", "rbhost.hostName", "rbhost") || "未提供商户";
+  const title = displayPayloadText(ticket, metadata, "goodsName", "goodsNameInput") || "未命名商品";
+  const merchant = displayPayloadText(ticket, metadata, "hostNameInput", "rbhost.hostName", "rbhost") || "未提供商户";
   const updatedAt = useMemo(() => formatDateTime(ticket.updatedAt), [ticket.updatedAt]);
 
   return (
@@ -228,30 +270,30 @@ function LoadedTicketDetail({
       </div>
 
       <div className="mx-auto max-w-6xl space-y-5 px-4 py-5">
-        <SummaryStrip ticket={ticket} />
-        <DetailSections sections={BASIC_SECTIONS} payload={payload} displayContext={ticket} />
-        <MediaSection payload={payload} />
-        <DetailSections sections={PACKAGE_SECTIONS} payload={payload} displayContext={ticket} />
-        <DetailSections sections={OPERATION_SECTIONS} payload={payload} displayContext={ticket} />
+        <SummaryStrip ticket={ticket} metadata={metadata} />
+        <DetailSections sections={BASIC_SECTIONS} payload={payload} displayContext={metadata} />
+        <MediaSection ticket={ticket} metadata={metadata} />
+        <DetailSections sections={PACKAGE_SECTIONS} payload={payload} displayContext={metadata} />
+        <DetailSections sections={OPERATION_SECTIONS} payload={payload} displayContext={metadata} />
         <RawPayload payload={payload} />
       </div>
     </div>
   );
 }
 
-function displayPayloadText(ticket: TicketRecord, ...fields: string[]): string {
+function displayPayloadText(ticket: TicketRecord, metadata: TicketMetadata, ...fields: string[]): string {
   return getPayloadDisplayText(ticket.payload, fields, {
-    fieldMetadata: ticket.fieldMetadata,
-    fieldOptions: ticket.fieldOptions,
+    fieldMetadata: metadata.fieldMetadata,
+    fieldOptions: metadata.fieldOptions,
   });
 }
 
-function SummaryStrip({ ticket }: { ticket: TicketRecord }) {
+function SummaryStrip({ ticket, metadata }: { ticket: TicketRecord; metadata: TicketMetadata }) {
   const items = [
     { label: "审核状态", value: ticket.approvalState, icon: ClipboardCheck },
-    { label: "售价", value: displayPayloadText(ticket, "price") || "未提供" },
-    { label: "结算价", value: displayPayloadText(ticket, "supplyPrice") || "未提供" },
-    { label: "签约城市", value: displayPayloadText(ticket, "signCity", "bdCity") || "未提供" },
+    { label: "售价", value: displayPayloadText(ticket, metadata, "price") || "未提供" },
+    { label: "结算价", value: displayPayloadText(ticket, metadata, "supplyPrice") || "未提供" },
+    { label: "签约城市", value: displayPayloadText(ticket, metadata, "signCity", "bdCity") || "未提供" },
   ];
 
   return (
@@ -337,7 +379,7 @@ function DetailFieldView({
   );
 }
 
-function MediaSection({ payload }: { payload: Record<string, unknown> }) {
+function MediaSection({ ticket, metadata }: { ticket: TicketRecord; metadata: TicketMetadata }) {
   return (
     <Card className="shadow-sm">
       <CardHeader className="pb-3">
@@ -346,15 +388,29 @@ function MediaSection({ payload }: { payload: Record<string, unknown> }) {
       </CardHeader>
       <CardContent className="space-y-5">
         {MEDIA_FIELDS.map((field) => (
-          <MediaFieldView key={field.label} field={field} payload={payload} />
+          <MediaFieldView key={field.label} field={field} ticket={ticket} metadata={metadata} />
         ))}
       </CardContent>
     </Card>
   );
 }
 
-function MediaFieldView({ field, payload }: { field: MediaField; payload: Record<string, unknown> }) {
-  const items = getPayloadMediaItems(payload, ...field.fields);
+function MediaFieldView({
+  field,
+  ticket,
+  metadata,
+}: {
+  field: MediaField;
+  ticket: TicketRecord;
+  metadata: TicketMetadata;
+}) {
+  const items = buildMediaPreviewItems({
+    payload: ticket.payload,
+    assets: ticket.assets,
+    fields: field.fields,
+    fieldMetadata: metadata.fieldMetadata,
+    kindHint: field.kindHint,
+  });
   if (items.length === 0) {
     return (
       <div className="grid gap-3 md:grid-cols-[128px_1fr]">
@@ -369,36 +425,211 @@ function MediaFieldView({ field, payload }: { field: MediaField; payload: Record
       <div className="text-sm font-medium text-slate-500">{field.label}</div>
       <div className="flex flex-wrap gap-3">
         {items.map((item, index) => (
-          <MediaItem key={`${field.label}-${index}-${item}`} value={item} />
+          <MediaItem key={`${field.label}-${index}-${item.source}-${item.url}`} item={item} />
         ))}
       </div>
     </div>
   );
 }
 
-function MediaItem({ value }: { value: string }) {
-  if (isImageUrl(value)) {
+function MediaItem({ item }: { item: MediaPreviewItem }) {
+  if (item.kind === "image") {
+    return <ImagePreviewItem item={item} />;
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          disabled={!item.canPreview}
+          className={cn(
+            "flex h-20 w-[min(320px,calc(100vw-48px))] items-center gap-3 rounded-md bg-slate-50 px-3 text-left text-sm text-slate-700 shadow-sm ring-1 ring-slate-200 transition",
+            item.canPreview ? "hover:bg-white hover:shadow-md" : "cursor-not-allowed opacity-70",
+          )}
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white shadow-sm">
+            {item.kind === "pdf" ? (
+              <FileText className="h-5 w-5 text-red-500" />
+            ) : (
+              <LinkIcon className="h-5 w-5 text-slate-500" />
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium text-slate-900">{item.fileName}</span>
+            <span className="mt-1 block text-xs text-slate-500">
+              {item.canPreview ? "点击预览文件" : "等待 R2 镜像后预览"}
+            </span>
+          </span>
+          {item.canPreview ? <Maximize2 className="h-4 w-4 shrink-0 text-slate-400" /> : null}
+        </button>
+      </DialogTrigger>
+      {item.canPreview ? <FilePreviewDialog item={item} /> : null}
+    </Dialog>
+  );
+}
+
+function ImagePreviewItem({ item }: { item: MediaPreviewItem }) {
+  if (!item.canPreview) {
     return (
-      <a href={value} target="_blank" rel="noreferrer" className="group block">
-        <img
-          src={value}
-          alt={getFileName(value)}
-          className="h-24 w-24 rounded-md object-cover shadow-sm ring-1 ring-slate-200 transition group-hover:shadow-md"
-        />
-      </a>
+      <div className="flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-md bg-slate-50 text-xs text-slate-400 shadow-sm ring-1 ring-slate-200">
+        <ImageIcon className="h-5 w-5" />
+        <span>待镜像</span>
+      </div>
     );
   }
 
-  const isImagePathValue = isImagePath(value);
-  const isPdf = value.toLowerCase().endsWith(".pdf");
   return (
-    <div className="flex max-w-[320px] items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-      {isPdf ? <FileText className="h-5 w-5 shrink-0 text-red-500" /> : isImagePathValue ? (
-        <ImageIcon className="h-5 w-5 shrink-0 text-blue-500" />
-      ) : (
-        <LinkIcon className="h-5 w-5 shrink-0 text-slate-400" />
-      )}
-      <span className="min-w-0 truncate">{getFileName(value)}</span>
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="group relative block h-24 w-24 overflow-hidden rounded-md shadow-sm ring-1 ring-slate-200"
+        >
+          <img
+            src={item.url}
+            alt={item.fileName}
+            className="h-full w-full object-cover transition group-hover:scale-105"
+          />
+          <span className="absolute inset-x-0 bottom-0 flex items-center justify-center bg-slate-950/55 py-1 text-[11px] text-white opacity-0 transition group-hover:opacity-100">
+            预览
+          </span>
+        </button>
+      </DialogTrigger>
+      <DialogContent className="w-[min(94vw,960px)] p-4">
+        <DialogHeader className="pr-8">
+          <DialogTitle className="truncate text-base">{item.fileName}</DialogTitle>
+          <DialogDescription>图片预览</DialogDescription>
+        </DialogHeader>
+        <div className="mt-4 max-h-[72vh] overflow-auto rounded-md bg-slate-950/5 p-2">
+          <img
+            src={item.url}
+            alt={item.fileName}
+            className="mx-auto max-h-[68vh] max-w-full rounded-md object-contain"
+          />
+        </div>
+        <PreviewActions item={item} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FilePreviewDialog({ item }: { item: MediaPreviewItem }) {
+  return (
+    <DialogContent className="w-[min(94vw,1040px)] p-4">
+      <DialogHeader className="pr-8">
+        <DialogTitle className="truncate text-base">{item.fileName}</DialogTitle>
+        <DialogDescription>{item.kind === "pdf" ? "PDF 文件预览" : "文件预览"}</DialogDescription>
+      </DialogHeader>
+      {item.kind === "pdf" ? <PdfPreview item={item} /> : <GenericFilePreview item={item} />}
+      <PreviewActions item={item} />
+    </DialogContent>
+  );
+}
+
+function PdfPreview({ item }: { item: MediaPreviewItem }) {
+  const [pageCount, setPageCount] = useState(0);
+  const [pageNumber, setPageNumber] = useState(1);
+  const pdfUrl = useMemo(() => buildPdfPreviewUrl(item.url), [item.url]);
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-md bg-slate-100 ring-1 ring-slate-200">
+      <div className="flex h-10 items-center justify-between border-b border-slate-200 bg-white px-3 text-sm">
+        <div className="font-medium text-slate-700">
+          {pageCount > 0 ? `第 ${pageNumber} / ${pageCount} 页` : "PDF 加载中"}
+        </div>
+        {pageCount > 1 ? (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={pageNumber <= 1}
+              onClick={() => setPageNumber((current) => Math.max(1, current - 1))}
+            >
+              上一页
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={pageNumber >= pageCount}
+              onClick={() => setPageNumber((current) => Math.min(pageCount, current + 1))}
+            >
+              下一页
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <div className="h-[68vh] overflow-auto bg-slate-200 p-4">
+        <Document
+          file={pdfUrl}
+          options={PDF_PREVIEW_OPTIONS}
+          loading={<PdfLoading />}
+          error={<PdfError />}
+          onLoadSuccess={({ numPages }) => {
+            setPageCount(numPages);
+            setPageNumber(1);
+          }}
+        >
+          <Page
+            pageNumber={pageNumber}
+            width={840}
+            loading={<PdfLoading />}
+            className="mx-auto overflow-hidden rounded-md bg-white shadow-sm"
+          />
+        </Document>
+      </div>
+    </div>
+  );
+}
+
+function buildPdfPreviewUrl(url: string): string {
+  try {
+    const nextUrl = new URL(url);
+    nextUrl.searchParams.set("pdf_preview", PDF_PREVIEW_CACHE_BUST);
+    return nextUrl.toString();
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}pdf_preview=${PDF_PREVIEW_CACHE_BUST}`;
+  }
+}
+
+function PdfLoading() {
+  return (
+    <div className="flex h-64 items-center justify-center text-sm text-slate-500">
+      正在加载 PDF...
+    </div>
+  );
+}
+
+function PdfError() {
+  return (
+    <div className="flex h-64 flex-col items-center justify-center gap-2 text-center text-sm text-slate-600">
+      <FileText className="h-10 w-10 text-red-500" />
+      <div className="font-medium text-slate-900">PDF 加载失败</div>
+      <div className="text-slate-500">可以尝试用下方按钮在新窗口打开。</div>
+    </div>
+  );
+}
+
+function GenericFilePreview({ item }: { item: MediaPreviewItem }) {
+  return (
+    <div className="mt-4 h-[72vh] overflow-hidden rounded-md bg-slate-100 ring-1 ring-slate-200">
+      <iframe src={item.url} title={item.fileName} className="h-full w-full bg-white" />
+    </div>
+  );
+}
+
+function PreviewActions({ item }: { item: MediaPreviewItem }) {
+  return (
+    <div className="mt-3 flex justify-end">
+      <Button variant="outline" size="sm" asChild>
+        <a href={item.url} target="_blank" rel="noreferrer">
+          <ExternalLink className="h-4 w-4" />
+          新窗口打开
+        </a>
+      </Button>
     </div>
   );
 }
@@ -447,22 +678,6 @@ function DetailSkeleton() {
 
 function looksLikeUrl(value: string) {
   return /^https?:\/\//i.test(value);
-}
-
-function isImageUrl(value: string) {
-  return looksLikeUrl(value) && isImagePath(value);
-}
-
-function isImagePath(value: string) {
-  return /\.(png|jpe?g|gif|webp|avif)(?:\?.*)?$/i.test(value);
-}
-
-function getFileName(value: string) {
-  try {
-    return decodeURIComponent(value.split("/").pop() || value);
-  } catch {
-    return value.split("/").pop() || value;
-  }
 }
 
 function formatDateTime(value: string) {

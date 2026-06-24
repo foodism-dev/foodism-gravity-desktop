@@ -42,7 +42,6 @@ export function WorkOrdersWebView(): React.ReactElement {
         src={workOrderWebUrl}
         title="我的工单"
         className="h-full min-h-0 w-full flex-1 border-0 bg-white"
-        sandbox="allow-downloads allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
       />
     </div>
   )

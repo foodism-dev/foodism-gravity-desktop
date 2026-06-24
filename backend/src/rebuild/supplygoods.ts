@@ -2,10 +2,12 @@ import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../db/clien
 import { rebuildSupplyGoods, tickets } from "../db/schema.ts";
 import { buildRebuildOpenApiUrl, readJsonResponse } from "./openapi.ts";
 import type { RebuildFieldMetadata, RebuildFieldMetadataRepository } from "./fields.ts";
+import { mirrorSupplyGoodsAssets, type RebuildAssetMap, type RebuildAssetUploader } from "./assets.ts";
 
 export interface SupplyGoodsRecordUpsertInput {
   supplyGoodsId: string;
   payload: Record<string, unknown>;
+  assets: RebuildAssetMap;
   updatedAt: Date;
 }
 
@@ -312,12 +314,14 @@ export function createDrizzleSupplyGoodsRecordRepository(db: ServerDatabase): Su
         .values({
           supplyGoodsId: input.supplyGoodsId,
           payload: input.payload,
+          assets: input.assets,
           updatedAt: input.updatedAt,
         })
         .onConflictDoUpdate({
           target: rebuildSupplyGoods.supplyGoodsId,
           set: {
             payload: input.payload,
+            assets: input.assets,
             updatedAt: input.updatedAt,
           },
         });
@@ -361,12 +365,23 @@ export async function syncSupplyGoodsFromCallback(input: {
   supplyGoodsId: string;
   rebuildClient: RebuildSupplyGoodsClient;
   repository: SupplyGoodsRecordRepository;
+  assetUploader?: RebuildAssetUploader | null;
+  listFields?: () => Promise<RebuildFieldMetadata[]>;
 }): Promise<SupplyGoodsCallbackResult> {
   const payload = await input.rebuildClient.getSupplyGoods(input.supplyGoodsId);
+  const assets = input.assetUploader
+    ? await mirrorSupplyGoodsAssets({
+        supplyGoodsId: input.supplyGoodsId,
+        payload,
+        fields: input.listFields ? await input.listFields() : [],
+        uploader: input.assetUploader,
+      })
+    : {};
   const updatedAt = new Date();
   await input.repository.upsertRecord({
     supplyGoodsId: input.supplyGoodsId,
     payload,
+    assets,
     updatedAt,
   });
 

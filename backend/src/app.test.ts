@@ -19,6 +19,7 @@ import type {
   SupplyGoodsRecordRepository,
   SupplyGoodsRecordUpsertInput,
 } from "./rebuild/supplygoods.ts";
+import type { RebuildAssetUploader } from "./rebuild/assets.ts";
 import type { PublishSkillPackageInput, SkillPublisher } from "./skill-publisher.ts";
 import type { TicketQuery, TicketRepository, TicketWithSupplyGoods } from "./tickets.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
@@ -125,6 +126,11 @@ interface TicketsResponse {
 
 interface TicketDetailResponse {
   ticket: TicketsResponse["tickets"][number];
+  field_options?: never;
+  field_metadata?: never;
+}
+
+interface TicketMetadataResponse {
   field_options: Record<
     string,
     Array<{
@@ -146,7 +152,7 @@ interface TicketDetailResponse {
 interface RebuildFieldOptionsResponse {
   entity: string;
   field: string;
-  options: TicketDetailResponse["field_options"][string];
+  options: TicketMetadataResponse["field_options"][string];
 }
 
 interface RebuildFieldSyncResponse {
@@ -901,6 +907,57 @@ describe("server app", () => {
     });
   });
 
+  test("Given a SupplyGoods callback with media fields, When asset uploader is configured, Then it saves converted asset urls", async () => {
+    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const { repository: fieldRepository, fields } = createMemoryFieldRepository();
+    fields.push({
+      entityName: "SupplyGoods",
+      fieldName: "mainPic",
+      label: "商品主图",
+      fieldType: "IMAGE",
+      raw: { name: "mainPic", displayType: "IMAGE" },
+    });
+    const assetUploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.fieldName}/main.jpg`,
+        };
+      },
+    };
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
+        return {
+          SupplyGoodsId: supplyGoodsId,
+          goodsName: "带图商品",
+          mainPic: ["rb/20260624/main.jpg"],
+        };
+      },
+    };
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      rebuildAssetUploader: assetUploader,
+      rebuildFieldMetadataRepository: fieldRepository,
+      supplyGoodsRecordRepository: repository,
+    });
+
+    const response = await app.request("/api/rebuild/supplygoods/callback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ supply_goods_id: "944-asset" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(saved[0]?.assets).toEqual({
+      mainPic: [
+        {
+          source: "rb/20260624/main.jpg",
+          url: "https://cdn.example.com/mainPic/main.jpg",
+        },
+      ],
+    });
+  });
+
   test("Given a REBUILD SupplyGoods hook callback, When primaryId is provided, Then the compatible URL also syncs the record", async () => {
     const { repository, saved } = createMemorySupplyGoodsRepository();
     const queriedIds: string[] = [];
@@ -994,26 +1051,11 @@ describe("server app", () => {
     expect(response.status).toBe(200);
     expect(body.ticket.supply_goods_id).toBe("944-detail");
     expect(body.ticket.approval_state).toBe("通过");
-    expect(body.field_options).toEqual({});
-    expect(body.field_metadata).toEqual({});
+    expect("field_options" in body).toBe(false);
+    expect("field_metadata" in body).toBe(false);
   });
 
-  test("Given field options exist, When ticket detail API is requested, Then it returns option labels for rendering", async () => {
-    const now = new Date("2026-06-24T10:00:00.000Z");
-    const { repository: ticketRepository } = createMemoryTicketRepository([
-      {
-        id: 3,
-        supplyGoodsId: "944-show-channel",
-        approvalState: "审批中",
-        payload: {
-          SupplyGoodsId: "944-show-channel",
-          goodsNameInput: "渠道商品",
-          showChannel: "show-douyin",
-        },
-        createdAt: now,
-        updatedAt: now,
-      },
-    ]);
+  test("Given field options exist, When ticket metadata API is requested, Then it returns shared field dictionaries", async () => {
     const { repository: fieldRepository, fields } = createMemoryFieldRepository([
       {
         entityName: "SupplyGoods",
@@ -1032,13 +1074,19 @@ describe("server app", () => {
       fieldType: "PICKLIST",
       raw: { name: "showChannel", label: "商品计划上线渠道", type: "PICKLIST" },
     });
+    fields.push({
+      entityName: "SupplyGoods",
+      fieldName: "mainPic",
+      label: "商品主图",
+      fieldType: "IMAGE",
+      raw: { name: "mainPic", label: "商品主图", type: "IMAGE" },
+    });
     const app = createServerApp({
-      ticketRepository,
       rebuildFieldMetadataRepository: fieldRepository,
     });
 
-    const response = await app.request("/api/tickets/944-show-channel");
-    const body = (await response.json()) as TicketDetailResponse;
+    const response = await app.request("/api/tickets/metadata");
+    const body = (await response.json()) as TicketMetadataResponse;
 
     expect(response.status).toBe(200);
     expect(body.field_options.showChannel?.[0]).toEqual({
@@ -1051,6 +1099,42 @@ describe("server app", () => {
       label: "商品计划上线渠道",
       field_type: "PICKLIST",
     });
+    expect(body.field_metadata.mainPic).toEqual({
+      label: "商品主图",
+      field_type: "IMAGE",
+    });
+  });
+
+  test("Given ticket has mirrored assets, When detail API is requested, Then payload media paths are replaced by asset urls", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 4,
+        supplyGoodsId: "944-asset-detail",
+        approvalState: "审批中",
+        payload: {
+          SupplyGoodsId: "944-asset-detail",
+          mainPic: ["rb/20260624/main.jpg"],
+        },
+        assets: {
+          mainPic: [
+            {
+              source: "rb/20260624/main.jpg",
+              url: "https://cdn.example.com/main.jpg",
+            },
+          ],
+        },
+        createdAt: now,
+        updatedAt: now,
+      } as TicketWithSupplyGoods,
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-asset-detail");
+    const body = (await response.json()) as TicketDetailResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ticket.payload.mainPic).toEqual(["https://cdn.example.com/main.jpg"]);
   });
 
   test("Given REBUILD metadata client, When syncing SupplyGoods fields, Then it stores fields and options in pg repository", async () => {

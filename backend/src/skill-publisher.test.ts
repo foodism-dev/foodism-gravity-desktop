@@ -40,4 +40,33 @@ describe("skill publisher", () => {
     expect(headers.get("Authorization")).toContain("AWS4-HMAC-SHA256 Credential=test-access-key/");
     expect(headers.get("Authorization")).toContain("SignedHeaders=host;x-amz-content-sha256;x-amz-date");
   });
+
+  test("Given endpoint already contains bucket, When uploading, Then it does not duplicate bucket in object key", async () => {
+    const packageBytes = new TextEncoder().encode("skill package");
+    const requests: string[] = [];
+    const publisher = createR2SkillPublisher(
+      {
+        endpointUrl: "https://account-id.r2.cloudflarestorage.com/skill-market-bucket",
+        accessKeyId: "test-access-key",
+        secretAccessKey: "test-secret",
+        bucket: "skill-market-bucket",
+        publicBaseUrl: "https://cdn.example.com",
+        prefix: "upload_file",
+        region: "auto",
+      },
+      async (url) => {
+        requests.push(String(url));
+        return new Response("", { status: 200 });
+      },
+    );
+
+    await publisher.publishSkillPackage({
+      slug: "brief-writer",
+      packageBytes,
+      contentType: "application/zip",
+      sha256: sha256Bytes(packageBytes),
+    });
+
+    expect(requests[0]).toBe("https://account-id.r2.cloudflarestorage.com/skill-market-bucket/upload_file/skills/brief-writer.skill");
+  });
 });

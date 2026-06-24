@@ -15,9 +15,20 @@ export interface SkillPublisher {
   publishSkillPackage: (input: PublishSkillPackageInput) => Promise<PublishSkillPackageResult>;
 }
 
-type R2Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+export interface R2ObjectUploadInput {
+  objectKey: string;
+  bytes: Uint8Array;
+  contentType: string;
+  sha256: string;
+}
 
-interface R2Config {
+export interface R2ObjectUploadResult {
+  publicUrl: string;
+}
+
+export type R2Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+export interface R2Config {
   endpointUrl: string;
   accessKeyId: string;
   secretAccessKey: string;
@@ -31,8 +42,13 @@ function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
 }
 
-function normalizeEndpointUrl(value: string): string {
-  return value.replace(/\/+$/, "");
+function normalizeEndpointUrl(value: string, bucket: string): string {
+  const url = new URL(value.replace(/\/+$/, ""));
+  const bucketPath = `/${encodePathSegment(bucket)}`;
+  if (url.pathname === bucketPath || url.pathname === `/${bucket}`) {
+    url.pathname = "";
+  }
+  return url.toString().replace(/\/+$/, "");
 }
 
 function encodePathSegment(value: string): string {
@@ -68,12 +84,12 @@ export function buildR2SkillObjectKey(prefix: string, slug: string): string {
   return normalizedPrefix ? `${normalizedPrefix}/${suffix}` : suffix;
 }
 
-function buildPublicUrl(publicBaseUrl: string, objectKey: string): string {
+export function buildR2PublicUrl(publicBaseUrl: string, objectKey: string): string {
   return `${publicBaseUrl.replace(/\/+$/, "")}/${encodeObjectKey(objectKey)}`;
 }
 
 function buildUploadUrl(config: R2Config, objectKey: string): string {
-  return `${normalizeEndpointUrl(config.endpointUrl)}/${encodePathSegment(config.bucket)}/${encodeObjectKey(objectKey)}`;
+  return `${normalizeEndpointUrl(config.endpointUrl, config.bucket)}/${encodePathSegment(config.bucket)}/${encodeObjectKey(objectKey)}`;
 }
 
 function signR2PutRequest(config: R2Config, uploadUrl: string, payloadSha256: string, now: Date): Headers {
@@ -113,26 +129,40 @@ function signR2PutRequest(config: R2Config, uploadUrl: string, payloadSha256: st
   });
 }
 
+export async function uploadObjectToR2(
+  config: R2Config,
+  input: R2ObjectUploadInput,
+  fetchImpl: R2Fetch = fetch,
+): Promise<R2ObjectUploadResult> {
+  const uploadUrl = buildUploadUrl(config, input.objectKey);
+  const headers = signR2PutRequest(config, uploadUrl, input.sha256, new Date());
+  headers.set("Content-Type", input.contentType || "application/octet-stream");
+
+  const response = await fetchImpl(uploadUrl, {
+    method: "PUT",
+    headers,
+    body: new Blob([input.bytes], { type: input.contentType || "application/octet-stream" }),
+  });
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => "");
+    console.warn(`[R2] 上传失败: ${response.status} ${response.statusText}`);
+    throw new Error(responseText.trim() || `R2 上传失败: ${response.status}`);
+  }
+
+  return { publicUrl: buildR2PublicUrl(config.publicBaseUrl, input.objectKey) };
+}
+
 export function createR2SkillPublisher(config: R2Config, fetchImpl: R2Fetch = fetch): SkillPublisher {
   return {
     async publishSkillPackage(input: PublishSkillPackageInput): Promise<PublishSkillPackageResult> {
       const objectKey = buildR2SkillObjectKey(config.prefix, input.slug);
-      const uploadUrl = buildUploadUrl(config, objectKey);
-      const headers = signR2PutRequest(config, uploadUrl, input.sha256, new Date());
-      headers.set("Content-Type", input.contentType || "application/zip");
-
-      const response = await fetchImpl(uploadUrl, {
-        method: "PUT",
-        headers,
-        body: new Blob([input.packageBytes], { type: input.contentType || "application/zip" }),
-      });
-      if (!response.ok) {
-        const responseText = await response.text().catch(() => "");
-        console.warn(`[Skill 市场] R2 上传失败: ${response.status} ${response.statusText}`);
-        throw new Error(responseText.trim() || `R2 上传失败: ${response.status}`);
-      }
-
-      return { packageUrl: buildPublicUrl(config.publicBaseUrl, objectKey) };
+      const result = await uploadObjectToR2(config, {
+        objectKey,
+        bytes: input.packageBytes,
+        contentType: input.contentType || "application/zip",
+        sha256: input.sha256,
+      }, fetchImpl);
+      return { packageUrl: result.publicUrl };
     },
   };
 }

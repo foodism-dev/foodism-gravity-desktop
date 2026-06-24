@@ -12,10 +12,14 @@ export interface TicketRecord {
   supplyGoodsId: string;
   approvalState: string;
   payload: Record<string, unknown>;
-  fieldOptions: TicketFieldOptionsMap;
-  fieldMetadata: TicketFieldMetadataMap;
+  assets: Record<string, Array<{ source: string; url: string }>>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TicketMetadata {
+  fieldOptions: TicketFieldOptionsMap;
+  fieldMetadata: TicketFieldMetadataMap;
 }
 
 export interface TicketListQuery {
@@ -37,6 +41,7 @@ interface TicketApiRecord {
   supply_goods_id: string;
   approval_state: string;
   payload: Record<string, unknown>;
+  assets?: Record<string, Array<{ source: string; url: string }>>;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +71,9 @@ interface TicketListResponse {
 
 interface TicketDetailResponse {
   ticket: TicketApiRecord;
+}
+
+interface TicketMetadataResponse {
   field_options?: TicketFieldOptionsApiMap;
   field_metadata?: TicketFieldMetadataApiMap;
 }
@@ -130,20 +138,22 @@ function normalizeFieldMetadata(metadata: TicketFieldMetadataApiMap | undefined)
   );
 }
 
-function normalizeTicket(
-  record: TicketApiRecord,
-  fieldOptions?: TicketFieldOptionsApiMap,
-  fieldMetadata?: TicketFieldMetadataApiMap,
-): TicketRecord {
+function normalizeTicket(record: TicketApiRecord): TicketRecord {
   return {
     id: record.id,
     supplyGoodsId: record.supply_goods_id,
     approvalState: record.approval_state,
     payload: record.payload,
-    fieldOptions: normalizeFieldOptions(fieldOptions),
-    fieldMetadata: normalizeFieldMetadata(fieldMetadata),
+    assets: record.assets ?? {},
     createdAt: record.created_at,
     updatedAt: record.updated_at,
+  };
+}
+
+function normalizeTicketMetadata(response: TicketMetadataResponse): TicketMetadata {
+  return {
+    fieldOptions: normalizeFieldOptions(response.field_options),
+    fieldMetadata: normalizeFieldMetadata(response.field_metadata),
   };
 }
 
@@ -166,7 +176,11 @@ export async function listTickets(query: TicketListQuery = {}): Promise<TicketLi
 
 export async function getTicket(supplyGoodsId: string): Promise<TicketRecord> {
   const response = await apiFetch<TicketDetailResponse>(`/api/tickets/${encodeURIComponent(supplyGoodsId)}`);
-  return normalizeTicket(response.ticket, response.field_options, response.field_metadata);
+  return normalizeTicket(response.ticket);
+}
+
+export async function getTicketMetadata(): Promise<TicketMetadata> {
+  return normalizeTicketMetadata(await apiFetch<TicketMetadataResponse>("/api/tickets/metadata"));
 }
 
 export function getPayloadText(payload: Record<string, unknown>, ...fields: string[]): string {

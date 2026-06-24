@@ -1,4 +1,5 @@
 import { createServerApp } from "./app.ts";
+import { warmRebuildLoginSession } from "./rebuild/login-session.ts";
 
 const DEFAULT_PORT = 8787;
 
@@ -27,3 +28,9 @@ Bun.serve({
 });
 
 console.log(`Proma Server 已启动：http://localhost:${port}`);
+
+void warmRebuildLoginSession().then((warmed) => {
+  if (warmed) {
+    console.log("[REBUILD] 登录 Cookie 已预热");
+  }
+});
