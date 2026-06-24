@@ -1,12 +1,14 @@
 {
   "name": "proma",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "The next gen ai software with general agents",
   "type": "module",
   "private": true,
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "backend",
+    "frontend/*"
   ],
   "scripts": {
     "dev": "bun run --filter='@proma/electron' dev",

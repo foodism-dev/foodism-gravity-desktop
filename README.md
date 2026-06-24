@@ -167,7 +167,7 @@ proma-v2/
 | 包 | 版本 | 职责 |
 | --- | --- | --- |
 | `@proma/electron` | `0.12.84` | Electron 桌面应用 |
-| `@proma/server` | `0.1.7` | Hono 后端服务、认证和 Skill 市场 |
+| `@proma/server` | `0.1.9` | Hono 后端服务、认证和 Skill 市场 |
 | `@proma/shared` | `0.1.36` | 共享类型、IPC 常量、配置和工具 |
 | `@proma/core` | `0.2.9` | Provider Adapter、SSE、Shiki 高亮 |
 | `@proma/ui` | `0.1.6` | 共享 React UI 组件 |
@@ -248,7 +248,7 @@ shared 类型和 IPC 常量
 
 渲染进程以 Jotai 管理状态，关键 atoms 位于 `apps/electron/src/renderer/atoms/`。Agent IPC 监听器在应用顶层全局挂载，避免切换页面时丢失流式事件、权限请求或后台任务状态。
 
-`apps/server` 使用 Hono + Drizzle + Postgres。Skill 市场当前使用 `skills`、`skill_tags`、`skill_tag_links` 三张表：一个 `slug` 对应一份当前 `.skill` 包，不维护历史版本，不记录用户安装事件；桌面端通过 `/api/skills`、`/api/skills/:slug` 和 `/api/skills/:slug/download` 获取列表、详情和下载地址。内部发布接口 `POST /api/internal/skills` 使用 `PROMA_INTERNAL_API_TOKEN` 保护，接收 multipart `.skill` 文件和元数据，读取 `CLOUDFLARE_R2_*` 环境变量上传到 R2，再把 `package_url`、`package_sha256` 和大小写入 Postgres。桌面端不需要也不会持有 R2 密钥。
+`backend` 使用 Hono + Drizzle + Postgres。Skill 市场当前使用 `skills`、`skill_tags`、`skill_tag_links` 三张表：一个 `slug` 对应一份当前 `.skill` 包，不维护历史版本，不记录用户安装事件；桌面端通过 `/api/skills`、`/api/skills/:slug` 和 `/api/skills/:slug/download` 获取列表、详情和下载地址。内部发布接口 `POST /api/internal/skills` 使用 `PROMA_INTERNAL_API_TOKEN` 保护，接收 multipart `.skill` 文件和元数据，读取 `CLOUDFLARE_R2_*` 环境变量上传到 R2，再把 `package_url`、`package_sha256` 和大小写入 Postgres。桌面端不需要也不会持有 R2 密钥。
 
 ## 打包注意事项
 

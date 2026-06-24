@@ -3,7 +3,16 @@ import { describe, expect, test } from "bun:test";
 import { createServerApp } from "./app.ts";
 import type { ApiUser } from "./auth.ts";
 import type { PublishSkillPackageInput, SkillPublisher } from "./skill-publisher.ts";
+import { SUPPLY_GOODS_SYNC_FIELDS } from "./rebuild/supplygoods.ts";
+import type {
+  RebuildSupplyGoodsClient,
+  SupplyGoodsRecordRepository,
+  SupplyGoodsRecordUpsertInput,
+} from "./rebuild/supplygoods.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
+
+process.env.DATABASE_URL = "";
+process.env.PROMA_SERVER_JWT_SECRET = "";
 
 interface StatusResponse {
   name: string;
@@ -80,6 +89,12 @@ interface MarketSkillDownloadResponse {
 interface PublishSkillResponse {
   packageUrl: string;
   skill: MarketSkillDetailResponse["skill"];
+}
+
+interface SupplyGoodsCallbackResponse {
+  ok: boolean;
+  record_id: string;
+  synced_at: string;
 }
 
 interface MemoryMarketSkill {
@@ -198,7 +213,38 @@ function createMemorySkillPublisher(packageUrl: string): SkillPublisher & { uplo
   };
 }
 
+function createMemorySupplyGoodsRepository(): {
+  repository: SupplyGoodsRecordRepository;
+  saved: SupplyGoodsRecordUpsertInput[];
+} {
+  const saved: SupplyGoodsRecordUpsertInput[] = [];
+  return {
+    saved,
+    repository: {
+      async upsertRecord(input: SupplyGoodsRecordUpsertInput): Promise<void> {
+        saved.push(input);
+      },
+    },
+  };
+}
+
 describe("server app", () => {
+  test("Given SupplyGoods sync fields, When querying REBUILD, Then it requests rich record data", () => {
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("mainPic");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("rbimages");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("detailImages");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("company.SupplyCompanyId");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("rbhost.hostName");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("supplyPrice");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("settleType.text");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("OAApprovalNo");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("OAApprovalType");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("approvalId");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("rejectRemark");
+    expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("bdAuditor");
+    expect(new Set(SUPPLY_GOODS_SYNC_FIELDS).size).toBe(SUPPLY_GOODS_SYNC_FIELDS.length);
+  });
+
   test("Given the server is running, When health is requested, Then it returns ok", async () => {
     const app = createServerApp();
 
@@ -619,5 +665,106 @@ describe("server app", () => {
     expect(response.status).toBe(401);
     expect(body.message).toBe("内部接口 Token 无效");
     expect(skillPublisher.uploads).toHaveLength(0);
+  });
+
+  test("Given a SupplyGoods callback, When record_id is provided, Then it refreshes and saves the latest REBUILD record", async () => {
+    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const queriedIds: string[] = [];
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(recordId: string): Promise<Record<string, unknown>> {
+        queriedIds.push(recordId);
+        return {
+          SupplyGoodsId: recordId,
+          goodsName: "测试商品",
+          approvalState: { value: 2, text: "审批中" },
+        };
+      },
+    };
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      supplyGoodsRecordRepository: repository,
+    });
+
+    const response = await app.request("/api/rebuild/supplygoods/callback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ record_id: "944-019eee7db58948ec" }),
+    });
+    const body = (await response.json()) as SupplyGoodsCallbackResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.record_id).toBe("944-019eee7db58948ec");
+    expect(typeof body.synced_at).toBe("string");
+    expect(queriedIds).toEqual(["944-019eee7db58948ec"]);
+    expect(saved).toHaveLength(1);
+    const savedRecord = saved[0];
+    expect(savedRecord).toBeDefined();
+    expect(savedRecord?.recordId).toBe("944-019eee7db58948ec");
+    expect(savedRecord?.payload).toEqual({
+      SupplyGoodsId: "944-019eee7db58948ec",
+      goodsName: "测试商品",
+      approvalState: { value: 2, text: "审批中" },
+    });
+  });
+
+  test("Given a REBUILD SupplyGoods hook callback, When primaryId is provided, Then the compatible URL also syncs the record", async () => {
+    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const queriedIds: string[] = [];
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(recordId: string): Promise<Record<string, unknown>> {
+        queriedIds.push(recordId);
+        return {
+          SupplyGoodsId: recordId,
+          goodsName: "兼容路径商品",
+        };
+      },
+    };
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      supplyGoodsRecordRepository: repository,
+    });
+
+    const response = await app.request("/api/m/rebuild/saveReportSupplierGoodsInfo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ primaryId: "944-compatible" }),
+    });
+    const body = (await response.json()) as SupplyGoodsCallbackResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.record_id).toBe("944-compatible");
+    expect(queriedIds).toEqual(["944-compatible"]);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.payload).toEqual({
+      SupplyGoodsId: "944-compatible",
+      goodsName: "兼容路径商品",
+    });
+  });
+
+  test("Given a SupplyGoods callback, When record_id is missing, Then it rejects the request", async () => {
+    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        throw new Error("不应该查询 REBUILD");
+      },
+    };
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      supplyGoodsRecordRepository: repository,
+    });
+
+    const response = await app.request("/api/rebuild/supplygoods/callback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const body = (await response.json()) as ErrorResponse;
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("Bad Request");
+    expect(body.message).toBe("record_id 不能为空");
+    expect(saved).toHaveLength(0);
   });
 });

@@ -1,4 +1,4 @@
-SERVER_ENV ?= .env.server
+SERVER_ENV ?= backend/.env
 LOAD_SERVER_ENV = set -a; [ ! -f "$(SERVER_ENV)" ] || . "$(SERVER_ENV)"; set +a;
 
 .PHONY: dev run-api migrate-local

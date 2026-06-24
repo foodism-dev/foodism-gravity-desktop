@@ -1,9 +1,68 @@
 {
-  "id": "209e5989-cf9f-448e-ba15-5cd43e95f454",
-  "prevId": "53ba2359-5260-4703-9c77-d08e77273026",
+  "id": "07301f30-bad5-4ff2-9c00-ed3e5a97ab75",
+  "prevId": "c1b5cccf-4cdd-4a2d-b0c2-a11c3d261c17",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.rebuild_supply_goods_records": {
+      "name": "rebuild_supply_goods_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "record_id": {
+          "name": "record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "synced_at": {
+          "name": "synced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "rebuild_supply_goods_records_record_id_unique": {
+          "name": "rebuild_supply_goods_records_record_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "record_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.skill_tag_links": {
       "name": "skill_tag_links",
       "schema": "",

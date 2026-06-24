@@ -33,4 +33,7 @@ CREATE TABLE "skills" (
 );
 --> statement-breakpoint
 ALTER TABLE "skill_tag_links" ADD CONSTRAINT "skill_tag_links_skill_id_skills_id_fk" FOREIGN KEY ("skill_id") REFERENCES "public"."skills"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "skill_tag_links" ADD CONSTRAINT "skill_tag_links_tag_id_skill_tags_id_fk" FOREIGN KEY ("tag_id") REFERENCES "public"."skill_tags"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "skill_tag_links" ADD CONSTRAINT "skill_tag_links_tag_id_skill_tags_id_fk" FOREIGN KEY ("tag_id") REFERENCES "public"."skill_tags"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "skill_tag_links_tag_idx" ON "skill_tag_links" USING btree ("tag_id","skill_id");--> statement-breakpoint
+CREATE INDEX "skills_list_idx" ON "skills" USING btree ("status","updated_at");--> statement-breakpoint
+CREATE INDEX "skills_download_idx" ON "skills" USING btree ("status","download_count");
