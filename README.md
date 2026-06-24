@@ -166,7 +166,7 @@ proma-v2/
 
 | 包 | 版本 | 职责 |
 | --- | --- | --- |
-| `@proma/electron` | `0.12.83` | Electron 桌面应用 |
+| `@proma/electron` | `0.12.84` | Electron 桌面应用 |
 | `@proma/server` | `0.1.7` | Hono 后端服务、认证和 Skill 市场 |
 | `@proma/shared` | `0.1.36` | 共享类型、IPC 常量、配置和工具 |
 | `@proma/core` | `0.2.9` | Provider Adapter、SSE、Shiki 高亮 |
