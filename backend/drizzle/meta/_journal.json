@@ -8,6 +8,13 @@
       "when": 1782121335266,
       "tag": "0000_cynical_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782269521434,
+      "tag": "0001_careless_vulture",
+      "breakpoints": true
     }
   ]
 }

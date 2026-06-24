@@ -11,6 +11,14 @@ import {
   resolveUserFromTokenPayload,
   type AuthTokenPayload,
 } from "./auth.ts";
+import {
+  createRebuildSupplyGoodsClient,
+  extractSupplyGoodsRecordId,
+  getDefaultSupplyGoodsRecordRepository,
+  syncSupplyGoodsFromCallback,
+  type RebuildSupplyGoodsClient,
+  type SupplyGoodsRecordRepository,
+} from "./rebuild/supplygoods.ts";
 import { getDefaultUserRepository, type UserRepository } from "./users.ts";
 
 interface ServerStatus {
@@ -26,6 +34,8 @@ interface ServerVariables {
 
 interface ServerAppOptions {
   userRepository?: UserRepository | null;
+  rebuildSupplyGoodsClient?: RebuildSupplyGoodsClient;
+  supplyGoodsRecordRepository?: SupplyGoodsRecordRepository | null;
 }
 
 const SENSITIVE_LOG_KEYS = new Set([
@@ -64,10 +74,14 @@ function sanitizeForLog(value: unknown): unknown {
 
 function stringifyForLog(value: unknown): string {
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(value);
   } catch {
     return String(value);
   }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function getRecordKeys(value: unknown): string {
@@ -96,6 +110,9 @@ export function createServerApp(options: ServerAppOptions = {}) {
   const app = new Hono<{ Variables: ServerVariables }>();
   const jwtSecret = getJwtSecret();
   const userRepository = options.userRepository ?? getDefaultUserRepository();
+  const rebuildSupplyGoodsClient = options.rebuildSupplyGoodsClient ?? createRebuildSupplyGoodsClient();
+  const supplyGoodsRecordRepository =
+    options.supplyGoodsRecordRepository ?? getDefaultSupplyGoodsRecordRepository();
 
   app.use("/api/*", cors());
 
@@ -163,6 +180,45 @@ export function createServerApp(options: ServerAppOptions = {}) {
 
   app.post("/create_user", (context) => handleSsoInternalAuth(context, "create_user"));
   app.post("/sso_login", (context) => handleSsoInternalAuth(context, "sso_login"));
+
+  async function handleSupplyGoodsCallback(context: Context<{ Variables: ServerVariables }>) {
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "Bad Request", message: "请求体必须是 JSON" }, 400);
+    }
+    console.log(`[REBUILD] SupplyGoods callback payload（已脱敏）=${stringifyForLog(sanitizeForLog(body))}`);
+
+    const recordId = extractSupplyGoodsRecordId(body);
+    if (!recordId) {
+      return context.json({ error: "Bad Request", message: "record_id 不能为空" }, 400);
+    }
+
+    if (!supplyGoodsRecordRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    try {
+      const result = await syncSupplyGoodsFromCallback({
+        recordId,
+        rebuildClient: rebuildSupplyGoodsClient,
+        repository: supplyGoodsRecordRepository,
+      });
+      console.log(`[REBUILD] SupplyGoods 已同步: ${result.recordId}`);
+      return context.json({
+        ok: true,
+        record_id: result.recordId,
+        synced_at: result.syncedAt.toISOString(),
+      });
+    } catch (error) {
+      console.error(`[REBUILD] SupplyGoods 回调同步失败: ${getErrorMessage(error)}`);
+      return context.json({ error: "Bad Gateway", message: "同步 SupplyGoods 失败" }, 502);
+    }
+  }
+
+  app.post("/api/rebuild/supplygoods/callback", handleSupplyGoodsCallback);
+  app.post("/api/m/rebuild/saveReportSupplierGoodsInfo", handleSupplyGoodsCallback);
 
   app.use(
     "/api/me",
