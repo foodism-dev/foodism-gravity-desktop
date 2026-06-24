@@ -3,7 +3,6 @@ name: Backend Docker Release
 on:
   push:
     branches:
-      - vibe_code
       - test
     tags:
       - 'backend-v*'
