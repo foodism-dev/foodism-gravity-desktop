@@ -1,0 +1,133 @@
+name: Backend Docker Release
+
+on:
+  push:
+    branches:
+      - vibe_code
+      - test
+    tags:
+      - 'backend-v*'
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: backend-docker-release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    name: build and publish docker images
+    runs-on: self-hosted
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装 Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: 安装 backend 依赖
+        run: bun install --frozen-lockfile --filter @proma/server
+
+      - name: 校验 backend 类型
+        run: bun run --filter='@proma/server' typecheck
+
+      - name: 解析镜像坐标
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          short_sha="${GITHUB_SHA::7}"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            release_tag="${GITHUB_REF_NAME#backend-v}"
+            release_tag="${release_tag#v}"
+          else
+            release_tag="${GITHUB_REF_NAME}"
+          fi
+
+          echo "backend_image=ghcr.io/${owner}/foodism-gravity-backend" >> "$GITHUB_OUTPUT"
+          echo "postgres_image=ghcr.io/${owner}/foodism-gravity-postgres" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 提取 backend 镜像元数据
+        id: backend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.backend_image }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref_type == 'branch' && github.ref_name == 'test' }}
+            type=raw,value=${{ steps.image.outputs.release_tag }}
+            type=raw,value=${{ steps.image.outputs.sha_tag }}
+
+      - name: 构建并推送 backend 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.backend-meta.outputs.tags }}
+          labels: ${{ steps.backend-meta.outputs.labels }}
+
+      - name: 提取 pg 镜像元数据
+        id: postgres-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.postgres_image }}
+          tags: |
+            type=raw,value=17-alpine
+            type=raw,value=17-alpine-${{ steps.image.outputs.sha_tag }}
+            type=raw,value=17-alpine-${{ steps.image.outputs.release_tag }}
+
+      - name: 构建并推送 pg 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend/docker/postgres
+          file: ./backend/docker/postgres/Dockerfile
+          push: true
+          tags: ${{ steps.postgres-meta.outputs.tags }}
+          labels: ${{ steps.postgres-meta.outputs.labels }}
+
+      - name: 触发 Dokploy 部署
+        if: ${{ github.ref_type == 'branch' && github.ref_name == 'test' }}
+        run: |
+          curl -fsSL -X POST "https://deploy.foodism.pro/api/deploy/compose/Y89Qhlh2Hj2rr-JDyyKe8"
+
+      - name: 输出发包结果
+        run: |
+          {
+            echo "Backend Docker 镜像已发布"
+            echo "- ${{ steps.image.outputs.backend_image }}:${{ steps.image.outputs.sha_tag }}"
+            echo "- ${{ steps.image.outputs.backend_image }}:${{ steps.image.outputs.release_tag }}"
+            echo "- ${{ steps.image.outputs.postgres_image }}:17-alpine-${{ steps.image.outputs.sha_tag }}"
+            echo "- ${{ steps.image.outputs.postgres_image }}:17-alpine-${{ steps.image.outputs.release_tag }}"
+            if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_REF_NAME}" = "test" ]; then
+              echo "Dokploy webhook 已触发"
+            else
+              echo "Dokploy webhook 未触发，仅 test 分支触发部署"
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"

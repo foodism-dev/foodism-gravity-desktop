@@ -21,6 +21,7 @@ const port = getPort();
 const app = createServerApp();
 
 Bun.serve({
+  hostname: "0.0.0.0",
   port,
   fetch: app.fetch,
 });

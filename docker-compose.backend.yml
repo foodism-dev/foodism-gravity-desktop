@@ -1,0 +1,40 @@
+services:
+  postgres:
+    build:
+      context: ./backend/docker/postgres
+    image: foodism-gravity-postgres:17-alpine
+    container_name: foodism-gravity-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-proma}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ${POSTGRES_DATA_DIR:-/home/jik1992/projects/foodism-worker/postgres-data}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: foodism-gravity-backend:latest
+    container_name: foodism-gravity-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
+      PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-self-hosted-ci}
+      PORT: ${PORT:-8787}
+      REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
+      REBUILD_APP_ID: ${REBUILD_APP_ID:-}
+      REBUILD_APP_SECRET: ${REBUILD_APP_SECRET:-}
+    ports:
+      - "${BACKEND_PORT:-8787}:8787"

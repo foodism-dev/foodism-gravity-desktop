@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-proma}
+    volumes:
+      - ${POSTGRES_DATA_DIR:-/home/jik1992/projects/foodism-worker/postgres-data}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dokploy-network
+
+  backend-migrate:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
+      PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-dokploy}
+      REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
+      REBUILD_APP_ID: ${REBUILD_APP_ID:-}
+      REBUILD_APP_SECRET: ${REBUILD_APP_SECRET:-}
+    command: sh -lc "bun run db:create-local && bun run db:migrate && bun run db:seed-local"
+    networks:
+      - dokploy-network
+
+  backend:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    restart: unless-stopped
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
+      PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-dokploy}
+      PORT: ${PORT:-8787}
+      REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
+      REBUILD_APP_ID: ${REBUILD_APP_ID:-}
+      REBUILD_APP_SECRET: ${REBUILD_APP_SECRET:-}
+    networks:
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.foodism-gravity-api-web.rule=Host(`${API_HOST}`)
+      - traefik.http.routers.foodism-gravity-api-web.entrypoints=web
+      - traefik.http.routers.foodism-gravity-api-websecure.rule=Host(`${API_HOST}`)
+      - traefik.http.routers.foodism-gravity-api-websecure.entrypoints=websecure
+      - traefik.http.routers.foodism-gravity-api-websecure.tls=true
+      - traefik.http.routers.foodism-gravity-api-websecure.tls.certresolver=letsencrypt
+      - traefik.http.services.foodism-gravity-api.loadbalancer.server.port=8787
+
+networks:
+  dokploy-network:
+    external: true
