@@ -1,7 +1,5 @@
 import type { AuthSession, LoginInput } from '../../types'
 
-const DEFAULT_SERVER_API_BASE_URL = 'http://localhost:8787'
-
 export interface ApiUserInfo {
   id: string
   username: string
@@ -37,14 +35,14 @@ interface ApiErrorResponse {
 export function resolveServerApiBaseUrl(value?: string): string {
   const baseUrl = value?.trim()
   if (!baseUrl) {
-    return DEFAULT_SERVER_API_BASE_URL
+    throw new Error('缺少 VITE_API_BASE_URL 配置，无法请求 Gravity API')
   }
 
   return baseUrl.replace(/\/+$/, '')
 }
 
 function getServerApiBaseUrl(): string {
-  return resolveServerApiBaseUrl(import.meta.env.VITE_PROMA_SERVER_URL)
+  return resolveServerApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
 }
 
 export function createAuthHeaders(token: string): Record<string, string> {

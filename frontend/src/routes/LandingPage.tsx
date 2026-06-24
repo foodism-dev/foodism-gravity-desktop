@@ -5,12 +5,15 @@ import type { AuthState } from "@/App.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card.tsx";
+import { getApiBaseUrl } from "@/lib/config.ts";
 
 interface LandingPageProps {
   authState: AuthState;
 }
 
 export function LandingPage({ authState }: LandingPageProps) {
+  const healthUrl = `${getApiBaseUrl()}/health`;
+
   return (
     <div className="space-y-6">
       <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
@@ -36,7 +39,7 @@ export function LandingPage({ authState }: LandingPageProps) {
               </Link>
             </Button>
             <Button variant="outline" asChild>
-              <a href="http://localhost:8787/health" target="_blank" rel="noreferrer">
+              <a href={healthUrl} target="_blank" rel="noreferrer">
                 检查后端
               </a>
             </Button>

@@ -109,9 +109,9 @@ describe('sso-oidc-service', () => {
     })
   })
 
-  test('Given API 环境变量 When 读取内部认证配置 Then 使用 API_BASE_URL 和自定义路径', () => {
+  test('Given Vite API 环境变量 When 读取内部认证配置 Then 使用 VITE_API_BASE_URL 和自定义路径', () => {
     const config = getDefaultInternalAuthConfig({
-      API_BASE_URL: 'https://api.example.com///',
+      VITE_API_BASE_URL: 'https://api.example.com///',
       GRAVITY_CREATE_USER_PATH: 'create_user',
       GRAVITY_SSO_LOGIN_PATH: '/sso_login',
     })
@@ -121,6 +121,10 @@ describe('sso-oidc-service', () => {
       createUserPath: '/create_user',
       loginPath: '/sso_login',
     })
+  })
+
+  test('Given 没有 API 环境变量 When 读取内部认证配置 Then 抛出明确配置错误', () => {
+    expect(() => getDefaultInternalAuthConfig({})).toThrow('缺少 VITE_API_BASE_URL 配置')
   })
 
   test('Given SSO 账号未初始化 When 请求内部认证 Then 调用 create_user 并返回 JWT', async () => {

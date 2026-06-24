@@ -1,4 +1,5 @@
 import { getStoredToken } from "./auth.ts";
+import { getApiBaseUrl } from "./config.ts";
 import {
   formatPayloadValue,
   getPayloadValue,
@@ -76,10 +77,6 @@ class ApiError extends Error {
   ) {
     super(message);
   }
-}
-
-function getApiBaseUrl() {
-  return import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:8787";
 }
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {

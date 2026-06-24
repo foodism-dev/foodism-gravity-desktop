@@ -3,8 +3,8 @@ import { describe, expect, test } from 'bun:test'
 import { createAuthHeaders, fetchCurrentPortalMe, resolveServerApiBaseUrl } from './server-api'
 
 describe('server api client', () => {
-  test('Given no custom server url When resolving base url Then it uses local Hono server', () => {
-    expect(resolveServerApiBaseUrl()).toBe('http://localhost:8787')
+  test('Given no custom server url When resolving base url Then it throws a config error', () => {
+    expect(() => resolveServerApiBaseUrl()).toThrow('缺少 VITE_API_BASE_URL 配置')
   })
 
   test('Given a custom server url with trailing slash When resolving base url Then it normalizes the url', () => {
@@ -45,7 +45,7 @@ describe('server api client', () => {
       const data = await fetchCurrentPortalMe('token-value')
 
       expect(data.portal).toEqual({ id: 'portal-1', name: '万店引力' })
-      expect(String(calls[0]?.url)).toBe('http://localhost:8787/api/me')
+      expect(String(calls[0]?.url)).toBe(`${import.meta.env.VITE_API_BASE_URL}/api/me`)
       expect(new Headers(calls[0]?.init?.headers).get('Authorization')).toBe('Bearer token-value')
     } finally {
       globalThis.fetch = originalFetch

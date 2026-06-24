@@ -106,12 +106,7 @@ export function getDefaultSsoOidcConfig(env: Record<string, string | undefined> 
 
 export function getDefaultInternalAuthConfig(env: Record<string, string | undefined> = process.env): InternalAuthConfig {
   return {
-    apiBaseUrl: normalizeBaseUrl(
-      env.API_BASE_URL
-      || env.PROMA_SERVER_URL
-      || env.VITE_PROMA_SERVER_URL
-      || 'http://localhost:8787'
-    ),
+    apiBaseUrl: normalizeBaseUrl(requireApiBaseUrl(env.VITE_API_BASE_URL)),
     createUserPath: normalizePath(env.GRAVITY_CREATE_USER_PATH || '/create_user'),
     loginPath: normalizePath(env.GRAVITY_SSO_LOGIN_PATH || '/sso_login'),
   }
@@ -346,6 +341,14 @@ function logSsoUserInfo(account: unknown): void {
 
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '')
+}
+
+function requireApiBaseUrl(value: string | undefined): string {
+  const baseUrl = value?.trim()
+  if (!baseUrl) {
+    throw new Error('缺少 VITE_API_BASE_URL 配置，无法请求 Gravity API')
+  }
+  return baseUrl
 }
 
 function normalizePath(value: string): string {

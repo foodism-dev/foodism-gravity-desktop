@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from "./config.ts";
+
 const TOKEN_KEY = "proma_frontend_token";
 const USER_KEY = "proma_frontend_user";
 
@@ -15,10 +17,6 @@ export interface AuthSession {
 interface HandoffExchangeResponse {
   token: string;
   user: FrontendUser;
-}
-
-function getApiBaseUrl() {
-  return import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
 }
 
 export function getStoredToken() {
