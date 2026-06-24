@@ -5,14 +5,14 @@
  *
  * 结构：
  * - 顶部：标题 + 工作区切换下拉
- * - 工具条：Skills / MCP 切换 + 搜索 + 社区市场（占位）+ 新增入口
+ * - 工具条：Skills / MCP 切换 + 搜索 + Skill 市场 + 新增入口
  * - 内容：能力卡片网格（商店风），点击卡片打开右侧详情抽屉
  */
 
 import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { Blocks, ChevronDown, Search, Plus, Store, FolderOpen, Check } from 'lucide-react'
+import { Blocks, ChevronDown, Search, Plus, Store, FolderOpen, Check, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -25,7 +25,7 @@ import { workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
 import { agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 import { useProjectActions } from '@/hooks/useProjectActions'
-import type { BuiltinMcpServerSummary, McpServerEntry, SkillMeta } from '@proma/shared'
+import type { BuiltinMcpServerSummary, MarketSkillSummary, McpServerEntry, SkillMeta } from '@proma/shared'
 import { useAgentSkillsData } from './useAgentSkillsData'
 import { SkillCard } from './SkillCard'
 import { McpCard } from './McpCard'
@@ -49,6 +49,10 @@ export function AgentSkillsView(): React.ReactElement {
   const [editingMcp, setEditingMcp] = React.useState<{ name: string; entry: McpServerEntry } | null>(null)
   const [selectedBuiltinMcp, setSelectedBuiltinMcp] = React.useState<BuiltinMcpServerSummary | null>(null)
   const [showImport, setShowImport] = React.useState(false)
+  const [marketOpen, setMarketOpen] = React.useState(false)
+  const [marketLoading, setMarketLoading] = React.useState(false)
+  const [marketSkills, setMarketSkills] = React.useState<MarketSkillSummary[]>([])
+  const [installingMarketSlug, setInstallingMarketSlug] = React.useState<string | null>(null)
   const [wsPopoverOpen, setWsPopoverOpen] = React.useState(false)
   const [pendingDeleteSkill, setPendingDeleteSkill] = React.useState<SkillMeta | null>(null)
   const [pendingDeleteMcpName, setPendingDeleteMcpName] = React.useState<string | null>(null)
@@ -69,6 +73,7 @@ export function AgentSkillsView(): React.ReactElement {
   const customSkills = filteredSkills.filter((s) => !data.defaultSkillSlugs.has(s.slug))
   const builtinSkills = filteredSkills.filter((s) => data.defaultSkillSlugs.has(s.slug))
   const updateCount = data.skills.filter((s) => s.hasUpdate).length
+  const installedSkillSlugs = React.useMemo(() => new Set(data.skills.map((skill) => skill.slug)), [data.skills])
 
   const userMcpEntries = React.useMemo(() => {
     return Object.entries(data.mcpConfig.servers ?? {})
@@ -98,6 +103,43 @@ export function AgentSkillsView(): React.ReactElement {
   const openSkillFolder = (slug: string): void => {
     if (data.skillsDir) window.electronAPI.openFile(`${data.skillsDir}/${slug}`)
   }
+
+  const loadMarketSkills = React.useCallback(async (): Promise<void> => {
+    setMarketLoading(true)
+    try {
+      const skills = await window.electronAPI.listMarketSkills({ query: search.trim() || undefined })
+      setMarketSkills(skills)
+    } catch (error) {
+      console.error('[Skill 市场] 加载失败:', error)
+      toast.error('加载 Skill 市场失败')
+    } finally {
+      setMarketLoading(false)
+    }
+  }, [search])
+
+  React.useEffect(() => {
+    if (!marketOpen) return
+    void loadMarketSkills()
+  }, [marketOpen, loadMarketSkills])
+
+  const installMarketSkill = React.useCallback(async (skill: MarketSkillSummary): Promise<void> => {
+    if (!data.workspaceSlug || installingMarketSlug) return
+    setInstallingMarketSlug(skill.slug)
+    try {
+      const installed = await window.electronAPI.installMarketSkill({
+        workspaceSlug: data.workspaceSlug,
+        slug: skill.slug,
+      })
+      toast.success(`已安装 Skill：${installed.name}`)
+      bumpCapabilities((v) => v + 1)
+    } catch (error) {
+      console.error('[Skill 市场] 安装失败:', error)
+      const message = error instanceof Error ? error.message : '未知错误'
+      toast.error('安装 Skill 失败', { description: message })
+    } finally {
+      setInstallingMarketSlug(null)
+    }
+  }, [data.workspaceSlug, installingMarketSlug, bumpCapabilities])
 
   const configureBuiltinMcp = React.useCallback((serverId: string): void => {
     const focusMap: Partial<Record<string, ToolSettingsFocus>> = {
@@ -215,20 +257,79 @@ export function AgentSkillsView(): React.ReactElement {
           />
         </div>
 
-        {/* 社区市场（占位） */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              disabled
-              className="flex h-8 cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-border/60 px-3 text-[13px] font-medium text-foreground/35"
-            >
-              <Store size={14} />
-              <span>社区市场</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">即将上线：一键浏览、安装与更新社区 Skills</TooltipContent>
-        </Tooltip>
+        <Popover open={marketOpen} onOpenChange={setMarketOpen}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-content-area px-3 text-[13px] font-medium text-foreground/80 shadow-sm transition-colors hover:bg-foreground/[0.04]"
+                >
+                  <Store size={14} />
+                  <span>市场</span>
+                </button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">浏览并安装 Skill</TooltipContent>
+          </Tooltip>
+          <PopoverContent align="end" className="w-[420px] p-2">
+            <div className="flex max-h-[420px] flex-col overflow-y-auto scrollbar-thin">
+              {marketLoading ? (
+                <div className="py-10 text-center text-[13px] text-muted-foreground">加载中...</div>
+              ) : marketSkills.length === 0 ? (
+                <div className="py-10 text-center text-[13px] text-muted-foreground">暂无匹配 Skill</div>
+              ) : (
+                marketSkills.map((skill) => {
+                  const installed = installedSkillSlugs.has(skill.slug)
+                  const installing = installingMarketSlug === skill.slug
+                  return (
+                    <div key={skill.slug} className="flex items-start gap-3 rounded-lg px-2 py-2.5 hover:bg-muted/60">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <Store size={16} />
+                      </div>
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => { void installMarketSkill(skill) }}
+                        disabled={installing}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-medium text-foreground">{skill.name}</span>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">{skill.downloadCount}</span>
+                        </div>
+                        <p className="mt-0.5 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground">
+                          {skill.summary ?? skill.slug}
+                        </p>
+                        {skill.tags.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {skill.tags.slice(0, 3).map((tag) => (
+                              <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{tag}</span>
+                            ))}
+                          </div>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={installing}
+                        onClick={() => { void installMarketSkill(skill) }}
+                        className={cn(
+                          'flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[12px] font-medium transition-colors',
+                          installed
+                            ? 'bg-muted text-muted-foreground hover:bg-muted/80'
+                            : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                          installing && 'opacity-60',
+                        )}
+                      >
+                        <Download size={12} />
+                        <span>{installing ? '安装中' : installed ? '更新' : '安装'}</span>
+                      </button>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
 
         {/* Skills：从其他工作区导入 */}
         {tab === 'skills' && (
