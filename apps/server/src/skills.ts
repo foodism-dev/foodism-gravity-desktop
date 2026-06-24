@@ -27,10 +27,27 @@ export interface ListMarketSkillsInput {
   tag?: string;
 }
 
+export interface UpsertMarketSkillInput {
+  slug: string;
+  name: string;
+  summary: string | null;
+  description: string | null;
+  icon: string | null;
+  status: MarketSkillStatus;
+  packageUrl: string;
+  packageSha256: string;
+  packageSizeBytes: number;
+  unpackedSizeBytes: number | null;
+  fileCount: number | null;
+  manifest: Record<string, unknown>;
+  tags: string[];
+}
+
 export interface SkillRepository {
   listSkills: (input: ListMarketSkillsInput) => Promise<MarketSkill[]>;
   getSkillBySlug: (slug: string) => Promise<MarketSkill | null>;
   recordDownload: (slug: string) => Promise<MarketSkill | null>;
+  upsertSkill: (input: UpsertMarketSkillInput) => Promise<MarketSkill>;
 }
 
 function toIsoString(value: Date | string): string {
@@ -147,6 +164,70 @@ export function createDrizzleSkillRepository(db: ServerDatabase): SkillRepositor
       if (!updated) return null;
       const tagMap = await loadTags([updated.id]);
       return mapSkill(updated, tagMap.get(updated.id) ?? []);
+    },
+
+    async upsertSkill(input: UpsertMarketSkillInput): Promise<MarketSkill> {
+      const now = new Date();
+      const [row] = await db
+        .insert(skills)
+        .values({
+          slug: input.slug,
+          name: input.name,
+          summary: input.summary,
+          description: input.description,
+          icon: input.icon,
+          status: input.status,
+          packageUrl: input.packageUrl,
+          packageSha256: input.packageSha256,
+          packageSizeBytes: input.packageSizeBytes,
+          unpackedSizeBytes: input.unpackedSizeBytes,
+          fileCount: input.fileCount,
+          manifest: input.manifest,
+          publishedAt: input.status === "published" ? now : null,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: skills.slug,
+          set: {
+            name: input.name,
+            summary: input.summary,
+            description: input.description,
+            icon: input.icon,
+            status: input.status,
+            packageUrl: input.packageUrl,
+            packageSha256: input.packageSha256,
+            packageSizeBytes: input.packageSizeBytes,
+            unpackedSizeBytes: input.unpackedSizeBytes,
+            fileCount: input.fileCount,
+            manifest: input.manifest,
+            publishedAt: input.status === "published" ? now : null,
+            updatedAt: now,
+          },
+        })
+        .returning();
+
+      if (!row) {
+        throw new Error("Skill 保存失败");
+      }
+
+      await db.delete(skillTagLinks).where(eq(skillTagLinks.skillId, row.id));
+      for (const tag of input.tags) {
+        const [tagRow] = await db
+          .insert(skillTags)
+          .values({ slug: tag, name: tag })
+          .onConflictDoUpdate({
+            target: skillTags.slug,
+            set: { name: tag },
+          })
+          .returning();
+        if (!tagRow) continue;
+        await db
+          .insert(skillTagLinks)
+          .values({ skillId: row.id, tagId: tagRow.id })
+          .onConflictDoNothing();
+      }
+
+      return mapSkill(row, input.tags);
     },
   };
 }

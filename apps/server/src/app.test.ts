@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createServerApp } from "./app.ts";
 import type { ApiUser } from "./auth.ts";
+import type { PublishSkillPackageInput, SkillPublisher } from "./skill-publisher.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
 
 interface StatusResponse {
@@ -74,6 +75,11 @@ interface MarketSkillDownloadResponse {
   downloadUrl: string;
   packageSha256: string;
   packageSizeBytes: number;
+}
+
+interface PublishSkillResponse {
+  packageUrl: string;
+  skill: MarketSkillDetailResponse["skill"];
 }
 
 interface MemoryMarketSkill {
@@ -154,6 +160,40 @@ function createMemorySkillRepository(initialSkills: MemoryMarketSkill[]) {
       if (!skill) return null;
       skill.downloadCount += 1;
       return skill;
+    },
+
+    async upsertSkill(input: Omit<MemoryMarketSkill, "downloadCount" | "updatedAt">) {
+      const now = "2026-06-24T01:00:00.000Z";
+      const existing = skills.find((skill) => skill.slug === input.slug);
+      if (existing) {
+        Object.assign(existing, {
+          ...input,
+          downloadCount: existing.downloadCount,
+          tags: [...input.tags],
+          updatedAt: now,
+        });
+        return existing;
+      }
+
+      const created: MemoryMarketSkill = {
+        ...input,
+        downloadCount: 0,
+        tags: [...input.tags],
+        updatedAt: now,
+      };
+      skills.push(created);
+      return created;
+    },
+  };
+}
+
+function createMemorySkillPublisher(packageUrl: string): SkillPublisher & { uploads: PublishSkillPackageInput[] } {
+  const uploads: PublishSkillPackageInput[] = [];
+  return {
+    uploads,
+    async publishSkillPackage(input: PublishSkillPackageInput) {
+      uploads.push(input);
+      return { packageUrl };
     },
   };
 }
@@ -502,5 +542,82 @@ describe("server app", () => {
       packageSizeBytes: 3072,
     });
     expect(detailBody.skill.downloadCount).toBe(11);
+  });
+
+  test("Given an internal token and skill package, When publishing a skill, Then it uploads the package and stores the R2 package URL", async () => {
+    const skillRepository = createMemorySkillRepository([]);
+    const skillPublisher = createMemorySkillPublisher("https://cdn.example.com/upload_file/skills/brief-writer.skill");
+    const app = createServerApp({
+      skillRepository,
+      skillPublisher,
+      internalApiToken: "internal-secret",
+    });
+    const packageBytes = new TextEncoder().encode("fake skill zip bytes");
+    const formData = new FormData();
+    formData.set("slug", "brief-writer");
+    formData.set("name", "Brief Writer");
+    formData.set("summary", "生成项目 brief");
+    formData.set("description", "把输入整理成项目 brief。");
+    formData.set("icon", "file-pen");
+    formData.set("tags", JSON.stringify(["writing", "planning"]));
+    formData.set("manifest", JSON.stringify({ minAppVersion: "0.12.0" }));
+    formData.set("unpackedSizeBytes", "4096");
+    formData.set("fileCount", "6");
+    formData.set("package", new File([packageBytes], "brief-writer.skill", { type: "application/zip" }));
+
+    const response = await app.request("/api/internal/skills", {
+      method: "POST",
+      headers: { Authorization: "Bearer internal-secret" },
+      body: formData,
+    });
+    const body = (await response.json()) as PublishSkillResponse;
+    const downloadResponse = await app.request("/api/skills/brief-writer/download");
+    const downloadBody = (await downloadResponse.json()) as MarketSkillDownloadResponse;
+
+    expect(response.status).toBe(201);
+    expect(skillPublisher.uploads).toHaveLength(1);
+    expect(skillPublisher.uploads[0]?.slug).toBe("brief-writer");
+    expect(skillPublisher.uploads[0]?.packageBytes).toEqual(packageBytes);
+    expect(body.packageUrl).toBe("https://cdn.example.com/upload_file/skills/brief-writer.skill");
+    expect(body.skill).toMatchObject({
+      slug: "brief-writer",
+      name: "Brief Writer",
+      summary: "生成项目 brief",
+      description: "把输入整理成项目 brief。",
+      icon: "file-pen",
+      tags: ["writing", "planning"],
+      packageSizeBytes: packageBytes.byteLength,
+      unpackedSizeBytes: 4096,
+      fileCount: 6,
+      manifest: { minAppVersion: "0.12.0" },
+      downloadCount: 0,
+    });
+    expect(body.skill.packageSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(downloadBody.downloadUrl).toBe("https://cdn.example.com/upload_file/skills/brief-writer.skill");
+    expect(downloadBody.packageSha256).toBe(body.skill.packageSha256);
+    expect(downloadBody.packageSizeBytes).toBe(packageBytes.byteLength);
+  });
+
+  test("Given no internal token, When publishing a skill, Then it rejects the upload", async () => {
+    const skillPublisher = createMemorySkillPublisher("https://cdn.example.com/upload_file/skills/brief-writer.skill");
+    const app = createServerApp({
+      skillRepository: createMemorySkillRepository([]),
+      skillPublisher,
+      internalApiToken: "internal-secret",
+    });
+    const formData = new FormData();
+    formData.set("slug", "brief-writer");
+    formData.set("name", "Brief Writer");
+    formData.set("package", new File([new Uint8Array([1, 2, 3])], "brief-writer.skill"));
+
+    const response = await app.request("/api/internal/skills", {
+      method: "POST",
+      body: formData,
+    });
+    const body = (await response.json()) as ErrorResponse;
+
+    expect(response.status).toBe(401);
+    expect(body.message).toBe("内部接口 Token 无效");
+    expect(skillPublisher.uploads).toHaveLength(0);
   });
 });
