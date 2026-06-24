@@ -11,6 +11,7 @@ import {
   resolveUserFromTokenPayload,
   type AuthTokenPayload,
 } from "./auth.ts";
+import { getDefaultSkillRepository, type MarketSkill, type SkillRepository } from "./skills.ts";
 import { getDefaultUserRepository, type UserRepository } from "./users.ts";
 
 interface ServerStatus {
@@ -26,6 +27,7 @@ interface ServerVariables {
 
 interface ServerAppOptions {
   userRepository?: UserRepository | null;
+  skillRepository?: SkillRepository | null;
 }
 
 const SENSITIVE_LOG_KEYS = new Set([
@@ -92,10 +94,35 @@ function logSsoPayload(body: unknown, authAction: "create_user" | "sso_login"): 
   console.log(`[认证] SSO ${authAction} account.account 字段: ${getRecordKeys(getNestedRecord(body, ["account", "account"]))}`);
 }
 
+function toSkillListItem(skill: MarketSkill) {
+  return {
+    slug: skill.slug,
+    name: skill.name,
+    summary: skill.summary,
+    icon: skill.icon,
+    tags: skill.tags,
+    packageSha256: skill.packageSha256,
+    packageSizeBytes: skill.packageSizeBytes,
+    downloadCount: skill.downloadCount,
+    updatedAt: skill.updatedAt,
+  };
+}
+
+function toSkillDetail(skill: MarketSkill) {
+  return {
+    ...toSkillListItem(skill),
+    description: skill.description,
+    unpackedSizeBytes: skill.unpackedSizeBytes,
+    fileCount: skill.fileCount,
+    manifest: skill.manifest,
+  };
+}
+
 export function createServerApp(options: ServerAppOptions = {}) {
   const app = new Hono<{ Variables: ServerVariables }>();
   const jwtSecret = getJwtSecret();
   const userRepository = options.userRepository ?? getDefaultUserRepository();
+  const skillRepository = options.skillRepository ?? getDefaultSkillRepository();
 
   app.use("/api/*", cors());
 
@@ -163,6 +190,49 @@ export function createServerApp(options: ServerAppOptions = {}) {
 
   app.post("/create_user", (context) => handleSsoInternalAuth(context, "create_user"));
   app.post("/sso_login", (context) => handleSsoInternalAuth(context, "sso_login"));
+
+  app.get("/api/skills", async (context) => {
+    if (!skillRepository) {
+      return context.json({ skills: [] });
+    }
+
+    const skills = await skillRepository.listSkills({
+      query: context.req.query("query"),
+      tag: context.req.query("tag"),
+    });
+
+    return context.json({ skills: skills.map(toSkillListItem) });
+  });
+
+  app.get("/api/skills/:slug", async (context) => {
+    if (!skillRepository) {
+      return context.json({ error: "Not Found", message: "Skill 不存在" }, 404);
+    }
+
+    const skill = await skillRepository.getSkillBySlug(context.req.param("slug"));
+    if (!skill) {
+      return context.json({ error: "Not Found", message: "Skill 不存在" }, 404);
+    }
+
+    return context.json({ skill: toSkillDetail(skill) });
+  });
+
+  app.get("/api/skills/:slug/download", async (context) => {
+    if (!skillRepository) {
+      return context.json({ error: "Not Found", message: "Skill 不存在" }, 404);
+    }
+
+    const skill = await skillRepository.recordDownload(context.req.param("slug"));
+    if (!skill) {
+      return context.json({ error: "Not Found", message: "Skill 不存在" }, 404);
+    }
+
+    return context.json({
+      downloadUrl: skill.packageUrl,
+      packageSha256: skill.packageSha256,
+      packageSizeBytes: skill.packageSizeBytes,
+    });
+  });
 
   app.use(
     "/api/me",

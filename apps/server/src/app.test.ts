@@ -38,6 +38,62 @@ interface ErrorResponse {
   message: string;
 }
 
+interface MarketSkillListResponse {
+  skills: Array<{
+    slug: string;
+    name: string;
+    summary: string | null;
+    icon: string | null;
+    tags: string[];
+    packageSha256: string;
+    packageSizeBytes: number;
+    downloadCount: number;
+    updatedAt: string;
+  }>;
+}
+
+interface MarketSkillDetailResponse {
+  skill: {
+    slug: string;
+    name: string;
+    summary: string | null;
+    description: string | null;
+    icon: string | null;
+    tags: string[];
+    packageSha256: string;
+    packageSizeBytes: number;
+    unpackedSizeBytes: number | null;
+    fileCount: number | null;
+    manifest: Record<string, unknown>;
+    downloadCount: number;
+    updatedAt: string;
+  };
+}
+
+interface MarketSkillDownloadResponse {
+  downloadUrl: string;
+  packageSha256: string;
+  packageSizeBytes: number;
+}
+
+interface MemoryMarketSkill {
+  slug: string;
+  name: string;
+  summary: string | null;
+  description: string | null;
+  icon: string | null;
+  status: "published" | "hidden" | "archived";
+  packageUrl: string;
+  packageSha256: string;
+  packageSizeBytes: number;
+  unpackedSizeBytes: number | null;
+  fileCount: number | null;
+  manifest: Record<string, unknown>;
+  downloadCount: number;
+  tags: string[];
+  updatedAt: string;
+}
+
 function createMemoryUserRepository(user: UserWithPasswordHash): UserRepository {
   let storedUser = user;
   return {
@@ -67,6 +123,37 @@ function createMemoryUserRepository(user: UserWithPasswordHash): UserRepository 
         username: storedUser.username,
         displayName: storedUser.displayName,
       };
+    },
+  };
+}
+
+function createMemorySkillRepository(initialSkills: MemoryMarketSkill[]) {
+  const skills = initialSkills.map((skill) => ({ ...skill, tags: [...skill.tags] }));
+
+  return {
+    async listSkills(input: { query?: string; tag?: string }) {
+      const query = input.query?.trim().toLowerCase();
+      const tag = input.tag?.trim();
+      return skills
+        .filter((skill) => skill.status === "published")
+        .filter((skill) => !tag || skill.tags.includes(tag))
+        .filter((skill) => {
+          if (!query) return true;
+          return [skill.slug, skill.name, skill.summary, skill.description]
+            .filter((value): value is string => typeof value === "string")
+            .some((value) => value.toLowerCase().includes(query));
+        });
+    },
+
+    async getSkillBySlug(slug: string) {
+      return skills.find((skill) => skill.slug === slug && skill.status === "published") ?? null;
+    },
+
+    async recordDownload(slug: string) {
+      const skill = skills.find((item) => item.slug === slug && item.status === "published");
+      if (!skill) return null;
+      skill.downloadCount += 1;
+      return skill;
     },
   };
 }
@@ -286,5 +373,134 @@ describe("server app", () => {
       username: "zhangsan",
       displayName: "张三",
     });
+  });
+
+  test("Given published market skills, When the skill list is requested, Then it returns searchable public skills without user or version fields", async () => {
+    const app = createServerApp({
+      skillRepository: createMemorySkillRepository([
+        {
+          slug: "feedback-synthesis",
+          name: "用户反馈分析",
+          summary: "聚合反馈并生成主题",
+          description: "把访谈、issue 和用户反馈整理为主题、证据和优先级。",
+          icon: "message-square",
+          status: "published",
+          packageUrl: "https://cdn.example.com/skills/feedback-synthesis.skill",
+          packageSha256: "sha256-feedback",
+          packageSizeBytes: 1024,
+          unpackedSizeBytes: 4096,
+          fileCount: 5,
+          manifest: { minAppVersion: "0.12.0" },
+          downloadCount: 7,
+          tags: ["research"],
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        },
+        {
+          slug: "internal-hidden",
+          name: "隐藏 Skill",
+          summary: null,
+          description: null,
+          icon: null,
+          status: "hidden",
+          packageUrl: "https://cdn.example.com/skills/internal-hidden.skill",
+          packageSha256: "sha256-hidden",
+          packageSizeBytes: 512,
+          unpackedSizeBytes: null,
+          fileCount: null,
+          manifest: {},
+          downloadCount: 0,
+          tags: ["internal"],
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        },
+      ]),
+    });
+
+    const response = await app.request("/api/skills?query=反馈&tag=research");
+    const body = (await response.json()) as MarketSkillListResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.skills).toHaveLength(1);
+    expect(body.skills[0]).toEqual({
+      slug: "feedback-synthesis",
+      name: "用户反馈分析",
+      summary: "聚合反馈并生成主题",
+      icon: "message-square",
+      tags: ["research"],
+      packageSha256: "sha256-feedback",
+      packageSizeBytes: 1024,
+      downloadCount: 7,
+      updatedAt: "2026-06-24T00:00:00.000Z",
+    });
+    expect(Object.keys(body.skills[0]!)).not.toContain("userId");
+    expect(Object.keys(body.skills[0]!)).not.toContain("version");
+    expect(Object.keys(body.skills[0]!)).not.toContain("featured");
+  });
+
+  test("Given a published market skill, When detail is requested, Then it returns package metadata for hash based updates", async () => {
+    const app = createServerApp({
+      skillRepository: createMemorySkillRepository([
+        {
+          slug: "docx",
+          name: "Word 文档",
+          summary: "处理 Word 文档",
+          description: "创建、编辑和检查 docx 文件。",
+          icon: "file-text",
+          status: "published",
+          packageUrl: "https://cdn.example.com/skills/docx.skill",
+          packageSha256: "sha256-docx",
+          packageSizeBytes: 2048,
+          unpackedSizeBytes: 8192,
+          fileCount: 8,
+          manifest: { minAppVersion: "0.12.0" },
+          downloadCount: 3,
+          tags: ["document"],
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        },
+      ]),
+    });
+
+    const response = await app.request("/api/skills/docx");
+    const body = (await response.json()) as MarketSkillDetailResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.skill.packageSha256).toBe("sha256-docx");
+    expect(body.skill.manifest).toEqual({ minAppVersion: "0.12.0" });
+    expect(Object.keys(body.skill)).not.toContain("version");
+  });
+
+  test("Given a published market skill, When download is requested, Then it increments the global download count and returns the current package", async () => {
+    const skillRepository = createMemorySkillRepository([
+      {
+        slug: "sales-report",
+        name: "销售报告",
+        summary: "生成销售报告",
+        description: "把销售数据整理成报告。",
+        icon: null,
+        status: "published",
+        packageUrl: "https://cdn.example.com/skills/sales-report.skill",
+        packageSha256: "sha256-sales",
+        packageSizeBytes: 3072,
+        unpackedSizeBytes: 12000,
+        fileCount: 9,
+        manifest: {},
+        downloadCount: 10,
+        tags: ["sales"],
+        updatedAt: "2026-06-24T00:00:00.000Z",
+      },
+    ]);
+    const app = createServerApp({ skillRepository });
+
+    const downloadResponse = await app.request("/api/skills/sales-report/download");
+    const downloadBody = (await downloadResponse.json()) as MarketSkillDownloadResponse;
+    const detailResponse = await app.request("/api/skills/sales-report");
+    const detailBody = (await detailResponse.json()) as MarketSkillDetailResponse;
+
+    expect(downloadResponse.status).toBe(200);
+    expect(downloadBody).toEqual({
+      downloadUrl: "https://cdn.example.com/skills/sales-report.skill",
+      packageSha256: "sha256-sales",
+      packageSizeBytes: 3072,
+    });
+    expect(detailBody.skill.downloadCount).toBe(11);
   });
 });
