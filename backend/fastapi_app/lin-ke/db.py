@@ -25,18 +25,18 @@ def connect(settings: Settings):
     return psycopg.connect(settings.database_url, row_factory=dict_row)
 
 
-def fetch_supply_goods_records(settings: Settings, record_ids: List[str]) -> Dict[str, Dict[str, Any]]:
-    if not record_ids:
+def fetch_supply_goods_payloads(settings: Settings, supply_goods_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    if not supply_goods_ids:
         return {}
     with connect(settings) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT supply_goods_id, payload
-                FROM rebuild_supply_goods
+                FROM tickets
                 WHERE supply_goods_id = ANY(%s)
                 """,
-                (record_ids,),
+                (supply_goods_ids,),
             )
             rows = cur.fetchall()
     return {str(row["supply_goods_id"]): row["payload"] for row in rows}
@@ -134,8 +134,8 @@ def update_account_config(settings: Settings, config_id: int, data: Dict[str, An
             return cur.fetchone()
 
 
-def update_supply_goods_lin_ke_mapping(settings: Settings, record_id: str, mapping: Dict[str, Any]) -> bool:
-    if not record_id:
+def update_supply_goods_lin_ke_mapping(settings: Settings, supply_goods_id: str, mapping: Dict[str, Any]) -> bool:
+    if not supply_goods_id:
         return False
     with connect(settings) as conn:
         with conn.cursor() as cur:
@@ -156,7 +156,7 @@ def update_supply_goods_lin_ke_mapping(settings: Settings, record_id: str, mappi
                     mapping.get("thirdCategoryId"),
                     mapping.get("categoryName"),
                     mapping.get("categoryPath"),
-                    record_id,
+                    supply_goods_id,
                 ),
             )
             return cur.rowcount > 0

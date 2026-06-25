@@ -83,7 +83,7 @@ def save_supply_goods_draft(
     settings: Settings,
     payload: Dict[str, Any],
     account_config: Dict[str, Any],
-    record_id: Optional[str] = None,
+    supply_goods_id: str,
     poi_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
@@ -91,13 +91,9 @@ def save_supply_goods_draft(
     except ProductMappingError as exc:
         raise LinKeServiceError(exc.payload, status_code=400) from exc
 
-    mapping_record_id = (
-        record_id
-        or draft.clean_string(payload.get("SupplyGoodsId"))
-        or draft.clean_string(payload.get("goodsId"))
-    )
-    if mapping_record_id:
-        db.update_supply_goods_lin_ke_mapping(settings, mapping_record_id, lin_ke_mapping)
+    mapping_supply_goods_id = draft.clean_string(supply_goods_id)
+    if mapping_supply_goods_id:
+        db.update_supply_goods_lin_ke_mapping(settings, mapping_supply_goods_id, lin_ke_mapping)
 
     session = make_session(settings, account_config)
     try:

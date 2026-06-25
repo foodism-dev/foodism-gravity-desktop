@@ -51,23 +51,30 @@ def health():
 @app.post("/api/supply-goods/optimize-stream")
 async def optimize_stream(request: OptimizeStreamRequest):
     settings = get_settings()
-    record_ids = [record_id.strip() for record_id in request.record_ids if record_id.strip()]
-    if len(record_ids) > settings.optimize_max_batch_size:
-        raise HTTPException(status_code=400, detail=f"recordIds must contain at most {settings.optimize_max_batch_size} items")
-    records = await asyncio.to_thread(db.fetch_supply_goods_records, settings, record_ids)
+    supply_goods_ids = [
+        supply_goods_id.strip()
+        for supply_goods_id in request.supply_goods_ids
+        if supply_goods_id.strip()
+    ]
+    if len(supply_goods_ids) > settings.optimize_max_batch_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"supplyGoodsIds must contain at most {settings.optimize_max_batch_size} items",
+        )
+    payloads = await asyncio.to_thread(db.fetch_supply_goods_payloads, settings, supply_goods_ids)
     semaphore = asyncio.Semaphore(max(settings.optimize_concurrency, 1))
 
-    async def process(index: int, record_id: str) -> Dict[str, Any]:
-        payload = records.get(record_id)
+    async def process(index: int, supply_goods_id: str) -> Dict[str, Any]:
+        payload = payloads.get(supply_goods_id)
         if payload is None:
             return dump_model(
                 OptimizeStreamItem(
                     index=index,
-                    record_id=record_id,
+                    supply_goods_id=supply_goods_id,
                     ok=False,
                     fallback=True,
                     payload=None,
-                    error="record_not_found",
+                    error="supply_goods_not_found",
                     changes=[],
                 ),
                 by_alias=True,
@@ -77,7 +84,7 @@ async def optimize_stream(request: OptimizeStreamRequest):
         return dump_model(
             OptimizeStreamItem(
                 index=index,
-                record_id=record_id,
+                supply_goods_id=supply_goods_id,
                 ok=True,
                 fallback=fallback,
                 payload=optimized,
@@ -88,7 +95,10 @@ async def optimize_stream(request: OptimizeStreamRequest):
         )
 
     async def generate():
-        tasks = [asyncio.create_task(process(index, record_id)) for index, record_id in enumerate(record_ids)]
+        tasks = [
+            asyncio.create_task(process(index, supply_goods_id))
+            for index, supply_goods_id in enumerate(supply_goods_ids)
+        ]
         for task in asyncio.as_completed(tasks):
             item = await task
             yield json.dumps(item, ensure_ascii=False) + "\n"
@@ -149,7 +159,7 @@ def create_lin_ke_draft(request: LinKeDraftRequest):
             settings,
             request.payload,
             account_config,
-            record_id=request.record_id,
+            supply_goods_id=request.supply_goods_id,
             poi_id=request.poi_id,
         )
     except LinKeServiceError as exc:

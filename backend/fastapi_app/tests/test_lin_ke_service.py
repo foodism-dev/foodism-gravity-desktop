@@ -59,9 +59,15 @@ class LinKeServiceTests(unittest.TestCase):
         ) as update_mapping, patch("fastapi_app.lin_ke.lin_ke_service.make_session", side_effect=fail_session):
             for _ in range(2):
                 with self.assertRaises(LinKeServiceError):
-                    save_supply_goods_draft(DummySettings(), self.payload(), {"cookie_file_path": "/tmp/cookie.json"})
+                    save_supply_goods_draft(
+                        DummySettings(),
+                        self.payload(),
+                        {"cookie_file_path": "/tmp/cookie.json"},
+                        supply_goods_id="944-test",
+                    )
 
         self.assertEqual(update_mapping.call_count, 2)
+        self.assertEqual(update_mapping.call_args_list[0].args[1], "944-test")
         self.assertEqual(update_mapping.call_args_list[0].args[2]["categoryId"], "1004001")
         self.assertEqual(update_mapping.call_args_list[1].args[2]["productType"], 11)
 

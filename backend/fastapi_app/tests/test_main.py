@@ -14,18 +14,19 @@ class MainRouteTests(unittest.TestCase):
             next_payload["optimized"] = True
             return next_payload, [{"path": "packages.viewList[0].groupName"}], False, ""
 
-        def fake_fetch(settings, record_ids):
-            return {"record-a": {"packages": "{\"viewList\":[]}"}}
+        def fake_fetch(settings, supply_goods_ids):
+            return {"goods-a": {"packages": "{\"viewList\":[]}"}}
 
-        with patch("fastapi_app.lin_ke.app.db.fetch_supply_goods_records", side_effect=fake_fetch), patch(
+        with patch("fastapi_app.lin_ke.app.db.fetch_supply_goods_payloads", side_effect=fake_fetch), patch(
             "fastapi_app.lin_ke.app.optimize_payload_with_retries", side_effect=fake_optimize
         ):
-            response = TestClient(app).post("/api/supply-goods/optimize-stream", json={"recordIds": ["record-a"]})
+            response = TestClient(app).post("/api/supply-goods/optimize-stream", json={"supplyGoodsIds": ["goods-a"]})
 
         self.assertEqual(response.status_code, 200)
         lines = [json.loads(line) for line in response.text.splitlines() if line.strip()]
         self.assertEqual(len(lines), 1)
-        self.assertEqual(lines[0]["recordId"], "record-a")
+        self.assertEqual(lines[0]["supplyGoodsId"], "goods-a")
+        self.assertNotIn("recordId", lines[0])
         self.assertTrue(lines[0]["payload"]["optimized"])
         self.assertFalse(lines[0]["fallback"])
 

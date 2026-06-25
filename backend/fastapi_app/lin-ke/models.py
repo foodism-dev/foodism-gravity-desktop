@@ -4,16 +4,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class OptimizeStreamRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    record_ids: List[str] = Field(..., alias="recordIds")
+    supply_goods_ids: List[str] = Field(..., alias="supplyGoodsIds")
 
 
 class OptimizeStreamItem(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     index: int
-    record_id: str = Field(..., alias="recordId")
+    supply_goods_id: str = Field(..., alias="supplyGoodsId")
     ok: bool
     fallback: bool = False
     payload: Optional[Dict[str, Any]] = None
@@ -46,8 +46,8 @@ class LinKeAccountConfigPatch(BaseModel):
 
 
 class LinKeDraftRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     payload: Dict[str, Any]
-    record_id: Optional[str] = Field(None, alias="recordId")
+    supply_goods_id: str = Field(..., alias="supplyGoodsId")
     poi_id: Optional[str] = Field(None, alias="poiId")
