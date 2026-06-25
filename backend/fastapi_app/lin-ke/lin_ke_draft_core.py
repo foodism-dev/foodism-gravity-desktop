@@ -624,18 +624,52 @@ def parse_rec_person_text(text):
     normalized = clean_string(text)
     if not normalized:
         return None
-    range_match = re.search(r"(\d+)\s*[-~至到]\s*(\d+)\s*人", normalized)
+    token_pattern = r"\d+|[一二两三四五六七八九十单双]+"
+    range_match = re.search(rf"({token_pattern})\s*[-~至到]\s*({token_pattern})\s*人", normalized)
     if range_match:
-        start = int(range_match.group(1))
-        end = int(range_match.group(2))
+        start = parse_person_count_token(range_match.group(1))
+        end = parse_person_count_token(range_match.group(2))
         if start > 0 and end >= start:
             return start, end
-    single_match = re.search(r"(\d+)\s*人", normalized)
+    single_match = re.search(rf"({token_pattern})\s*人", normalized)
     if single_match:
-        value = int(single_match.group(1))
+        value = parse_person_count_token(single_match.group(1))
         if value > 0:
             return value, value
     return None
+
+
+def parse_person_count_token(token):
+    text = clean_string(token)
+    if not text:
+        return 0
+    if text.isdigit():
+        return int(text)
+    direct = {
+        "单": 1,
+        "一": 1,
+        "双": 2,
+        "两": 2,
+        "二": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    if text in direct:
+        return direct[text]
+    digits = {**direct, "十": 10}
+    if "十" not in text:
+        return 0
+    parts = text.split("十", 1)
+    if len(parts) != 2:
+        return 0
+    tens = 1 if parts[0] == "" else digits.get(parts[0], 0)
+    ones = 0 if parts[1] == "" else digits.get(parts[1], 0)
+    return tens * 10 + ones if tens > 0 else 0
 
 
 def collect_required_questions(product, context):

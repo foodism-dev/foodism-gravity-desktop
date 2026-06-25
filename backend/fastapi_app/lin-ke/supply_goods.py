@@ -24,7 +24,13 @@ def parse_packages(value: Any) -> Tuple[Dict[str, Any], bool]:
     if isinstance(value, dict):
         return copy.deepcopy(value), False
     if isinstance(value, str):
-        return json.loads(value), True
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}, True
+        if isinstance(parsed, dict):
+            return parsed, True
+        return {}, True
     return {}, False
 
 

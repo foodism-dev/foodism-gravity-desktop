@@ -1,6 +1,7 @@
 import json
 import unittest
 
+from fastapi_app.lin_ke.lin_ke_draft_core import parse_rec_person_text
 from fastapi_app.lin_ke.lin_ke_service import build_workbench_draft_url
 from fastapi_app.lin_ke.supply_goods import (
     apply_menu_optimization,
@@ -53,6 +54,62 @@ class SupplyGoodsTests(unittest.TestCase):
         self.assertEqual(packages["viewList"][0]["list"][0]["title"], "鲜活大闸蟹")
         self.assertEqual(packages["viewList"][0]["list"][0]["price"], "88.00")
         self.assertEqual(len(changes), 2)
+        self.assertEqual(optimized["goodsName"], payload["goodsName"])
+        self.assertEqual(optimized["SupplyGoodsId"], payload["SupplyGoodsId"])
+
+    def test_apply_menu_optimization_ignores_disallowed_fields(self):
+        payload = self.sample_payload()
+        optimized, changes = apply_menu_optimization(
+            payload,
+            {
+                "groups": [
+                    {
+                        "index": 0,
+                        "groupName": "招牌主菜",
+                        "groupSelectNum": "99",
+                        "groupId": 999,
+                        "items": [
+                            {
+                                "index": 0,
+                                "title": "鲜活大闸蟹",
+                                "price": "1.00",
+                                "num": "99",
+                                "id": 999,
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+        packages = json.loads(optimized["packages"])
+        self.assertEqual(packages["viewList"][0]["groupName"], "招牌主菜")
+        self.assertEqual(packages["viewList"][0]["groupSelectNum"], "1")
+        self.assertEqual(packages["viewList"][0]["groupId"], 0)
+        self.assertEqual(packages["viewList"][0]["list"][0]["title"], "鲜活大闸蟹")
+        self.assertEqual(packages["viewList"][0]["list"][0]["price"], "88.00")
+        self.assertEqual(packages["viewList"][0]["list"][0]["num"], "1")
+        self.assertEqual(packages["viewList"][0]["list"][0]["id"], 0)
+        self.assertEqual(len(changes), 2)
+
+    def test_malformed_packages_has_no_optimizable_menu(self):
+        payload = self.sample_payload()
+        payload["packages"] = "{bad json"
+
+        self.assertEqual(extract_menu_for_optimization(payload), [])
+        optimized, changes = apply_menu_optimization(
+            payload,
+            {"groups": [{"index": 0, "groupName": "不会应用", "items": [{"index": 0, "title": "不会应用"}]}]},
+        )
+
+        self.assertEqual(optimized, payload)
+        self.assertEqual(changes, [])
+
+    def test_missing_packages_has_no_optimizable_menu(self):
+        payload = self.sample_payload()
+        payload.pop("packages")
+
+        self.assertEqual(extract_menu_for_optimization(payload), [])
 
     def test_extract_menu_for_optimization(self):
         menu = extract_menu_for_optimization(self.sample_payload())
@@ -96,6 +153,12 @@ class SupplyGoodsTests(unittest.TestCase):
         self.assertIn("sku_order_id=7654505757261776948", url)
         self.assertIn("product_type=11", url)
         self.assertIn("third_category_id=1003002", url)
+
+    def test_parse_rec_person_text_supports_chinese_person_counts(self):
+        self.assertEqual(parse_rec_person_text("双人66元乳山生蚝自助"), (2, 2))
+        self.assertEqual(parse_rec_person_text("两人餐"), (2, 2))
+        self.assertEqual(parse_rec_person_text("三至四人套餐"), (3, 4))
+        self.assertEqual(parse_rec_person_text("10-12人聚餐"), (10, 12))
 
 
 if __name__ == "__main__":
