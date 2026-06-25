@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../db/client.ts";
 import { rebuildFieldOptions, rebuildFields } from "../db/schema.ts";
 import { buildRebuildOpenApiUrl, readJsonResponse } from "./openapi.ts";
-import { SUPPLY_GOODS_ENTITY } from "./supplygoods.ts";
+import { SUPPLY_COMPANY_ENTITY, SUPPLY_GOODS_ENTITY } from "./supplygoods.ts";
 
 export interface RebuildFieldMetadata {
   entityName: string;
@@ -69,7 +69,12 @@ const SUPPLY_GOODS_CLASSIFICATION_FIELDS = [
   "classification",
 ];
 
+const SUPPLY_COMPANY_PICKLIST_FIELDS: string[] = [];
+const SUPPLY_COMPANY_MULTISELECT_FIELDS: string[] = [];
+const SUPPLY_COMPANY_CLASSIFICATION_FIELDS: string[] = [];
+
 let defaultRepository: RebuildFieldMetadataRepository | null | undefined;
+const FIELD_OPTION_UPSERT_BATCH_SIZE = 1000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -287,19 +292,21 @@ export function createDrizzleRebuildFieldMetadataRepository(db: ServerDatabase):
 
     async upsertFieldOptions(options: RebuildFieldOptionMetadata[], updatedAt: Date): Promise<void> {
       if (options.length === 0) return;
-      await db
-        .insert(rebuildFieldOptions)
-        .values(options.map((option) => ({ ...option, updatedAt })))
-        .onConflictDoUpdate({
-          target: [rebuildFieldOptions.entityName, rebuildFieldOptions.fieldName, rebuildFieldOptions.optionValue],
-          set: {
-            optionLabel: sqlExcluded("option_label"),
-            sortOrder: sqlExcluded("sort_order"),
-            isDefault: sqlExcluded("is_default"),
-            raw: sqlExcluded("raw"),
-            updatedAt,
-          },
-        });
+      for (const batch of chunkArray(options, FIELD_OPTION_UPSERT_BATCH_SIZE)) {
+        await db
+          .insert(rebuildFieldOptions)
+          .values(batch.map((option) => ({ ...option, updatedAt })))
+          .onConflictDoUpdate({
+            target: [rebuildFieldOptions.entityName, rebuildFieldOptions.fieldName, rebuildFieldOptions.optionValue],
+            set: {
+              optionLabel: sqlExcluded("option_label"),
+              sortOrder: sqlExcluded("sort_order"),
+              isDefault: sqlExcluded("is_default"),
+              raw: sqlExcluded("raw"),
+              updatedAt,
+            },
+          });
+      }
     },
 
     async listFields(entityName: string, fieldNames: string[]): Promise<RebuildFieldMetadata[]> {
@@ -353,6 +360,14 @@ function sqlExcluded(columnName: string) {
   return sql.raw(`excluded.${columnName}`);
 }
 
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export function getDefaultRebuildFieldMetadataRepository(): RebuildFieldMetadataRepository | null {
   if (defaultRepository !== undefined) {
     return defaultRepository;
@@ -373,29 +388,62 @@ export async function syncSupplyGoodsFieldMetadata(input: {
   metadataClient: RebuildMetadataClient;
   repository: RebuildFieldMetadataRepository;
 }): Promise<RebuildMetadataSyncResult> {
+  return syncRebuildFieldMetadata({
+    ...input,
+    entityName: SUPPLY_GOODS_ENTITY,
+    picklistFields: SUPPLY_GOODS_PICKLIST_FIELDS,
+    multiselectFields: SUPPLY_GOODS_MULTISELECT_FIELDS,
+    classificationFields: SUPPLY_GOODS_CLASSIFICATION_FIELDS,
+  });
+}
+
+export async function syncSupplyCompanyFieldMetadata(input: {
+  metadataClient: RebuildMetadataClient;
+  repository: RebuildFieldMetadataRepository;
+}): Promise<RebuildMetadataSyncResult> {
+  return syncRebuildFieldMetadata({
+    ...input,
+    entityName: SUPPLY_COMPANY_ENTITY,
+    picklistFields: SUPPLY_COMPANY_PICKLIST_FIELDS,
+    multiselectFields: SUPPLY_COMPANY_MULTISELECT_FIELDS,
+    classificationFields: SUPPLY_COMPANY_CLASSIFICATION_FIELDS,
+  });
+}
+
+export async function syncRebuildFieldMetadata(input: {
+  entityName: string;
+  metadataClient: RebuildMetadataClient;
+  repository: RebuildFieldMetadataRepository;
+  picklistFields?: string[];
+  multiselectFields?: string[];
+  classificationFields?: string[];
+}): Promise<RebuildMetadataSyncResult> {
   const updatedAt = new Date();
-  const fields = await input.metadataClient.listFields(SUPPLY_GOODS_ENTITY);
+  const fields = await input.metadataClient.listFields(input.entityName);
   await input.repository.upsertFields(fields, updatedAt);
 
-  const inlineOptions = fields.flatMap((field) => readInlineOptions(SUPPLY_GOODS_ENTITY, field));
+  const inlineOptions = fields.flatMap((field) => readInlineOptions(input.entityName, field));
   const explicitOptions: RebuildFieldOptionMetadata[] = [];
   const detectedFields = detectOptionFields(fields);
   await appendExplicitOptions({
-    fieldNames: mergeFieldNames(SUPPLY_GOODS_PICKLIST_FIELDS, detectedFields.picklist),
+    entityName: input.entityName,
+    fieldNames: mergeFieldNames(input.picklistFields ?? [], detectedFields.picklist),
     optionTypeName: "下拉",
-    fetchOptions: (fieldName) => input.metadataClient.listPicklistOptions(SUPPLY_GOODS_ENTITY, fieldName),
+    fetchOptions: (fieldName) => input.metadataClient.listPicklistOptions(input.entityName, fieldName),
     into: explicitOptions,
   });
   await appendExplicitOptions({
-    fieldNames: mergeFieldNames(SUPPLY_GOODS_MULTISELECT_FIELDS, detectedFields.multiselect),
+    entityName: input.entityName,
+    fieldNames: mergeFieldNames(input.multiselectFields ?? [], detectedFields.multiselect),
     optionTypeName: "多选",
-    fetchOptions: (fieldName) => input.metadataClient.listMultiselectOptions(SUPPLY_GOODS_ENTITY, fieldName),
+    fetchOptions: (fieldName) => input.metadataClient.listMultiselectOptions(input.entityName, fieldName),
     into: explicitOptions,
   });
   await appendExplicitOptions({
-    fieldNames: mergeFieldNames(SUPPLY_GOODS_CLASSIFICATION_FIELDS, detectedFields.classification),
+    entityName: input.entityName,
+    fieldNames: mergeFieldNames(input.classificationFields ?? [], detectedFields.classification),
     optionTypeName: "分类",
-    fetchOptions: (fieldName) => input.metadataClient.listClassificationOptions(SUPPLY_GOODS_ENTITY, fieldName),
+    fetchOptions: (fieldName) => input.metadataClient.listClassificationOptions(input.entityName, fieldName),
     into: explicitOptions,
   });
 
@@ -403,7 +451,7 @@ export async function syncSupplyGoodsFieldMetadata(input: {
   await input.repository.upsertFieldOptions(mergedOptions, updatedAt);
 
   return {
-    entityName: SUPPLY_GOODS_ENTITY,
+    entityName: input.entityName,
     fieldCount: fields.length,
     optionCount: mergedOptions.length,
     updatedAt,
@@ -462,6 +510,7 @@ function mergeFieldNames(...groups: string[][]): string[] {
 }
 
 async function appendExplicitOptions(input: {
+  entityName: string;
   fieldNames: string[];
   optionTypeName: string;
   fetchOptions: (fieldName: string) => Promise<RebuildFieldOptionMetadata[]>;
@@ -472,7 +521,7 @@ async function appendExplicitOptions(input: {
       input.into.push(...await input.fetchOptions(fieldName));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[REBUILD] ${input.optionTypeName}字段选项同步跳过 ${SUPPLY_GOODS_ENTITY}.${fieldName}: ${message}`);
+      console.warn(`[REBUILD] ${input.optionTypeName}字段选项同步跳过 ${input.entityName}.${fieldName}: ${message}`);
     }
   }
 }

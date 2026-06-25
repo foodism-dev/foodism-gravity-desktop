@@ -10,11 +10,43 @@ import {
 export interface TicketRecord {
   id: number;
   supplyGoodsId: string;
-  approvalState: string;
+  status: TicketStatus;
+  businessStatus: TicketBusinessStatus;
   payload: Record<string, unknown>;
-  assets: Record<string, Array<{ source: string; url: string }>>;
+  sourcePayload: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export type TicketStatus =
+  | "todo"
+  | "processing"
+  | "done";
+
+export type TicketBusinessStatus =
+  | "access_review_pending"
+  | "info_optimization_pending"
+  | "shelf_confirm_pending"
+  | "commission_setup_pending"
+  | "online";
+
+export interface TicketActionRecord {
+  id: number;
+  ticketId: number;
+  action: string;
+  origin: Record<string, unknown>;
+  current: Record<string, unknown>;
+  operator: Record<string, unknown>;
+  remark: string | null;
+  createdAt: string;
+}
+
+export interface CreateTicketActionRecordInput {
+  action: string;
+  origin: Record<string, unknown>;
+  current: Record<string, unknown>;
+  operator?: Record<string, unknown>;
+  remark?: string | null;
 }
 
 export interface TicketMetadata {
@@ -23,7 +55,8 @@ export interface TicketMetadata {
 }
 
 export interface TicketListQuery {
-  approvalState?: string;
+  status?: TicketStatus;
+  businessStatus?: TicketBusinessStatus;
   q?: string;
   pageNo?: number;
   pageSize?: number;
@@ -39,11 +72,23 @@ export interface TicketListResult {
 interface TicketApiRecord {
   id: number;
   supply_goods_id: string;
-  approval_state: string;
+  status?: TicketStatus;
+  business_status?: TicketBusinessStatus;
   payload: Record<string, unknown>;
-  assets?: Record<string, Array<{ source: string; url: string }>>;
+  source_payload?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+interface TicketActionRecordApiRecord {
+  id: number;
+  ticket_id: number;
+  action: string;
+  origin: Record<string, unknown>;
+  current: Record<string, unknown>;
+  operator: Record<string, unknown>;
+  remark: string | null;
+  created_at: string;
 }
 
 interface TicketFieldOptionApiRecord {
@@ -71,6 +116,15 @@ interface TicketListResponse {
 
 interface TicketDetailResponse {
   ticket: TicketApiRecord;
+}
+
+interface TicketActionRecordListResponse {
+  records: TicketActionRecordApiRecord[];
+}
+
+interface TicketActionRecordCreateResponse {
+  ticket: TicketApiRecord;
+  record: TicketActionRecordApiRecord;
 }
 
 interface TicketMetadataResponse {
@@ -142,11 +196,25 @@ function normalizeTicket(record: TicketApiRecord): TicketRecord {
   return {
     id: record.id,
     supplyGoodsId: record.supply_goods_id,
-    approvalState: record.approval_state,
+    status: record.status ?? "todo",
+    businessStatus: record.business_status ?? "access_review_pending",
     payload: record.payload,
-    assets: record.assets ?? {},
+    sourcePayload: record.source_payload ?? record.payload,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
+  };
+}
+
+function normalizeTicketActionRecord(record: TicketActionRecordApiRecord): TicketActionRecord {
+  return {
+    id: record.id,
+    ticketId: record.ticket_id,
+    action: record.action,
+    origin: record.origin,
+    current: record.current,
+    operator: record.operator,
+    remark: record.remark,
+    createdAt: record.created_at,
   };
 }
 
@@ -159,7 +227,8 @@ function normalizeTicketMetadata(response: TicketMetadataResponse): TicketMetada
 
 export async function listTickets(query: TicketListQuery = {}): Promise<TicketListResult> {
   const params = new URLSearchParams();
-  if (query.approvalState) params.set("approvalState", query.approvalState);
+  if (query.status) params.set("status", query.status);
+  if (query.businessStatus) params.set("businessStatus", query.businessStatus);
   if (query.q) params.set("q", query.q);
   if (query.pageNo) params.set("pageNo", String(query.pageNo));
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
@@ -177,6 +246,30 @@ export async function listTickets(query: TicketListQuery = {}): Promise<TicketLi
 export async function getTicket(supplyGoodsId: string): Promise<TicketRecord> {
   const response = await apiFetch<TicketDetailResponse>(`/api/tickets/${encodeURIComponent(supplyGoodsId)}`);
   return normalizeTicket(response.ticket);
+}
+
+export async function getTicketActionRecords(supplyGoodsId: string): Promise<TicketActionRecord[]> {
+  const response = await apiFetch<TicketActionRecordListResponse>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/action-records`,
+  );
+  return response.records.map((record) => normalizeTicketActionRecord(record));
+}
+
+export async function createTicketActionRecord(
+  supplyGoodsId: string,
+  input: CreateTicketActionRecordInput,
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord }> {
+  const response = await apiFetch<TicketActionRecordCreateResponse>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/action-records`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return {
+    ticket: normalizeTicket(response.ticket),
+    record: normalizeTicketActionRecord(response.record),
+  };
 }
 
 export async function getTicketMetadata(): Promise<TicketMetadata> {

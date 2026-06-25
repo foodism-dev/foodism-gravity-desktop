@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  buildR2PublicUrl,
   uploadObjectToR2,
   type R2Config,
   type R2Fetch,
@@ -15,9 +16,11 @@ export interface RebuildAssetItem {
 export type RebuildAssetMap = Record<string, RebuildAssetItem[]>;
 
 export interface RebuildAssetUploadInput {
-  supplyGoodsId: string;
+  entityName?: string;
+  recordId?: string;
   fieldName: string;
   sourcePath: string;
+  supplyGoodsId?: string;
 }
 
 export interface RebuildAssetUploader {
@@ -40,6 +43,17 @@ interface RebuildR2AssetUploaderOptions {
 }
 
 const ASSET_FIELD_TYPES = new Set(["IMAGE", "FILE", "ATTACHMENT"]);
+const NON_ASSET_FIELD_TYPES = [
+  "TEXT",
+  "STRING",
+  "NUMBER",
+  "BOOLEAN",
+  "DATE",
+  "DATETIME",
+  "PICKLIST",
+  "MULTISELECT",
+  "CLASSIFICATION",
+];
 const ASSET_FIELD_NAME_KEYWORDS = [
   "image",
   "images",
@@ -75,6 +89,9 @@ function isAssetField(field: RebuildFieldMetadata): boolean {
   ].join(" ").toLowerCase();
   if ([...ASSET_FIELD_TYPES].some((type) => fieldType.includes(type.toLowerCase()))) {
     return true;
+  }
+  if (NON_ASSET_FIELD_TYPES.some((type) => fieldType.includes(type.toLowerCase()))) {
+    return false;
   }
 
   const fieldName = field.fieldName.toLowerCase();
@@ -124,7 +141,8 @@ function sha256Bytes(bytes: Uint8Array): string {
 
 function buildAssetObjectKey(input: {
   prefix: string;
-  supplyGoodsId: string;
+  entityName: string;
+  recordId: string;
   fieldName: string;
   sourcePath: string;
   sha256: string;
@@ -133,8 +151,8 @@ function buildAssetObjectKey(input: {
   const fileName = readFileName(input.sourcePath);
   const objectKey = [
     normalizedPrefix,
-    "supplygoods",
-    sanitizePathSegment(input.supplyGoodsId),
+    sanitizePathSegment(input.entityName.toLowerCase()),
+    sanitizePathSegment(input.recordId),
     sanitizePathSegment(input.fieldName),
     `${input.sha256.slice(0, 16)}-${fileName}`,
   ].filter(Boolean).join("/");
@@ -254,8 +272,9 @@ export function createRebuildAssetDownloader(fetchImpl: R2Fetch = fetch): Rebuil
   };
 }
 
-export async function mirrorSupplyGoodsAssets(input: {
-  supplyGoodsId: string;
+export async function mirrorRebuildAssets(input: {
+  entityName: string;
+  recordId: string;
   payload: Record<string, unknown>;
   fields: RebuildFieldMetadata[];
   uploader: RebuildAssetUploader;
@@ -269,7 +288,9 @@ export async function mirrorSupplyGoodsAssets(input: {
     for (const sourcePath of sourcePaths) {
       try {
         items.push(await input.uploader.uploadAsset({
-          supplyGoodsId: input.supplyGoodsId,
+          entityName: input.entityName,
+          recordId: input.recordId,
+          supplyGoodsId: input.entityName === "SupplyGoods" ? input.recordId : undefined,
           fieldName: field.fieldName,
           sourcePath,
         }));
@@ -281,6 +302,21 @@ export async function mirrorSupplyGoodsAssets(input: {
     if (items.length > 0) entries.push([field.fieldName, items]);
   }
   return Object.fromEntries(entries);
+}
+
+export async function mirrorSupplyGoodsAssets(input: {
+  supplyGoodsId: string;
+  payload: Record<string, unknown>;
+  fields: RebuildFieldMetadata[];
+  uploader: RebuildAssetUploader;
+}): Promise<RebuildAssetMap> {
+  return mirrorRebuildAssets({
+    entityName: "SupplyGoods",
+    recordId: input.supplyGoodsId,
+    payload: input.payload,
+    fields: input.fields,
+    uploader: input.uploader,
+  });
 }
 
 export function replacePayloadAssetUrls(
@@ -299,15 +335,36 @@ export function replacePayloadAssetUrls(
 export function createRebuildR2AssetUploader(options: RebuildR2AssetUploaderOptions): RebuildAssetUploader {
   return {
     async uploadAsset(input: RebuildAssetUploadInput): Promise<RebuildAssetItem> {
+      const entityName = input.entityName ?? "SupplyGoods";
+      const recordId = input.recordId ?? input.supplyGoodsId;
+      if (!recordId) throw new Error("缺少 REBUILD 资产归属记录 ID");
+      const publicBaseUrl = options.r2Config.publicBaseUrl.replace(/\/+$/, "");
+      if (input.sourcePath.startsWith(`${publicBaseUrl}/`)) {
+        return {
+          source: input.sourcePath,
+          url: input.sourcePath,
+        };
+      }
+
       const downloaded = await options.downloader.downloadAsset(input.sourcePath);
       const sha256 = sha256Bytes(downloaded.bytes);
       const objectKey = buildAssetObjectKey({
         prefix: options.r2Config.prefix,
-        supplyGoodsId: input.supplyGoodsId,
+        entityName,
+        recordId,
         fieldName: input.fieldName,
         sourcePath: input.sourcePath,
         sha256,
       });
+      const publicUrl = buildR2PublicUrl(options.r2Config.publicBaseUrl, objectKey);
+      const existingObjectResponse = await options.fetchImpl?.(publicUrl, { method: "HEAD" });
+      if (existingObjectResponse?.ok) {
+        return {
+          source: input.sourcePath,
+          url: publicUrl,
+        };
+      }
+
       const result = await uploadObjectToR2(options.r2Config, {
         objectKey,
         bytes: downloaded.bytes,

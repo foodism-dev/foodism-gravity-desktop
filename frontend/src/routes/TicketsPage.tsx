@@ -11,27 +11,26 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.t
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
-import { getPayloadText, listTickets, type TicketRecord } from "@/lib/api.ts";
+import { getPayloadText, listTickets, type TicketBusinessStatus, type TicketRecord } from "@/lib/api.ts";
+import { formatTicketBusinessStatus } from "@/lib/ticket-detail-workbench.ts";
 import { cn } from "@/lib/utils.ts";
 
 interface TicketsPageProps {
   authState: AuthState;
 }
 
-interface ApprovalColumn {
-  id: string;
+interface BusinessStatusColumn {
+  id: TicketBusinessStatus;
   label: string;
-  value: number;
   cards: TicketRecord[];
 }
 
-const APPROVAL_OPTIONS = [
-  { value: "1", label: "草稿" },
-  { value: "2", label: "审批中" },
-  { value: "10", label: "通过" },
-  { value: "11", label: "驳回" },
-  { value: "12", label: "撤回" },
-  { value: "13", label: "撤销" },
+const BUSINESS_STATUS_OPTIONS: Array<{ value: TicketBusinessStatus; label: string }> = [
+  { value: "access_review_pending", label: "待准入审核" },
+  { value: "info_optimization_pending", label: "待信息优化确认" },
+  { value: "shelf_confirm_pending", label: "待货架上线确认" },
+  { value: "commission_setup_pending", label: "待佣金设置" },
+  { value: "online", label: "商品上线" },
 ] as const;
 
 export function TicketsPage({ authState }: TicketsPageProps) {
@@ -41,9 +40,9 @@ export function TicketsPage({ authState }: TicketsPageProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [query, setQuery] = useState("");
-  const [approvalState, setApprovalState] = useState<string>("all");
+  const [businessStatus, setBusinessStatus] = useState<"all" | TicketBusinessStatus>("all");
 
-  const approvalStateParam = approvalState === "all" ? undefined : approvalState;
+  const businessStatusParam = businessStatus === "all" ? undefined : businessStatus;
 
   useEffect(() => {
     void ensureTicketMetadata();
@@ -54,14 +53,14 @@ export function TicketsPage({ authState }: TicketsPageProps) {
       void refreshTickets();
     }, 250);
     return () => window.clearTimeout(timeoutId);
-  }, [approvalStateParam, query]);
+  }, [businessStatusParam, query]);
 
   async function refreshTickets() {
     setIsLoading(true);
     setErrorMessage("");
     try {
       const result = await listTickets({
-        approvalState: approvalStateParam,
+        businessStatus: businessStatusParam,
         q: query.trim() || undefined,
         pageNo: 1,
         pageSize: 80,
@@ -77,10 +76,10 @@ export function TicketsPage({ authState }: TicketsPageProps) {
     }
   }
 
-  const columns = useMemo(() => buildApprovalColumns(tickets), [tickets]);
-  const selectedApprovalLabel = approvalState === "all"
-    ? "全部状态"
-    : APPROVAL_OPTIONS.find((option) => option.value === approvalState)?.label ?? approvalState;
+  const columns = useMemo(() => buildBusinessStatusColumns(tickets), [tickets]);
+  const selectedBusinessStatusLabel = businessStatus === "all"
+    ? "全部节点"
+    : BUSINESS_STATUS_OPTIONS.find((option) => option.value === businessStatus)?.label ?? businessStatus;
 
   return (
     <div className="flex h-[calc(100vh-5.5rem)] min-h-[640px] flex-col gap-4">
@@ -94,7 +93,7 @@ export function TicketsPage({ authState }: TicketsPageProps) {
               </Badge>
               <Badge variant="secondary">{total} 条</Badge>
             </div>
-            <p className="mt-1 text-sm text-slate-500">按 SupplyGoods 审核状态流转，筛选条件由后端 tickets 查询接口处理。</p>
+            <p className="mt-1 text-sm text-slate-500">按商品上架业务节点流转，筛选条件由后端 tickets 查询接口处理。</p>
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -111,13 +110,13 @@ export function TicketsPage({ authState }: TicketsPageProps) {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline">
                   <Filter className="h-4 w-4" />
-                  {selectedApprovalLabel}
+                  {selectedBusinessStatusLabel}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setApprovalState("all")}>全部状态</DropdownMenuItem>
-                {APPROVAL_OPTIONS.map((option) => (
-                  <DropdownMenuItem key={option.value} onSelect={() => setApprovalState(option.value)}>
+                <DropdownMenuItem onSelect={() => setBusinessStatus("all")}>全部节点</DropdownMenuItem>
+                {BUSINESS_STATUS_OPTIONS.map((option) => (
+                  <DropdownMenuItem key={option.value} onSelect={() => setBusinessStatus(option.value)}>
                     {option.label}
                   </DropdownMenuItem>
                 ))}
@@ -140,32 +139,30 @@ export function TicketsPage({ authState }: TicketsPageProps) {
 
       <section className="grid min-h-0 flex-1 gap-4 overflow-x-auto pb-2 xl:grid-cols-6">
         {columns.map((column) => (
-          <ApprovalColumnView key={column.id} column={column} loading={isLoading} />
+          <BusinessStatusColumnView key={column.id} column={column} loading={isLoading} />
         ))}
       </section>
     </div>
   );
 }
 
-function buildApprovalColumns(tickets: TicketRecord[]): ApprovalColumn[] {
-  const columns = APPROVAL_OPTIONS.map((option) => ({
+function buildBusinessStatusColumns(tickets: TicketRecord[]): BusinessStatusColumn[] {
+  const columns = BUSINESS_STATUS_OPTIONS.map((option) => ({
     id: option.value,
     label: option.label,
-    value: Number(option.value),
     cards: [] as TicketRecord[],
   }));
 
   for (const ticket of tickets) {
-    const stateValue = getApprovalStateValue(ticket);
-    const target = columns.find((column) => column.value === stateValue);
+    const target = columns.find((column) => column.id === ticket.businessStatus);
     (target ?? columns[0]!).cards.push(ticket);
   }
 
   return columns;
 }
 
-function ApprovalColumnView({ column, loading }: { column: ApprovalColumn; loading: boolean }) {
-  const tone = getColumnTone(column.value);
+function BusinessStatusColumnView({ column, loading }: { column: BusinessStatusColumn; loading: boolean }) {
+  const tone = getColumnTone(column.id);
   return (
     <Card className="flex min-h-0 min-w-[260px] flex-col overflow-hidden shadow-sm">
       <CardHeader className="flex-row items-center justify-between p-4">
@@ -188,11 +185,12 @@ function ApprovalColumnView({ column, loading }: { column: ApprovalColumn; loadi
 }
 
 function TicketCard({ ticket }: { ticket: TicketRecord }) {
-  const title = getPayloadText(ticket.payload, "hostNameInput") || getPayloadText(ticket.payload, "goodsName") || "未命名商品";
-  const subtitle = getPayloadText(ticket.payload, "goodsNameInput") || getPayloadText(ticket.payload, "bdGroup") || ticket.supplyGoodsId;
-  const city = getPayloadText(ticket.payload, "bdCity") || "未分配城市";
-  const group = getPayloadText(ticket.payload, "bdGroup") || "未分配小组";
-  const tone = getColumnTone(getApprovalStateValue(ticket));
+  const sourcePayload = ticket.sourcePayload;
+  const title = getPayloadText(sourcePayload, "hostNameInput") || getPayloadText(sourcePayload, "goodsName") || "未命名商品";
+  const subtitle = getPayloadText(sourcePayload, "goodsNameInput") || getPayloadText(sourcePayload, "bdGroup") || ticket.supplyGoodsId;
+  const city = getPayloadText(sourcePayload, "bdCity") || "未分配城市";
+  const group = getPayloadText(sourcePayload, "bdGroup") || "未分配小组";
+  const tone = getColumnTone(ticket.businessStatus);
 
   return (
     <Link
@@ -206,7 +204,7 @@ function TicketCard({ ticket }: { ticket: TicketRecord }) {
           <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{subtitle}</div>
         </div>
         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium", tone.pillClassName)}>
-          {ticket.approvalState}
+          {formatTicketBusinessStatus(ticket.businessStatus)}
         </span>
       </div>
 
@@ -226,40 +224,22 @@ function TicketCard({ ticket }: { ticket: TicketRecord }) {
   );
 }
 
-function getApprovalStateValue(ticket: TicketRecord): number {
-  const parsed = Number.parseInt(ticket.approvalState, 10);
-  if (Number.isFinite(parsed)) return parsed;
-  const option = APPROVAL_OPTIONS.find((item) => item.label === ticket.approvalState);
-  if (option) return Number(option.value);
-
-  const payloadValue = getPayloadText(ticket.payload, "approvalState");
-  const payloadParsed = Number.parseInt(payloadValue, 10);
-  if (Number.isFinite(payloadParsed)) return payloadParsed;
-  return 1;
-}
-
-function getColumnTone(stateValue: number): { countClassName: string; pillClassName: string } {
-  if (stateValue === 2) {
+function getColumnTone(status: TicketBusinessStatus): { countClassName: string; pillClassName: string } {
+  if (status === "access_review_pending") {
     return {
       countClassName: "bg-orange-100 text-orange-700",
       pillClassName: "bg-orange-50 text-orange-700 ring-1 ring-orange-200",
     };
   }
-  if (stateValue === 10) {
+  if (status === "online") {
     return {
       countClassName: "bg-emerald-100 text-emerald-700",
       pillClassName: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
     };
   }
-  if (stateValue >= 11) {
-    return {
-      countClassName: "bg-rose-100 text-rose-700",
-      pillClassName: "bg-rose-50 text-rose-700 ring-1 ring-rose-200",
-    };
-  }
   return {
-    countClassName: "bg-slate-200 text-slate-700",
-    pillClassName: "bg-slate-100 text-slate-600",
+    countClassName: "bg-sky-100 text-sky-700",
+    pillClassName: "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
   };
 }
 

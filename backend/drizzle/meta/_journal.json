@@ -43,6 +43,13 @@
       "when": 1782356197343,
       "tag": "0005_lin_ke_account_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782380371930,
+      "tag": "0006_faithful_patriot",
+      "breakpoints": true
     }
   ]
 }

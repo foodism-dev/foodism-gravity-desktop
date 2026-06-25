@@ -1,6 +1,6 @@
 {
   "name": "@proma/server",
-  "version": "0.1.16",
+  "version": "0.1.32",
   "license": "AGPL-3.0-only",
   "description": "Standalone Hono server for Proma",
   "private": true,
@@ -17,7 +17,6 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "dev": "bun run --hot src/index.ts",
-    "rebuild:backfill-assets": "bun run src/rebuild/backfill-supplygoods-assets.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test src"

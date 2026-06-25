@@ -12,16 +12,31 @@ import type {
   RebuildFieldOptionMetadata,
   RebuildMetadataClient,
 } from "./rebuild/fields.ts";
-import { SUPPLY_GOODS_SYNC_FIELDS } from "./rebuild/supplygoods.ts";
+import { SUPPLY_COMPANY_SYNC_FIELDS, SUPPLY_GOODS_SYNC_FIELDS } from "./rebuild/supplygoods.ts";
 import { createRebuildSupplyGoodsClient } from "./rebuild/supplygoods.ts";
 import type {
   RebuildSupplyGoodsClient,
+  SupplyGoodsCallbackRecordInput,
+  SupplyCompanyRecordUpsertInput,
   SupplyGoodsRecordRepository,
   SupplyGoodsRecordUpsertInput,
 } from "./rebuild/supplygoods.ts";
 import type { RebuildAssetUploader } from "./rebuild/assets.ts";
 import type { PublishSkillPackageInput, SkillPublisher } from "./skill-publisher.ts";
-import type { TicketQuery, TicketRepository, TicketWithSupplyGoods } from "./tickets.ts";
+import type {
+  CreateTicketActionRecordInput,
+  TicketActionRecord,
+  TicketQuery,
+  TicketRepository,
+  TicketWithSupplyGoods,
+} from "./tickets.ts";
+import {
+  getNextTicketFlowStateByAction,
+  normalizeTicketBusinessStatus,
+  normalizeTicketStatus,
+  TICKET_BUSINESS_STATUS,
+  TICKET_STATUS,
+} from "./ticket-status.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
 
 process.env.DATABASE_URL = "";
@@ -114,8 +129,10 @@ interface TicketsResponse {
   tickets: Array<{
     id: number;
     supply_goods_id: string;
-    approval_state: string;
+    status: string;
+    business_status: string;
     payload: Record<string, unknown>;
+    source_payload: Record<string, unknown>;
     created_at: string;
     updated_at: string;
   }>;
@@ -128,6 +145,20 @@ interface TicketDetailResponse {
   ticket: TicketsResponse["tickets"][number];
   field_options?: never;
   field_metadata?: never;
+}
+
+interface TicketActionRecordResponse {
+  ticket: TicketsResponse["tickets"][number];
+  record: {
+    id: number;
+    ticket_id: number;
+    action: string;
+    origin: Record<string, unknown>;
+    current: Record<string, unknown>;
+    operator: Record<string, unknown>;
+    remark: string | null;
+    created_at: string;
+  };
 }
 
 interface TicketMetadataResponse {
@@ -282,13 +313,23 @@ function createMemorySkillPublisher(packageUrl: string): SkillPublisher & { uplo
 function createMemorySupplyGoodsRepository(): {
   repository: SupplyGoodsRecordRepository;
   saved: SupplyGoodsRecordUpsertInput[];
+  savedCompanies: SupplyCompanyRecordUpsertInput[];
+  callbackRecords: SupplyGoodsCallbackRecordInput[];
 } {
   const saved: SupplyGoodsRecordUpsertInput[] = [];
+  const savedCompanies: SupplyCompanyRecordUpsertInput[] = [];
+  const callbackRecords: SupplyGoodsCallbackRecordInput[] = [];
   return {
     saved,
+    savedCompanies,
+    callbackRecords,
     repository: {
       async upsertRecord(input: SupplyGoodsRecordUpsertInput): Promise<void> {
         saved.push(input);
+        if (input.supplyCompany) savedCompanies.push(input.supplyCompany);
+      },
+      async createCallbackRecord(input: SupplyGoodsCallbackRecordInput): Promise<void> {
+        callbackRecords.push(input);
       },
     },
   };
@@ -297,10 +338,13 @@ function createMemorySupplyGoodsRepository(): {
 function createMemoryTicketRepository(records: TicketWithSupplyGoods[]): {
   repository: TicketRepository;
   queries: TicketQuery[];
+  actionRecords: TicketActionRecord[];
 } {
   const queries: TicketQuery[] = [];
+  const actionRecords: TicketActionRecord[] = [];
   return {
     queries,
+    actionRecords,
     repository: {
       async listTickets(query: TicketQuery) {
         queries.push(query);
@@ -314,6 +358,44 @@ function createMemoryTicketRepository(records: TicketWithSupplyGoods[]): {
 
       async getTicket(supplyGoodsId: string) {
         return records.find((record) => record.supplyGoodsId === supplyGoodsId) ?? null;
+      },
+
+      async listActionRecords(supplyGoodsId: string) {
+        const ticket = records.find((record) => record.supplyGoodsId === supplyGoodsId);
+        if (!ticket) return [];
+        return actionRecords.filter((record) => record.ticketId === ticket.id);
+      },
+
+      async createActionRecord(input: CreateTicketActionRecordInput) {
+        const ticket = records.find((record) => record.supplyGoodsId === input.supplyGoodsId);
+        if (!ticket) return null;
+
+        const updatedAt = new Date("2026-06-24T11:00:00.000Z");
+        ticket.payload = {
+          ...ticket.payload,
+          ...input.current,
+        };
+        const nextState = getNextTicketFlowStateByAction(input.action, {
+          status: normalizeTicketStatus(ticket.status),
+          businessStatus: normalizeTicketBusinessStatus(ticket.businessStatus),
+        });
+        ticket.status = nextState.status;
+        ticket.businessStatus = nextState.businessStatus;
+        ticket.updatedAt = updatedAt;
+
+        const record: TicketActionRecord = {
+          id: actionRecords.length + 1,
+          ticketId: ticket.id,
+          action: input.action,
+          origin: input.origin,
+          current: input.current,
+          operator: input.operator,
+          remark: input.remark,
+          createdAt: updatedAt,
+        };
+        actionRecords.push(record);
+
+        return { ticket, record };
       },
     },
   };
@@ -375,6 +457,14 @@ describe("server app", () => {
     expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("hasPushedMiddleSide");
     expect(SUPPLY_GOODS_SYNC_FIELDS).toContain("regionRatingCertificate");
     expect(new Set(SUPPLY_GOODS_SYNC_FIELDS).size).toBe(SUPPLY_GOODS_SYNC_FIELDS.length);
+  });
+
+  test("Given SupplyCompany sync fields, When querying REBUILD, Then it requests company detail data", () => {
+    expect(SUPPLY_COMPANY_SYNC_FIELDS).toContain("SupplyCompanyId");
+    expect(SUPPLY_COMPANY_SYNC_FIELDS).toContain("companyName");
+    expect(SUPPLY_COMPANY_SYNC_FIELDS).toContain("legalPerson");
+    expect(SUPPLY_COMPANY_SYNC_FIELDS).toContain("guestId");
+    expect(new Set(SUPPLY_COMPANY_SYNC_FIELDS).size).toBe(SUPPLY_COMPANY_SYNC_FIELDS.length);
   });
 
   test("Given SupplyGoods fields stored in database, When querying REBUILD twice, Then it uses cached database fields", async () => {
@@ -442,6 +532,73 @@ describe("server app", () => {
     expect(queriedFields[0]?.split(",")).toContain("mealType");
     expect(queriedFields[0]?.split(",")).toContain("mealType.text");
     expect(queriedFields[1]).toBe(queriedFields[0]);
+  });
+
+  test("Given SupplyCompany fields stored in database, When querying REBUILD, Then it requests current company fields", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalBaseUrl = Bun.env.REBUILD_BASE_URL;
+    const originalAppId = Bun.env.REBUILD_APP_ID;
+    const originalAppSecret = Bun.env.REBUILD_APP_SECRET;
+    const queriedFields: string[] = [];
+
+    Bun.env.REBUILD_BASE_URL = "https://rebuild.example.com";
+    Bun.env.REBUILD_APP_ID = "app-id";
+    Bun.env.REBUILD_APP_SECRET = "app-secret";
+    const fetchMock = async (...args: Parameters<typeof fetch>): Promise<Response> => {
+      const [input] = args;
+      const url = new URL(String(input));
+      queriedFields.push(url.searchParams.get("fields") ?? "");
+      return new Response(JSON.stringify({
+        error_code: 0,
+        error_msg: "",
+        data: { SupplyCompanyId: url.searchParams.get("id") ?? "", guestId: "guest-001" },
+      }));
+    };
+    globalThis.fetch = Object.assign(fetchMock, { preconnect: originalFetch.preconnect });
+
+    const fieldRepository = {
+      async listFieldsByEntity(entityName: string): Promise<RebuildFieldMetadata[]> {
+        return [
+          {
+            entityName,
+            fieldName: "SupplyCompanyId",
+            label: "商户ID",
+            fieldType: "TEXT",
+            raw: { name: "SupplyCompanyId", type: "TEXT" },
+          },
+          {
+            entityName,
+            fieldName: "guestId",
+            label: "来客账户ID",
+            fieldType: "TEXT",
+            raw: { name: "guestId", displayType: "TEXT" },
+          },
+          {
+            entityName,
+            fieldName: "auditStatus",
+            label: "审核状态",
+            fieldType: "PICKLIST",
+            raw: { name: "auditStatus", displayType: "PICKLIST" },
+          },
+        ];
+      },
+    } as unknown as RebuildFieldMetadataRepository;
+
+    try {
+      const client = createRebuildSupplyGoodsClient({
+        fieldMetadataRepository: fieldRepository,
+        fieldCacheTtlMs: 60_000,
+      });
+
+      await client.getSupplyCompany?.("945-current-fields");
+    } finally {
+      globalThis.fetch = originalFetch;
+      Bun.env.REBUILD_BASE_URL = originalBaseUrl;
+      Bun.env.REBUILD_APP_ID = originalAppId;
+      Bun.env.REBUILD_APP_SECRET = originalAppSecret;
+    }
+
+    expect(queriedFields).toEqual(["SupplyCompanyId,guestId,auditStatus,auditStatus.text"]);
   });
 
   test("Given the server is running, When health is requested, Then it returns ok", async () => {
@@ -867,21 +1024,65 @@ describe("server app", () => {
   });
 
   test("Given a SupplyGoods callback, When supply_goods_id is provided, Then it refreshes and saves the latest REBUILD record", async () => {
-    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const { repository, saved, savedCompanies, callbackRecords } = createMemorySupplyGoodsRepository();
+    const { repository: fieldRepository, fields: syncedFields, options: syncedOptions } = createMemoryFieldRepository();
     const queriedIds: string[] = [];
+    const queriedCompanyIds: string[] = [];
     const rebuildClient: RebuildSupplyGoodsClient = {
       async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
         queriedIds.push(supplyGoodsId);
         return {
           SupplyGoodsId: supplyGoodsId,
           goodsName: "测试商品",
+          company: {
+            id: "945-company",
+            text: "测试公司",
+            entity: "SupplyCompany",
+          },
           approvalState: { value: 2, text: "审批中" },
         };
+      },
+      async getSupplyCompany(supplyCompanyId: string): Promise<Record<string, unknown>> {
+        queriedCompanyIds.push(supplyCompanyId);
+        return {
+          SupplyCompanyId: supplyCompanyId,
+          companyName: "测试公司",
+          legalPerson: "张三",
+        };
+      },
+    };
+    const metadataClient: RebuildMetadataClient = {
+      async listFields(entityName: string): Promise<RebuildFieldMetadata[]> {
+        if (entityName !== "SupplyCompany") return [];
+        return [
+          {
+            entityName,
+            fieldName: "companyType",
+            label: "商户类型",
+            fieldType: "PICKLIST",
+            raw: { name: "companyType", displayType: "PICKLIST" },
+          },
+        ];
+      },
+
+      async listPicklistOptions(entityName: string, fieldName: string): Promise<RebuildFieldOptionMetadata[]> {
+        if (entityName !== "SupplyCompany" || fieldName !== "companyType") return [];
+        return normalizeRebuildFieldOptions(entityName, fieldName, [{ id: "restaurant", text: "餐饮商户" }]);
+      },
+
+      async listMultiselectOptions(): Promise<RebuildFieldOptionMetadata[]> {
+        return [];
+      },
+
+      async listClassificationOptions(): Promise<RebuildFieldOptionMetadata[]> {
+        return [];
       },
     };
     const app = createServerApp({
       rebuildSupplyGoodsClient: rebuildClient,
+      rebuildMetadataClient: metadataClient,
       supplyGoodsRecordRepository: repository,
+      rebuildFieldMetadataRepository: fieldRepository,
     });
 
     const response = await app.request("/api/rebuild/supplygoods/callback", {
@@ -896,19 +1097,48 @@ describe("server app", () => {
     expect(body.supply_goods_id).toBe("944-019eee7db58948ec");
     expect(typeof body.updated_at).toBe("string");
     expect(queriedIds).toEqual(["944-019eee7db58948ec"]);
+    expect(queriedCompanyIds).toEqual(["945-company"]);
+    expect(syncedFields.map((field) => `${field.entityName}.${field.fieldName}`)).toContain("SupplyCompany.companyType");
+    expect(syncedOptions.map((option) => option.optionLabel)).toContain("餐饮商户");
     expect(saved).toHaveLength(1);
+    expect(savedCompanies).toHaveLength(1);
+    const savedCompany = savedCompanies[0]!;
+    expect(savedCompany).toBeDefined();
+    expect(savedCompanies).toEqual([
+      {
+        supplyCompanyId: "945-company",
+        payload: {
+          SupplyCompanyId: "945-company",
+          companyName: "测试公司",
+          legalPerson: "张三",
+        },
+        updatedAt: savedCompany.updatedAt,
+      },
+    ]);
     const savedRecord = saved[0];
     expect(savedRecord).toBeDefined();
     expect(savedRecord?.supplyGoodsId).toBe("944-019eee7db58948ec");
+    expect(savedRecord?.rawPayload).toEqual({ supply_goods_id: "944-019eee7db58948ec" });
     expect(savedRecord?.payload).toEqual({
       SupplyGoodsId: "944-019eee7db58948ec",
       goodsName: "测试商品",
+      company: {
+        id: "945-company",
+        text: "测试公司",
+        entity: "SupplyCompany",
+      },
       approvalState: { value: 2, text: "审批中" },
     });
+    expect(savedRecord?.normalizedPayload).toEqual(savedRecord?.payload);
+    expect(callbackRecords).toHaveLength(1);
+    expect(callbackRecords[0]?.rawPayload).toEqual({ supply_goods_id: "944-019eee7db58948ec" });
+    expect(callbackRecords[0]?.payload).toEqual(savedRecord?.payload);
+    expect(callbackRecords[0]?.normalizedPayload).toEqual(savedRecord?.normalizedPayload);
+    expect(callbackRecords[0]?.status).toBe("success");
   });
 
   test("Given a SupplyGoods callback with media fields, When asset uploader is configured, Then it saves converted asset urls", async () => {
-    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const { repository, saved, callbackRecords } = createMemorySupplyGoodsRepository();
     const { repository: fieldRepository, fields } = createMemoryFieldRepository();
     fields.push({
       entityName: "SupplyGoods",
@@ -948,14 +1178,10 @@ describe("server app", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(saved[0]?.assets).toEqual({
-      mainPic: [
-        {
-          source: "rb/20260624/main.jpg",
-          url: "https://cdn.example.com/mainPic/main.jpg",
-        },
-      ],
-    });
+    expect(saved[0]?.payload.mainPic).toEqual(["rb/20260624/main.jpg"]);
+    expect(saved[0]?.normalizedPayload.mainPic).toEqual(["https://cdn.example.com/mainPic/main.jpg"]);
+    expect(callbackRecords[0]?.payload.mainPic).toEqual(["rb/20260624/main.jpg"]);
+    expect(callbackRecords[0]?.normalizedPayload.mainPic).toEqual(["https://cdn.example.com/mainPic/main.jpg"]);
   });
 
   test("Given a REBUILD SupplyGoods hook callback, When primaryId is provided, Then the compatible URL also syncs the record", async () => {
@@ -993,14 +1219,20 @@ describe("server app", () => {
     });
   });
 
-  test("Given tickets exist, When list API is filtered, Then it delegates query and returns SupplyGoods payload", async () => {
+  test("Given tickets exist, When list API is filtered, Then it delegates query and returns current and source payload", async () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository, queries } = createMemoryTicketRepository([
       {
         id: 1,
         supplyGoodsId: "944-019b72fc5f247d73",
-        approvalState: "审批中",
+        status: TICKET_STATUS.TODO,
+        businessStatus: TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING,
         payload: {
+          commission: {
+            commissionRate: 0.12,
+          },
+        },
+        sourcePayload: {
           SupplyGoodsId: "944-019b72fc5f247d73",
           hostNameInput: "禧聚晟宴",
           goodsNameInput: "3-4人餐",
@@ -1011,13 +1243,13 @@ describe("server app", () => {
     ]);
     const app = createServerApp({ ticketRepository: repository });
 
-    const response = await app.request("/api/tickets?approvalState=%E5%AE%A1%E6%89%B9%E4%B8%AD&q=%E7%A6%A7&pageNo=2&pageSize=10");
+    const response = await app.request("/api/tickets?businessStatus=access_review_pending&q=%E7%A6%A7&pageNo=2&pageSize=10");
     const body = (await response.json()) as TicketsResponse;
 
     expect(response.status).toBe(200);
     expect(queries).toEqual([
       {
-        approvalState: "审批中",
+        businessStatus: TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING,
         q: "禧",
         pageNo: 2,
         pageSize: 10,
@@ -1025,7 +1257,10 @@ describe("server app", () => {
     ]);
     expect(body.total).toBe(1);
     expect(body.tickets[0]?.supply_goods_id).toBe("944-019b72fc5f247d73");
-    expect(body.tickets[0]?.payload.hostNameInput).toBe("禧聚晟宴");
+    expect(body.tickets[0]?.status).toBe(TICKET_STATUS.TODO);
+    expect(body.tickets[0]?.business_status).toBe(TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING);
+    expect(body.tickets[0]?.payload.commission).toEqual({ commissionRate: 0.12 });
+    expect(body.tickets[0]?.source_payload.hostNameInput).toBe("禧聚晟宴");
   });
 
   test("Given a ticket exists, When detail API is requested, Then it returns that ticket", async () => {
@@ -1034,8 +1269,14 @@ describe("server app", () => {
       {
         id: 2,
         supplyGoodsId: "944-detail",
-        approvalState: "通过",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
         payload: {
+          copywriting: {
+            optimizedTitle: "详情套餐",
+          },
+        },
+        sourcePayload: {
           SupplyGoodsId: "944-detail",
           goodsNameInput: "详情套餐",
         },
@@ -1050,9 +1291,272 @@ describe("server app", () => {
 
     expect(response.status).toBe(200);
     expect(body.ticket.supply_goods_id).toBe("944-detail");
-    expect(body.ticket.approval_state).toBe("通过");
+    expect("approval_state" in body.ticket).toBe(false);
+    expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
     expect("field_options" in body).toBe(false);
     expect("field_metadata" in body).toBe(false);
+  });
+
+  test("Given an action record has mismatched fields, When creating it, Then the API rejects it", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 3,
+        supplyGoodsId: "944-action",
+        status: TICKET_STATUS.TODO,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-action/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "commission_filled",
+        origin: {
+          commissionMode: null,
+          commissionRate: null,
+        },
+        current: {
+          commissionMode: "rate",
+          commissionAmount: 12,
+        },
+      }),
+    });
+    const body = (await response.json()) as ErrorResponse;
+
+    expect(response.status).toBe(400);
+    expect(body.message).toBe("origin 和 current 字段必须一致");
+  });
+
+  test("Given a valid action record, When creating it, Then the ticket payload stores the latest current data", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 3,
+        supplyGoodsId: "944-action",
+        status: TICKET_STATUS.TODO,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: {
+          goodsNameInput: "原始套餐",
+          commissionMode: null,
+          commissionRate: null,
+          commissionAmount: null,
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-action/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "commission_filled",
+        origin: {
+          commissionMode: null,
+          commissionRate: null,
+          commissionAmount: null,
+        },
+        current: {
+          commissionMode: "rate",
+          commissionRate: 0.12,
+          commissionAmount: null,
+        },
+        operator: {
+          name: "运营A",
+        },
+        remark: "按商品售价 12% 设置",
+      }),
+    });
+    const body = (await response.json()) as TicketActionRecordResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ticket.payload.goodsNameInput).toBe("原始套餐");
+    expect(body.ticket.payload.commissionMode).toBe("rate");
+    expect(body.ticket.payload.commissionRate).toBe(0.12);
+    expect(body.ticket.payload.commissionAmount).toBeNull();
+    expect(body.ticket.payload.commission).toBeUndefined();
+    expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
+    expect(body.record.action).toBe("commission_filled");
+    expect(body.record.operator.name).toBe("运营A");
+  });
+
+  test("Given an action record without module, When creating it, Then the API accepts the simplified action record", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 4,
+        supplyGoodsId: "944-action-without-module",
+        status: TICKET_STATUS.TODO,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-action-without-module/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "info_optimization_started",
+        origin: {},
+        current: {},
+      }),
+    });
+    const body = (await response.json()) as TicketActionRecordResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.record.action).toBe("info_optimization_started");
+    expect("module" in body.record).toBe(false);
+  });
+
+  test("Given an info optimized action record, When creating it, Then the ticket status moves to shelf confirmation", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 5,
+        supplyGoodsId: "944-status-action",
+        status: TICKET_STATUS.TODO,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: {
+          goodsNameInput: "原始套餐",
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-status-action/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "info_optimized",
+        origin: {
+          goodsName: "原始套餐",
+          goodsNameInput: "原始套餐",
+        },
+        current: {
+          goodsName: "优化套餐",
+          goodsNameInput: "优化套餐",
+        },
+      }),
+    });
+    const body = (await response.json()) as TicketActionRecordResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING);
+    expect(body.ticket.payload.goodsName).toBe("优化套餐");
+    expect(body.ticket.payload.goodsNameInput).toBe("优化套餐");
+  });
+
+  test("Given a processing action record, When creating it, Then only overall status changes", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 6,
+        supplyGoodsId: "944-processing-action",
+        status: TICKET_STATUS.TODO,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: {
+          goodsNameInput: "原始套餐",
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-processing-action/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "info_optimization_started",
+        origin: {},
+        current: {},
+      }),
+    });
+    const body = (await response.json()) as TicketActionRecordResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
+    expect(body.ticket.payload.goodsNameInput).toBe("原始套餐");
+  });
+
+  test("Given a shelf confirmation action record, When creating it, Then the ticket moves to commission setup", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 7,
+        supplyGoodsId: "944-shelf-action",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING,
+        payload: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-shelf-action/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "shelf_online_confirmed",
+        origin: { onlineGoodsUrl: null },
+        current: { onlineGoodsUrl: "https://example.com/goods/1" },
+      }),
+    });
+    const body = (await response.json()) as TicketActionRecordResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING);
+    expect(body.ticket.payload.onlineGoodsUrl).toBe("https://example.com/goods/1");
+  });
+
+  test("Given a commission configured action record, When creating it, Then the ticket is done and online", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 8,
+        supplyGoodsId: "944-commission-action",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING,
+        payload: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-commission-action/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "commission_configured",
+        origin: { commissionConfigured: null },
+        current: { commissionConfigured: true },
+      }),
+    });
+    const body = (await response.json()) as TicketActionRecordResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ticket.status).toBe(TICKET_STATUS.DONE);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.ONLINE);
+    expect(body.ticket.payload.commissionConfigured).toBe(true);
   });
 
   test("Given field options exist, When ticket metadata API is requested, Then it returns shared field dictionaries", async () => {
@@ -1105,28 +1609,22 @@ describe("server app", () => {
     });
   });
 
-  test("Given ticket has mirrored assets, When detail API is requested, Then payload media paths are replaced by asset urls", async () => {
+  test("Given ticket source payload already has normalized media urls, When detail API is requested, Then it returns payload without asset side channel", async () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository } = createMemoryTicketRepository([
       {
         id: 4,
         supplyGoodsId: "944-asset-detail",
-        approvalState: "审批中",
-        payload: {
+        status: TICKET_STATUS.TODO,
+        businessStatus: TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING,
+        payload: {},
+        sourcePayload: {
           SupplyGoodsId: "944-asset-detail",
-          mainPic: ["rb/20260624/main.jpg"],
-        },
-        assets: {
-          mainPic: [
-            {
-              source: "rb/20260624/main.jpg",
-              url: "https://cdn.example.com/main.jpg",
-            },
-          ],
+          mainPic: ["https://cdn.example.com/main.jpg"],
         },
         createdAt: now,
         updatedAt: now,
-      } as TicketWithSupplyGoods,
+      },
     ]);
     const app = createServerApp({ ticketRepository: repository });
 
@@ -1134,7 +1632,9 @@ describe("server app", () => {
     const body = (await response.json()) as TicketDetailResponse;
 
     expect(response.status).toBe(200);
-    expect(body.ticket.payload.mainPic).toEqual(["https://cdn.example.com/main.jpg"]);
+    expect(body.ticket.source_payload.mainPic).toEqual(["https://cdn.example.com/main.jpg"]);
+    expect("assets" in body.ticket).toBe(false);
+    expect("source_assets" in body.ticket).toBe(false);
   });
 
   test("Given REBUILD metadata client, When syncing SupplyGoods fields, Then it stores fields and options in pg repository", async () => {
@@ -1228,6 +1728,70 @@ describe("server app", () => {
     expect(options.map((option) => option.optionLabel)).toContain("抖音来客（闭环）");
     expect(options.map((option) => option.optionLabel)).toContain("直播间");
     expect(options.map((option) => option.optionLabel)).toContain("同城玩享 / 运动健身");
+  });
+
+  test("Given REBUILD metadata client, When syncing SupplyCompany fields, Then it reuses entity metadata sync", async () => {
+    const { repository, fields, options } = createMemoryFieldRepository();
+    const metadataClient: RebuildMetadataClient = {
+      async listFields(entityName: string): Promise<RebuildFieldMetadata[]> {
+        return [
+          {
+            entityName,
+            fieldName: "companyType",
+            label: "商户类型",
+            fieldType: "PICKLIST",
+            raw: {
+              name: "companyType",
+              label: "商户类型",
+              displayType: "PICKLIST",
+            },
+          },
+          {
+            entityName,
+            fieldName: "businessScope",
+            label: "经营范围",
+            fieldType: "MULTISELECT",
+            raw: {
+              name: "businessScope",
+              label: "经营范围",
+              displayType: "MULTISELECT",
+            },
+          },
+        ];
+      },
+
+      async listPicklistOptions(entityName: string, fieldName: string): Promise<RebuildFieldOptionMetadata[]> {
+        if (fieldName !== "companyType") return [];
+        return normalizeRebuildFieldOptions(entityName, fieldName, [{ id: "restaurant", text: "餐饮商户" }]);
+      },
+
+      async listMultiselectOptions(entityName: string, fieldName: string): Promise<RebuildFieldOptionMetadata[]> {
+        if (fieldName !== "businessScope") return [];
+        return normalizeRebuildFieldOptions(entityName, fieldName, [{ mask: 1, text: "堂食" }]);
+      },
+
+      async listClassificationOptions(): Promise<RebuildFieldOptionMetadata[]> {
+        return [];
+      },
+    };
+    const app = createServerApp({
+      rebuildMetadataClient: metadataClient,
+      rebuildFieldMetadataRepository: repository,
+    });
+
+    const response = await app.request("/api/rebuild/supplycompany/fields/sync", { method: "POST" });
+    const body = (await response.json()) as RebuildFieldSyncResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.entity).toBe("SupplyCompany");
+    expect(body.fields).toBe(2);
+    expect(body.options).toBe(2);
+    expect(fields.map((field) => `${field.entityName}.${field.fieldName}`)).toEqual([
+      "SupplyCompany.companyType",
+      "SupplyCompany.businessScope",
+    ]);
+    expect(options.map((option) => option.optionLabel)).toEqual(["餐饮商户", "堂食"]);
   });
 
   test("Given stored field options, When options API is requested, Then it returns option values", async () => {

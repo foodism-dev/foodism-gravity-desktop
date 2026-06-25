@@ -1,20 +1,40 @@
 import { describe, expect, test } from "bun:test";
 import { getTableName } from "drizzle-orm";
 
-import { rebuildFieldOptions, rebuildFields, rebuildSupplyGoods, tickets } from "./schema.ts";
+import {
+  rebuildFieldOptions,
+  rebuildFields,
+  rebuildSupplyCompany,
+  rebuildSupplyGoods,
+  rebuildSupplyGoodsCallbackRecords,
+  tickets,
+} from "./schema.ts";
 
 describe("数据库 schema", () => {
   test("SupplyGoods 落库表使用业务命名与 supply_goods_id 唯一键", () => {
     expect(getTableName(rebuildSupplyGoods)).toBe("rebuild_supply_goods");
     expect(rebuildSupplyGoods.supplyGoodsId.name).toBe("supply_goods_id");
-    expect(rebuildSupplyGoods.assets.name).toBe("assets");
     expect("syncedAt" in rebuildSupplyGoods).toBe(false);
   });
 
-  test("工单表关联 SupplyGoods 业务 ID 并保存审核状态", () => {
+  test("SupplyCompany 落库表使用业务命名与 supply_company_id 唯一键", () => {
+    expect(getTableName(rebuildSupplyCompany)).toBe("rebuild_supply_company");
+    expect(rebuildSupplyCompany.supplyCompanyId.name).toBe("supply_company_id");
+    expect(rebuildSupplyCompany.payload.name).toBe("payload");
+  });
+
+  test("SupplyGoods callback 记录表保存原始、查询和标准化 payload", () => {
+    expect(getTableName(rebuildSupplyGoodsCallbackRecords)).toBe("rebuild_supply_goods_callback_records");
+    expect(rebuildSupplyGoodsCallbackRecords.rawPayload.name).toBe("raw_payload");
+    expect(rebuildSupplyGoodsCallbackRecords.payload.name).toBe("payload");
+    expect(rebuildSupplyGoodsCallbackRecords.normalizedPayload.name).toBe("normalized_payload");
+  });
+
+  test("工单表关联 SupplyGoods 业务 ID 并保存整体状态和业务状态", () => {
     expect(getTableName(tickets)).toBe("tickets");
     expect(tickets.supplyGoodsId.name).toBe("supply_goods_id");
-    expect(tickets.approvalState.name).toBe("approval_state");
+    expect(tickets.status.name).toBe("status");
+    expect(tickets.businessStatus.name).toBe("business_status");
   });
 
   test("REBUILD 字段元数据表按实体和字段存储定义与选项", () => {

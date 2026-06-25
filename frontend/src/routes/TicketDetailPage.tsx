@@ -1,14 +1,19 @@
 import {
   ArrowLeft,
+  Bot,
+  CheckCircle2,
   ClipboardCheck,
   ExternalLink,
   FileText,
   ImageIcon,
   LinkIcon,
   Maximize2,
+  RotateCcw,
   RefreshCw,
+  Send,
+  Sparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -20,6 +25,7 @@ import { ensureTicketMetadataAtom, ticketMetadataStateAtom } from "@/atoms/ticke
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
+import { Input } from "@/components/ui/input.tsx";
 import {
   Dialog,
   DialogContent,
@@ -29,9 +35,26 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
-import { getTicket, type TicketMetadata, type TicketRecord } from "@/lib/api.ts";
+import {
+  createTicketActionRecord,
+  getTicket,
+  getTicketActionRecords,
+  type TicketActionRecord,
+  type TicketMetadata,
+  type TicketRecord,
+} from "@/lib/api.ts";
 import { getPayloadDisplayText, type FieldDisplayContext } from "@/lib/field-display.ts";
 import { buildMediaPreviewItems, type MediaPreviewItem, type MediaPreviewKind } from "@/lib/media-preview.ts";
+import {
+  requestTicketInfoOptimization,
+  type TicketInfoOptimizationResult,
+} from "@/lib/ticket-info-optimization.ts";
+import {
+  buildTicketWorkbenchModel,
+  formatTicketBusinessStatus,
+  type TicketWorkbenchModel,
+  type WorkbenchActionButton,
+} from "@/lib/ticket-detail-workbench.ts";
 import { cn } from "@/lib/utils.ts";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -43,6 +66,7 @@ const PDF_PREVIEW_OPTIONS = {
 };
 
 const PDF_PREVIEW_CACHE_BUST = "20260624-cors";
+const SUPPLY_GOODS_APPROVAL_BASE_URL = "https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods";
 
 interface TicketDetailPageProps {
   authState: AuthState;
@@ -67,6 +91,21 @@ interface DetailSection {
   description?: string;
   fields: DetailField[];
 }
+
+interface CommissionRateField {
+  label: string;
+  max: number;
+}
+
+type CommissionRateValues = Record<string, string>;
+
+const COMMISSION_RATE_FIELDS: CommissionRateField[] = [
+  { label: "线上经营", max: 80 },
+  { label: "职人账号", max: 20 },
+  { label: "增量宝", max: 80 },
+  { label: "获客卡", max: 80 },
+  { label: "线下扫码", max: 80 },
+];
 
 const BASIC_SECTIONS: DetailSection[] = [
   {
@@ -181,6 +220,9 @@ export function TicketDetailPage({ authState, ticketId }: TicketDetailPageProps)
   const metadataState = useAtomValue(ticketMetadataStateAtom);
   const ensureTicketMetadata = useSetAtom(ensureTicketMetadataAtom);
   const [ticket, setTicket] = useState<TicketRecord | null>(null);
+  const [records, setRecords] = useState<TicketActionRecord[]>([]);
+  const [isLoadingRecords, setIsLoadingRecords] = useState(true);
+  const [recordErrorMessage, setRecordErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -191,6 +233,26 @@ export function TicketDetailPage({ authState, ticketId }: TicketDetailPageProps)
   useEffect(() => {
     void ensureTicketMetadata();
   }, [ensureTicketMetadata]);
+
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoadingRecords(true);
+    setRecordErrorMessage("");
+    getTicketActionRecords(ticketId)
+      .then((nextRecords) => {
+        if (isMounted) setRecords(nextRecords);
+      })
+      .catch((error) => {
+        if (isMounted) setRecordErrorMessage(error instanceof Error ? error.message : "加载变更记录失败");
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingRecords(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [ticketId]);
 
   async function refreshTicket(nextTicketId = ticketId) {
     setIsLoading(true);
@@ -220,6 +282,11 @@ export function TicketDetailPage({ authState, ticketId }: TicketDetailPageProps)
       metadata={metadata}
       authState={authState}
       onRefresh={() => void refreshTicket()}
+      onTicketUpdated={setTicket}
+      records={records}
+      setRecords={setRecords}
+      isLoadingRecords={isLoadingRecords}
+      recordErrorMessage={recordErrorMessage}
     />
   );
 }
@@ -229,71 +296,281 @@ function LoadedTicketDetail({
   metadata,
   authState,
   onRefresh,
+  onTicketUpdated,
+  records,
+  setRecords,
+  isLoadingRecords,
+  recordErrorMessage,
 }: {
   ticket: TicketRecord;
   metadata: TicketMetadata;
   authState: AuthState;
   onRefresh: () => void;
+  onTicketUpdated: (ticket: TicketRecord) => void;
+  records: TicketActionRecord[];
+  setRecords: Dispatch<SetStateAction<TicketActionRecord[]>>;
+  isLoadingRecords: boolean;
+  recordErrorMessage: string;
 }) {
-  const payload = ticket.payload;
-  const title = displayPayloadText(ticket, metadata, "goodsName", "goodsNameInput") || "未命名商品";
-  const merchant = displayPayloadText(ticket, metadata, "hostNameInput", "rbhost.hostName", "rbhost") || "未提供商户";
+  const sourcePayload = ticket.sourcePayload;
+  const currentPayload = useMemo(
+    () => buildCurrentDisplayPayload(sourcePayload, ticket.payload),
+    [sourcePayload, ticket.payload],
+  );
+  const title = displayPayloadText(currentPayload, metadata, "goodsName", "goodsNameInput") || "未命名商品";
+  const merchant = displayPayloadText(currentPayload, metadata, "hostNameInput", "rbhost.hostName", "rbhost") || "未提供商户";
   const updatedAt = useMemo(() => formatDateTime(ticket.updatedAt), [ticket.updatedAt]);
+  const workbenchModel = useMemo(() => buildTicketWorkbenchModel(ticket, records), [ticket, records]);
+  const [optimizationResult, setOptimizationResult] = useState<TicketInfoOptimizationResult | null>(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizationErrorMessage, setOptimizationErrorMessage] = useState("");
+  const [shelfGoodsUrl, setShelfGoodsUrl] = useState("");
+  const [linkeCommission, setLinkeCommission] = useState<CommissionRateValues>(() => buildInitialLinkeCommission(ticket.payload));
+  const [isActionSubmitting, setIsActionSubmitting] = useState(false);
+  const [actionErrorMessage, setActionErrorMessage] = useState("");
+
+  useEffect(() => {
+    if (workbenchModel.currentFlow !== "info_optimization") {
+      setOptimizationResult(null);
+      setOptimizationErrorMessage("");
+      return;
+    }
+    void runInfoOptimization(1);
+  }, [ticket.supplyGoodsId, workbenchModel.currentFlow]);
+
+  useEffect(() => {
+    setLinkeCommission(buildInitialLinkeCommission(ticket.payload));
+  }, [ticket.supplyGoodsId, ticket.payload]);
+
+  async function runInfoOptimization(generation: number) {
+    setIsOptimizing(true);
+    setOptimizationErrorMessage("");
+    try {
+      setOptimizationResult(await requestTicketInfoOptimization(ticket, generation));
+    } catch (error) {
+      setOptimizationErrorMessage(error instanceof Error ? error.message : "信息优化生成失败");
+    } finally {
+      setIsOptimizing(false);
+    }
+  }
+
+  async function confirmInfoOptimization() {
+    if (!optimizationResult) return;
+    await submitTicketAction({
+      action: "info_optimized",
+      origin: optimizationResult.origin,
+      current: optimizationResult.current,
+      operator: { source: "mock_info_optimizer" },
+      remark: "确认采用信息优化结果",
+    });
+    setOptimizationResult(null);
+  }
+
+  async function confirmShelfOnline() {
+    const url = shelfGoodsUrl.trim();
+    if (!url) {
+      setActionErrorMessage("请先填写商品链接");
+      return;
+    }
+    await submitTicketAction({
+      action: "shelf_online_confirmed",
+      origin: {
+        onlineGoodsUrl: readRecordValue(ticket.payload, "onlineGoodsUrl"),
+      },
+      current: {
+        onlineGoodsUrl: url,
+      },
+      operator: { source: "operator" },
+      remark: "确认货架上线并录入商品链接",
+    });
+  }
+
+  async function confirmCommission() {
+    const validationMessage = validateLinkeCommission(linkeCommission);
+    if (validationMessage) {
+      setActionErrorMessage(validationMessage);
+      return;
+    }
+
+    const confirmedAt = new Date().toISOString();
+    const normalizedLinkeCommission = normalizeLinkeCommission(linkeCommission);
+    await submitTicketAction({
+      action: "commission_configured",
+      origin: {
+        linkeCommission: readRecordValue(ticket.payload, "linkeCommission"),
+        commissionConfigured: readRecordValue(ticket.payload, "commissionConfigured"),
+        commissionConfiguredAt: readRecordValue(ticket.payload, "commissionConfiguredAt"),
+      },
+      current: {
+        linkeCommission: normalizedLinkeCommission,
+        commissionConfigured: true,
+        commissionConfiguredAt: confirmedAt,
+      },
+      operator: { source: "operator" },
+      remark: "确认佣金设置完成",
+    });
+  }
+
+  async function manualModifyCommission() {
+    await submitTicketAction({
+      action: "commission_manual_revision",
+      origin: {},
+      current: {},
+      operator: { source: "operator" },
+      remark: "进入佣金字段人工修改",
+    });
+  }
+
+  async function returnToManualRevision() {
+    await submitTicketAction({
+      action: "return_to_manual_revision",
+      origin: {},
+      current: {},
+      operator: { source: "operator" },
+      remark: "返回人工修改信息优化内容",
+    });
+  }
+
+  async function submitTicketAction(input: Parameters<typeof createTicketActionRecord>[1]) {
+    setIsActionSubmitting(true);
+    setActionErrorMessage("");
+    try {
+      const result = await createTicketActionRecord(ticket.supplyGoodsId, input);
+      onTicketUpdated(result.ticket);
+      setRecords((currentRecords) => [result.record, ...currentRecords]);
+      if (input.action === "shelf_online_confirmed") {
+        setShelfGoodsUrl("");
+      }
+    } catch (error) {
+      setActionErrorMessage(error instanceof Error ? error.message : "操作失败");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="sticky top-14 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
-            <Button variant="ghost" size="sm" asChild className="-ml-2 mb-2">
-              <Link to="/tickets">
-                <ArrowLeft className="h-4 w-4" />
-                返回列表
-              </Link>
-            </Button>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="max-w-4xl truncate text-xl font-semibold text-slate-950">{title}</h1>
-              <Badge variant="default">{ticket.approvalState}</Badge>
-              <Badge variant={authState.token ? "success" : "muted"}>
-                {authState.token ? "已桥接登录态" : "本地接口"}
-              </Badge>
+    <div className="min-h-screen bg-white">
+      <div className="mx-auto grid max-w-[1480px] gap-6 px-5 py-6 xl:grid-cols-[minmax(0,980px)_280px]">
+        <div className="min-w-0 rounded-md bg-slate-100 px-8 py-7">
+          <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <Button variant="ghost" size="sm" asChild className="-ml-2 h-7 px-2 text-xs text-slate-500">
+                  <Link to="/tickets">
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    我的工单
+                  </Link>
+                </Button>
+                <span>/</span>
+                <span>{ticket.supplyGoodsId}</span>
+                <span>/</span>
+                <span>{formatTicketBusinessStatus(ticket.businessStatus)}</span>
+              </div>
+              <h1 className="truncate text-2xl font-semibold tracking-normal text-slate-950">{merchant} · {title}</h1>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Badge variant="success" className="rounded-full">{formatTicketBusinessStatus(ticket.businessStatus)}</Badge>
+                <Badge variant="muted" className="rounded-full">工单 · {formatOverallStatus(ticket.status)}</Badge>
+                <Badge variant={authState.token ? "success" : "muted"} className="rounded-full">
+                  {authState.token ? "已桥接登录态" : "本地接口"}
+                </Badge>
+                <span className="text-xs text-slate-500">更新 {updatedAt}</span>
+              </div>
             </div>
-            <p className="mt-1 text-sm text-slate-500">
-              {merchant} · {ticket.supplyGoodsId} · 更新 {updatedAt}
-            </p>
+            <Button variant="outline" size="sm" onClick={onRefresh} className="bg-white">
+              <RefreshCw className="h-4 w-4" />
+              刷新
+            </Button>
           </div>
-          <Button variant="outline" onClick={onRefresh}>
-            <RefreshCw className="h-4 w-4" />
-            刷新
-          </Button>
-        </div>
-      </div>
 
-      <div className="mx-auto max-w-6xl space-y-5 px-4 py-5">
-        <SummaryStrip ticket={ticket} metadata={metadata} />
-        <DetailSections sections={BASIC_SECTIONS} payload={payload} displayContext={metadata} />
-        <MediaSection ticket={ticket} metadata={metadata} />
-        <DetailSections sections={PACKAGE_SECTIONS} payload={payload} displayContext={metadata} />
-        <DetailSections sections={OPERATION_SECTIONS} payload={payload} displayContext={metadata} />
-        <RawPayload payload={payload} />
+          <div className="space-y-5">
+            <SummaryStrip ticket={ticket} metadata={metadata} />
+            <DetailSections sections={BASIC_SECTIONS} payload={currentPayload} displayContext={metadata} />
+            <MediaSection ticket={ticket} metadata={metadata} />
+            {workbenchModel.currentFlow === "info_optimization" ? (
+              <InfoOptimizationDiff
+                result={optimizationResult}
+                isLoading={isOptimizing}
+                errorMessage={optimizationErrorMessage}
+              />
+            ) : null}
+            {workbenchModel.currentFlow === "commission_setup" ? (
+              <CommissionSetupPanel
+                values={linkeCommission}
+                onlineGoodsUrl={readPayloadText(ticket.payload, "onlineGoodsUrl", "shelfGoodsUrl")}
+                onChange={(label, value) => setLinkeCommission((current) => ({ ...current, [label]: value }))}
+              />
+            ) : null}
+            <DetailSections sections={PACKAGE_SECTIONS} payload={currentPayload} displayContext={metadata} />
+            <DetailSections sections={OPERATION_SECTIONS} payload={currentPayload} displayContext={metadata} />
+            <RawPayload title="Rebuild 原始 Payload" payload={sourcePayload} />
+          </div>
+        </div>
+        <TicketActionSidebar
+          model={workbenchModel}
+          ticket={ticket}
+          isLoadingRecords={isLoadingRecords}
+          recordErrorMessage={actionErrorMessage || recordErrorMessage}
+          isOptimizing={isOptimizing}
+          isActionSubmitting={isActionSubmitting}
+          canConfirmOptimization={Boolean(optimizationResult)}
+          shelfGoodsUrl={shelfGoodsUrl}
+          onShelfGoodsUrlChange={setShelfGoodsUrl}
+          onRegenerateOptimization={() => void runInfoOptimization((optimizationResult?.generation ?? 0) + 1)}
+          onConfirmOptimization={() => void confirmInfoOptimization()}
+          onConfirmShelfOnline={() => void confirmShelfOnline()}
+          onConfirmCommission={() => void confirmCommission()}
+          onManualModifyCommission={() => void manualModifyCommission()}
+          onReturnToManualRevision={() => void returnToManualRevision()}
+        />
       </div>
     </div>
   );
 }
 
-function displayPayloadText(ticket: TicketRecord, metadata: TicketMetadata, ...fields: string[]): string {
-  return getPayloadDisplayText(ticket.payload, fields, {
+function readRecordValue(payload: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(payload, key) ? payload[key] : null;
+}
+
+function readPayloadText(payload: Record<string, unknown>, ...fields: string[]): string {
+  for (const field of fields) {
+    const value = readPayloadPath(payload, field);
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function readPayloadPath(payload: Record<string, unknown>, field: string): unknown {
+  if (field in payload) return payload[field];
+  return field.split(".").reduce<unknown>((current, key) => {
+    if (!isRecord(current)) return undefined;
+    return current[key];
+  }, payload);
+}
+
+function displayPayloadText(payload: Record<string, unknown>, metadata: TicketMetadata, ...fields: string[]): string {
+  return getPayloadDisplayText(payload, fields, {
     fieldMetadata: metadata.fieldMetadata,
     fieldOptions: metadata.fieldOptions,
   });
 }
 
+function buildCurrentDisplayPayload(
+  sourcePayload: Record<string, unknown>,
+  currentPayload: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...sourcePayload,
+    ...currentPayload,
+  };
+}
+
 function SummaryStrip({ ticket, metadata }: { ticket: TicketRecord; metadata: TicketMetadata }) {
+  const currentPayload = buildCurrentDisplayPayload(ticket.sourcePayload, ticket.payload);
   const items = [
-    { label: "审核状态", value: ticket.approvalState, icon: ClipboardCheck },
-    { label: "售价", value: displayPayloadText(ticket, metadata, "price") || "未提供" },
-    { label: "结算价", value: displayPayloadText(ticket, metadata, "supplyPrice") || "未提供" },
-    { label: "签约城市", value: displayPayloadText(ticket, metadata, "signCity", "bdCity") || "未提供" },
+    { label: "业务节点", value: formatTicketBusinessStatus(ticket.businessStatus), icon: ClipboardCheck },
+    { label: "工单状态", value: formatOverallStatus(ticket.status), icon: CheckCircle2 },
+    { label: "售价", value: displayPayloadText(currentPayload, metadata, "price") || "未提供" },
+    { label: "结算价", value: displayPayloadText(currentPayload, metadata, "supplyPrice") || "未提供" },
   ];
 
   return (
@@ -308,6 +585,12 @@ function SummaryStrip({ ticket, metadata }: { ticket: TicketRecord; metadata: Ti
       ))}
     </section>
   );
+}
+
+function formatOverallStatus(status: TicketRecord["status"]): string {
+  if (status === "processing") return "处理中";
+  if (status === "done") return "已完成";
+  return "待处理";
 }
 
 function DetailSections({
@@ -406,7 +689,7 @@ function MediaFieldView({
 }) {
   const items = buildMediaPreviewItems({
     payload: ticket.payload,
-    assets: ticket.assets,
+    assets: {},
     fields: field.fields,
     fieldMetadata: metadata.fieldMetadata,
     kindHint: field.kindHint,
@@ -466,6 +749,446 @@ function MediaItem({ item }: { item: MediaPreviewItem }) {
       </DialogTrigger>
       {item.canPreview ? <FilePreviewDialog item={item} /> : null}
     </Dialog>
+  );
+}
+
+function InfoOptimizationDiff({
+  result,
+  isLoading,
+  errorMessage,
+}: {
+  result: TicketInfoOptimizationResult | null;
+  isLoading: boolean;
+  errorMessage: string;
+}) {
+  return (
+    <Card className="border-0 bg-white shadow-sm">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Sparkles className="h-4 w-4 text-violet-500" />
+          信息优化对比
+        </CardTitle>
+        <p className="text-sm text-slate-500">当前 mock 只优化商品标题，后续可替换为真实优化接口。</p>
+      </CardHeader>
+      <CardContent>
+        {errorMessage ? (
+          <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-600">{errorMessage}</div>
+        ) : isLoading && !result ? (
+          <div className="rounded-md bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">正在生成优化结果...</div>
+        ) : result ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <TitleDiffPanel title="原始标题" value={result.origin.goodsNameInput} tone="origin" />
+            <TitleDiffPanel title={`优化标题 #${result.generation}`} value={result.current.goodsNameInput} tone="current" />
+          </div>
+        ) : (
+          <div className="rounded-md bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">等待生成优化结果</div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TitleDiffPanel({
+  title,
+  value,
+  tone,
+}: {
+  title: string;
+  value: string;
+  tone: "origin" | "current";
+}) {
+  return (
+    <div className={cn(
+      "rounded-md p-4 ring-1",
+      tone === "origin" ? "bg-slate-50 ring-slate-100" : "bg-emerald-50 ring-emerald-100",
+    )}>
+      <div className={cn("text-xs font-medium", tone === "origin" ? "text-slate-500" : "text-emerald-700")}>{title}</div>
+      <div className="mt-3 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-950">{value || "未提供"}</div>
+    </div>
+  );
+}
+
+function CommissionSetupPanel({
+  values,
+  onlineGoodsUrl,
+  onChange,
+}: {
+  values: CommissionRateValues;
+  onlineGoodsUrl: string;
+  onChange: (label: string, value: string) => void;
+}) {
+  return (
+    <Card className="border-slate-200 bg-white shadow-sm">
+      <CardHeader className="pb-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle className="text-lg">费用比例填写</CardTitle>
+            <p className="mt-2 text-sm text-slate-500">填写后点击右侧「同步佣金设置」，同步到林客费用设置。</p>
+          </div>
+          <Button variant="outline" className="bg-blue-50 text-blue-700 hover:bg-blue-100" disabled={!looksLikeUrl(onlineGoodsUrl)} asChild={looksLikeUrl(onlineGoodsUrl)}>
+            {looksLikeUrl(onlineGoodsUrl) ? (
+              <a href={onlineGoodsUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4" />
+                打开林客核对
+              </a>
+            ) : (
+              <span className="inline-flex items-center gap-2">
+                <ExternalLink className="h-4 w-4" />
+                打开林客核对
+              </span>
+            )}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid gap-4 lg:grid-cols-2">
+          {COMMISSION_RATE_FIELDS.map((field) => (
+            <CommissionRateInput
+              key={field.label}
+              field={field}
+              value={values[field.label] ?? ""}
+              onChange={(value) => onChange(field.label, value)}
+            />
+          ))}
+        </div>
+        <div className="rounded-md bg-blue-50 px-4 py-3 text-sm font-medium leading-6 text-blue-700 ring-1 ring-blue-100">
+          同步成功后，请通过上方链接进入林客确认费用比例已正确落库。确认无误后工单进入「自动追踪中」。
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CommissionRateInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: CommissionRateField;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="rounded-md bg-slate-50 p-4 ring-1 ring-slate-200">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <label className="text-sm font-semibold text-slate-900">
+          <span className="mr-1 text-red-500">*</span>
+          {field.label}
+        </label>
+        <span className="text-sm font-medium text-slate-400">上限 {field.max.toFixed(2)}%</span>
+      </div>
+      <div className="relative">
+        <Input
+          value={value}
+          inputMode="decimal"
+          placeholder="请输入"
+          onChange={(event) => onChange(sanitizeCommissionRateInput(event.target.value))}
+          className="h-12 bg-white pr-12 text-lg font-semibold"
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-lg font-semibold text-slate-500">%</span>
+      </div>
+    </div>
+  );
+}
+
+function buildInitialLinkeCommission(payload: Record<string, unknown>): CommissionRateValues {
+  const storedRates = readRecordValue(payload, "linkeCommission") ?? readRecordValue(payload, "commissionRates");
+  return Object.fromEntries(
+    COMMISSION_RATE_FIELDS.map((field) => [
+      field.label,
+      formatCommissionRateInput(readStoredCommissionRate(storedRates, field.label) ?? 4),
+    ]),
+  );
+}
+
+function readStoredCommissionRate(value: unknown, label: string): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const rate = value[label];
+  if (typeof rate === "number" && Number.isFinite(rate)) return rate;
+  if (typeof rate === "string" && rate.trim()) {
+    const parsed = Number(rate.replace("%", ""));
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function sanitizeCommissionRateInput(value: string): string {
+  const normalized = value.replace(/[^\d.]/g, "");
+  const [integer = "", ...decimalParts] = normalized.split(".");
+  if (decimalParts.length === 0) return integer;
+  return `${integer}.${decimalParts.join("").slice(0, 2)}`;
+}
+
+function formatCommissionRateInput(value: number): string {
+  return value.toFixed(2);
+}
+
+function validateLinkeCommission(values: CommissionRateValues): string {
+  for (const field of COMMISSION_RATE_FIELDS) {
+    const value = values[field.label]?.trim();
+    const numberValue = Number(value);
+    if (!value || !Number.isFinite(numberValue)) return `请填写${field.label}费用比例`;
+    if (numberValue < 0) return `${field.label}费用比例不能小于 0`;
+    if (numberValue > field.max) return `${field.label}费用比例不能超过 ${field.max.toFixed(2)}%`;
+  }
+  return "";
+}
+
+function normalizeLinkeCommission(values: CommissionRateValues): Record<string, string> {
+  return Object.fromEntries(
+    COMMISSION_RATE_FIELDS.map((field) => {
+      const numberValue = Number(values[field.label]);
+      return [field.label, formatCommissionRateInput(Number.isFinite(numberValue) ? numberValue : 0)];
+    }),
+  );
+}
+
+function TicketActionSidebar({
+  model,
+  ticket,
+  isLoadingRecords,
+  recordErrorMessage,
+  isOptimizing,
+  isActionSubmitting,
+  canConfirmOptimization,
+  shelfGoodsUrl,
+  onShelfGoodsUrlChange,
+  onRegenerateOptimization,
+  onConfirmOptimization,
+  onConfirmShelfOnline,
+  onConfirmCommission,
+  onManualModifyCommission,
+  onReturnToManualRevision,
+}: {
+  model: TicketWorkbenchModel;
+  ticket: TicketRecord;
+  isLoadingRecords: boolean;
+  recordErrorMessage: string;
+  isOptimizing: boolean;
+  isActionSubmitting: boolean;
+  canConfirmOptimization: boolean;
+  shelfGoodsUrl: string;
+  onShelfGoodsUrlChange: (value: string) => void;
+  onRegenerateOptimization: () => void;
+  onConfirmOptimization: () => void;
+  onConfirmShelfOnline: () => void;
+  onConfirmCommission: () => void;
+  onManualModifyCommission: () => void;
+  onReturnToManualRevision: () => void;
+}) {
+  const isBusy = isOptimizing || isActionSubmitting;
+  return (
+    <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+      <SidebarSection title="工单属性">
+        <div className="space-y-2">
+          {model.metaItems.map((item) => (
+            <div key={item.label} className="grid grid-cols-[72px_1fr] gap-3 text-xs">
+              <span className="text-slate-400">{item.label}</span>
+              <span className="min-w-0 truncate text-right font-medium text-slate-800">{item.value}</span>
+            </div>
+          ))}
+        </div>
+      </SidebarSection>
+
+      <SidebarSection title="流程进度">
+        <div className="space-y-3">
+          {model.progressSteps.map((step) => (
+            <div key={step.label} className="flex items-center gap-2 text-xs">
+              <span
+                className={cn(
+                  "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                  step.state === "active" && "bg-emerald-500 text-white",
+                  step.state === "done" && "bg-emerald-100 text-emerald-700",
+                  step.state === "pending" && "bg-slate-100 text-slate-400",
+                )}
+              >
+                {step.index}
+              </span>
+              <span className={cn("font-medium", step.state === "active" ? "text-emerald-700" : "text-slate-500")}>
+                {step.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      </SidebarSection>
+
+      <SidebarSection title="Agent 建议">
+        <div className="rounded-md bg-violet-50 p-3 text-xs text-violet-900">
+          <div className="mb-2 flex items-center gap-2 font-semibold">
+            <Bot className="h-4 w-4" />
+            Agent 分析
+            <Badge variant="muted" className="ml-auto bg-violet-100 text-violet-700">待确认</Badge>
+          </div>
+          <p className="leading-5">
+            检测到 Rebuild 已完成资料同步。建议先核对证照、素材与价格字段，再进入准入确认。
+          </p>
+        </div>
+      </SidebarSection>
+
+      <SidebarSection title="执行日志">
+        {recordErrorMessage ? (
+          <div className="rounded-md bg-red-50 p-3 text-xs text-red-600">{recordErrorMessage}</div>
+        ) : isLoadingRecords ? (
+          <div className="rounded-md bg-slate-50 p-3 text-xs text-slate-500">正在加载执行日志...</div>
+        ) : (
+          <div className="space-y-3">
+            {model.activityItems.length > 0 ? (
+              model.activityItems.map((item, index) => (
+                <div key={`${item.title}-${index}`} className="flex gap-2 text-xs">
+                  <span className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-50">
+                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium text-slate-800">{item.title}</span>
+                    <span className="mt-0.5 block line-clamp-2 text-slate-500">{item.description}</span>
+                  </span>
+                  <span className="shrink-0 text-slate-400">{item.time}</span>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-md bg-slate-50 p-3 text-xs text-slate-500">暂无执行日志</div>
+            )}
+          </div>
+        )}
+      </SidebarSection>
+
+      <SidebarSection title="人工操作">
+        <div className="space-y-2">
+          {model.currentFlow === "shelf_confirm" ? (
+            <Input
+              value={shelfGoodsUrl}
+              onChange={(event) => onShelfGoodsUrlChange(event.target.value)}
+              placeholder="填写商品链接"
+              className="h-10 bg-white"
+            />
+          ) : null}
+          {model.actionButtons.map((actionButton) => (
+            <SidebarActionButton
+              key={actionButton.label}
+              actionButton={actionButton}
+              ticket={ticket}
+              disabled={isActionDisabled(actionButton.label, {
+                canConfirmOptimization,
+                isBusy,
+                shelfGoodsUrl,
+              })}
+              onClick={getActionButtonHandler(actionButton.label, {
+                onRegenerateOptimization,
+                onConfirmOptimization,
+                onConfirmShelfOnline,
+                onConfirmCommission,
+                onManualModifyCommission,
+                onReturnToManualRevision,
+              })}
+            />
+          ))}
+        </div>
+        <p className="mt-3 text-[11px] leading-5 text-slate-400">{getActionHint(model.currentFlow)}</p>
+      </SidebarSection>
+    </aside>
+  );
+}
+
+function isActionDisabled(
+  label: string,
+  state: { canConfirmOptimization: boolean; isBusy: boolean; shelfGoodsUrl: string },
+): boolean {
+  if (state.isBusy) return true;
+  if (label === "确认采用优化") return !state.canConfirmOptimization;
+  if (label === "确认上线并填写商品链接") return state.shelfGoodsUrl.trim().length === 0;
+  if (label === "查看上线任务") return true;
+  return false;
+}
+
+function getActionButtonHandler(
+  label: string,
+  handlers: {
+    onRegenerateOptimization: () => void;
+    onConfirmOptimization: () => void;
+    onConfirmShelfOnline: () => void;
+    onConfirmCommission: () => void;
+    onManualModifyCommission: () => void;
+    onReturnToManualRevision: () => void;
+  },
+): (() => void) | undefined {
+  if (label === "重新生成") return handlers.onRegenerateOptimization;
+  if (label === "确认采用优化") return handlers.onConfirmOptimization;
+  if (label === "确认上线并填写商品链接") return handlers.onConfirmShelfOnline;
+  if (label === "同步佣金设置") return handlers.onConfirmCommission;
+  if (label === "手动修改") return handlers.onManualModifyCommission;
+  if (label === "返回人工修改") return handlers.onReturnToManualRevision;
+  return undefined;
+}
+
+function SidebarActionButton({
+  actionButton,
+  ticket,
+  disabled,
+  onClick,
+}: {
+  actionButton: WorkbenchActionButton;
+  ticket: TicketRecord;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  const className = getActionButtonClassName(actionButton.tone);
+  const icon = getActionButtonIcon(actionButton.tone);
+  if (actionButton.label === "跳转 Rebuild 审核") {
+    return (
+      <Button asChild className={className}>
+        <a href={buildSupplyGoodsApprovalUrl(ticket.supplyGoodsId)} target="_blank" rel="noreferrer">
+          {icon}
+          {actionButton.label}
+        </a>
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      type="button"
+      className={className}
+      variant={actionButton.tone === "primary" ? "default" : "ghost"}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {icon}
+      {actionButton.label}
+    </Button>
+  );
+}
+
+function getActionButtonClassName(tone: WorkbenchActionButton["tone"]): string {
+  if (tone === "primary") return "h-10 w-full bg-emerald-600 text-white hover:bg-emerald-700";
+  if (tone === "danger") return "h-10 w-full border border-red-200 bg-red-50 text-red-600 hover:bg-red-100";
+  if (tone === "ghost") return "h-9 w-full text-slate-500";
+  return "h-10 w-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50";
+}
+
+function getActionButtonIcon(tone: WorkbenchActionButton["tone"]) {
+  if (tone === "danger") return <RotateCcw className="h-4 w-4" />;
+  if (tone === "ghost") return <Send className="h-4 w-4" />;
+  return <CheckCircle2 className="h-4 w-4" />;
+}
+
+function getActionHint(flow: TicketWorkbenchModel["currentFlow"]): string {
+  if (flow === "access_review") return "准入未完成时，请先回到 Rebuild 完成审核。";
+  if (flow === "info_optimization") return "确认文案后会写入信息优化记录，并进入货架上线确认。";
+  if (flow === "shelf_confirm") return "需要填写商品链接，确认后进入佣金设置。";
+  if (flow === "commission_setup") return "先在左侧填写费用比例，再同步到林客费用设置。";
+  return "商品已进入上线任务，后续可查看执行结果。";
+}
+
+function buildSupplyGoodsApprovalUrl(supplyGoodsId: string): string {
+  return `${SUPPLY_GOODS_APPROVAL_BASE_URL}/${encodeURIComponent(supplyGoodsId)}`;
+}
+
+function SidebarSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="border-b border-slate-100 pb-5 last:border-b-0">
+      <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{title}</h2>
+      {children}
+    </section>
   );
 }
 
@@ -634,10 +1357,10 @@ function PreviewActions({ item }: { item: MediaPreviewItem }) {
   );
 }
 
-function RawPayload({ payload }: { payload: Record<string, unknown> }) {
+function RawPayload({ title, payload }: { title: string; payload: Record<string, unknown> }) {
   return (
     <details className="rounded-lg bg-white shadow-sm">
-      <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-700">查看原始 Payload</summary>
+      <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-700">{title}</summary>
       <pre className="max-h-[420px] overflow-auto border-t border-slate-100 bg-slate-950 p-4 text-xs leading-6 text-slate-100">
         {JSON.stringify(payload, null, 2)}
       </pre>
@@ -678,6 +1401,10 @@ function DetailSkeleton() {
 
 function looksLikeUrl(value: string) {
   return /^https?:\/\//i.test(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function formatDateTime(value: string) {

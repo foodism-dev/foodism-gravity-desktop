@@ -1,22 +1,55 @@
+import { eq } from "drizzle-orm";
 import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../db/client.ts";
-import { rebuildSupplyGoods, tickets } from "../db/schema.ts";
+import {
+  rebuildSupplyCompany,
+  rebuildSupplyGoods,
+  rebuildSupplyGoodsCallbackRecords,
+  ticketActionRecords,
+  tickets,
+} from "../db/schema.ts";
 import { buildRebuildOpenApiUrl, readJsonResponse } from "./openapi.ts";
 import type { RebuildFieldMetadata, RebuildFieldMetadataRepository } from "./fields.ts";
-import { mirrorSupplyGoodsAssets, type RebuildAssetMap, type RebuildAssetUploader } from "./assets.ts";
+import { mirrorRebuildAssets, replacePayloadAssetUrls, type RebuildAssetUploader } from "./assets.ts";
+import {
+  getTicketStatusByBusinessStatus,
+  isApprovalStatePassed,
+  matchTicketBusinessStatusByApproval,
+  normalizeTicketBusinessStatus,
+} from "../ticket-status.ts";
 
 export interface SupplyGoodsRecordUpsertInput {
   supplyGoodsId: string;
+  rawPayload: Record<string, unknown>;
   payload: Record<string, unknown>;
-  assets: RebuildAssetMap;
+  normalizedPayload: Record<string, unknown>;
+  supplyCompany?: SupplyCompanyRecordUpsertInput | null;
   updatedAt: Date;
+}
+
+export interface SupplyCompanyRecordUpsertInput {
+  supplyCompanyId: string;
+  payload: Record<string, unknown>;
+  updatedAt: Date;
+}
+
+export interface SupplyGoodsCallbackRecordInput {
+  supplyGoodsId: string;
+  rawPayload: Record<string, unknown>;
+  payload: Record<string, unknown>;
+  normalizedPayload: Record<string, unknown>;
+  status: "success" | "failed";
+  errorMessage: string | null;
+  createdAt: Date;
 }
 
 export interface SupplyGoodsRecordRepository {
   upsertRecord: (input: SupplyGoodsRecordUpsertInput) => Promise<void>;
+  createCallbackRecord: (input: SupplyGoodsCallbackRecordInput) => Promise<void>;
 }
 
 export interface RebuildSupplyGoodsClient {
   getSupplyGoods: (supplyGoodsId: string) => Promise<Record<string, unknown>>;
+  getSupplyCompany?: (supplyCompanyId: string) => Promise<Record<string, unknown>>;
   clearFieldCache?: () => void;
 }
 
@@ -32,7 +65,29 @@ export interface SupplyGoodsCallbackResult {
 }
 
 export const SUPPLY_GOODS_ENTITY = "SupplyGoods";
+export const SUPPLY_COMPANY_ENTITY = "SupplyCompany";
 const DEFAULT_FIELD_CACHE_TTL_MS = 5 * 60 * 1000;
+export const SUPPLY_COMPANY_SYNC_FIELDS = [
+  "SupplyCompanyId",
+  "supplyCompanyId",
+  "companyName",
+  "name",
+  "legalPerson",
+  "address",
+  "telephone",
+  "businessLicenseNo",
+  "businessLicensePicture",
+  "businessLicenseExpiryDate",
+  "businessLicenseDate",
+  "foodLicense",
+  "guestId",
+  "modifiedOn",
+  "modifiedBy",
+  "createdOn",
+  "createdBy",
+  "owningUser",
+  "owningDept",
+];
 export const SUPPLY_GOODS_SYNC_FIELDS = [
   "SupplyGoodsId",
   "supplyGoodsId",
@@ -172,7 +227,7 @@ export const SUPPLY_GOODS_SYNC_FIELDS = [
   "bdSubRegion",
 ];
 
-interface CachedSupplyGoodsFields {
+interface CachedRebuildFields {
   expiresAt: number;
   fields: string[];
 }
@@ -206,7 +261,7 @@ function shouldRequestTextCompanion(field: RebuildFieldMetadata): boolean {
   );
 }
 
-function buildSupplyGoodsSyncFieldsFromMetadata(fields: RebuildFieldMetadata[]): string[] {
+function buildRebuildSyncFieldsFromMetadata(fields: RebuildFieldMetadata[]): string[] {
   const names = new Set<string>();
   for (const field of fields) {
     const fieldName = field.fieldName.trim();
@@ -219,29 +274,31 @@ function buildSupplyGoodsSyncFieldsFromMetadata(fields: RebuildFieldMetadata[]):
   return [...names];
 }
 
-async function resolveSupplyGoodsSyncFields(input: {
+async function resolveRebuildSyncFields(input: {
+  entityName: string;
+  fallbackFields: string[];
   repository: RebuildFieldMetadataRepository | null | undefined;
-  cache: CachedSupplyGoodsFields | null;
+  cache: CachedRebuildFields | null;
   cacheTtlMs: number;
   now: () => number;
-  setCache: (cache: CachedSupplyGoodsFields) => void;
+  setCache: (cache: CachedRebuildFields) => void;
 }): Promise<string[]> {
-  if (!input.repository) return SUPPLY_GOODS_SYNC_FIELDS;
+  if (!input.repository) return input.fallbackFields;
 
   const currentTime = input.now();
   if (input.cache && input.cache.expiresAt > currentTime) {
     return input.cache.fields;
   }
 
-  const metadataFields = await input.repository.listFieldsByEntity(SUPPLY_GOODS_ENTITY);
-  const fields = buildSupplyGoodsSyncFieldsFromMetadata(metadataFields);
+  const metadataFields = await input.repository.listFieldsByEntity(input.entityName);
+  const fields = buildRebuildSyncFieldsFromMetadata(metadataFields);
   if (fields.length === 0) {
-    console.warn("[REBUILD] SupplyGoods 字段元数据为空，回退使用内置字段列表");
+    console.warn(`[REBUILD] ${input.entityName} 字段元数据为空，回退使用内置字段列表`);
     input.setCache({
-      fields: SUPPLY_GOODS_SYNC_FIELDS,
+      fields: input.fallbackFields,
       expiresAt: currentTime + input.cacheTtlMs,
     });
-    return SUPPLY_GOODS_SYNC_FIELDS;
+    return input.fallbackFields;
   }
 
   input.setCache({
@@ -251,12 +308,20 @@ async function resolveSupplyGoodsSyncFields(input: {
   return fields;
 }
 
-function buildSupplyGoodsGetUrl(supplyGoodsId: string, fields: string[]): URL {
+function buildRebuildEntityGetUrl(entity: string, id: string, fields: string[]): URL {
   return buildRebuildOpenApiUrl("entity/get", {
-    entity: SUPPLY_GOODS_ENTITY,
-    id: supplyGoodsId,
+    entity,
+    id,
     fields: fields.join(","),
   });
+}
+
+function buildSupplyGoodsGetUrl(supplyGoodsId: string, fields: string[]): URL {
+  return buildRebuildEntityGetUrl(SUPPLY_GOODS_ENTITY, supplyGoodsId, fields);
+}
+
+function buildSupplyCompanyGetUrl(supplyCompanyId: string, fields: string[]): URL {
+  return buildRebuildEntityGetUrl(SUPPLY_COMPANY_ENTITY, supplyCompanyId, fields);
 }
 
 export function extractSupplyGoodsId(body: unknown): string | null {
@@ -273,23 +338,27 @@ export function extractSupplyGoodsId(body: unknown): string | null {
 }
 
 export function createRebuildSupplyGoodsClient(options: RebuildSupplyGoodsClientOptions = {}): RebuildSupplyGoodsClient {
-  let fieldCache: CachedSupplyGoodsFields | null = null;
+  let supplyGoodsFieldCache: CachedRebuildFields | null = null;
+  let supplyCompanyFieldCache: CachedRebuildFields | null = null;
   const fieldCacheTtlMs = options.fieldCacheTtlMs ?? DEFAULT_FIELD_CACHE_TTL_MS;
   const now = options.now ?? Date.now;
 
   return {
     clearFieldCache(): void {
-      fieldCache = null;
+      supplyGoodsFieldCache = null;
+      supplyCompanyFieldCache = null;
     },
 
     async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
-      const fields = await resolveSupplyGoodsSyncFields({
+      const fields = await resolveRebuildSyncFields({
+        entityName: SUPPLY_GOODS_ENTITY,
+        fallbackFields: SUPPLY_GOODS_SYNC_FIELDS,
         repository: options.fieldMetadataRepository,
-        cache: fieldCache,
+        cache: supplyGoodsFieldCache,
         cacheTtlMs: fieldCacheTtlMs,
         now,
         setCache: (nextCache) => {
-          fieldCache = nextCache;
+          supplyGoodsFieldCache = nextCache;
         },
       });
       const url = buildSupplyGoodsGetUrl(supplyGoodsId, fields);
@@ -303,42 +372,140 @@ export function createRebuildSupplyGoodsClient(options: RebuildSupplyGoodsClient
       }
       return result.data;
     },
+
+    async getSupplyCompany(supplyCompanyId: string): Promise<Record<string, unknown>> {
+      const fields = await resolveRebuildSyncFields({
+        entityName: SUPPLY_COMPANY_ENTITY,
+        fallbackFields: SUPPLY_COMPANY_SYNC_FIELDS,
+        repository: options.fieldMetadataRepository,
+        cache: supplyCompanyFieldCache,
+        cacheTtlMs: fieldCacheTtlMs,
+        now,
+        setCache: (nextCache) => {
+          supplyCompanyFieldCache = nextCache;
+        },
+      });
+      const url = buildSupplyCompanyGetUrl(supplyCompanyId, fields);
+      console.log(`[REBUILD] 回调同步 SupplyCompany: ${supplyCompanyId}`);
+      const result = await readJsonResponse<Record<string, unknown>>(await fetch(url));
+      if (result.error_code !== 0) {
+        throw new Error(result.error_msg || `REBUILD OpenAPI 调用失败: ${result.error_code}`);
+      }
+      if (!isRecord(result.data)) {
+        throw new Error("REBUILD OpenAPI 未返回 SupplyCompany 记录");
+      }
+      return result.data;
+    },
   };
 }
 
 export function createDrizzleSupplyGoodsRecordRepository(db: ServerDatabase): SupplyGoodsRecordRepository {
   return {
     async upsertRecord(input: SupplyGoodsRecordUpsertInput): Promise<void> {
+      const existingTicketRows = await db
+        .select({
+          id: tickets.id,
+          businessStatus: tickets.businessStatus,
+          payload: tickets.payload,
+        })
+        .from(tickets)
+        .where(eq(tickets.supplyGoodsId, input.supplyGoodsId))
+        .limit(1);
+      const existingTicket = existingTicketRows[0];
+      const approvalState = readApprovalState(input.normalizedPayload);
+      const isApprovalPassed = isApprovalStatePassed(approvalState);
+      const shouldSeedPayload = isApprovalPassed
+        && (!existingTicket || isEmptyRecord(existingTicket.payload));
+      const nextTicketPayload = shouldSeedPayload
+        ? buildTicketPayloadFromSupplyGoods(input.normalizedPayload, input.supplyCompany)
+        : hydrateTicketPayloadCompany(existingTicket?.payload ?? {}, input.supplyCompany);
+      const nextBusinessStatus = matchTicketBusinessStatusByApproval(
+        isApprovalPassed,
+        existingTicket ? normalizeTicketBusinessStatus(existingTicket.businessStatus) : undefined,
+      );
+      const nextTicketStatus = getTicketStatusByBusinessStatus(nextBusinessStatus);
+
       await db
         .insert(rebuildSupplyGoods)
         .values({
           supplyGoodsId: input.supplyGoodsId,
-          payload: input.payload,
-          assets: input.assets,
+          payload: input.normalizedPayload,
           updatedAt: input.updatedAt,
         })
         .onConflictDoUpdate({
           target: rebuildSupplyGoods.supplyGoodsId,
           set: {
-            payload: input.payload,
-            assets: input.assets,
+            payload: input.normalizedPayload,
             updatedAt: input.updatedAt,
           },
         });
+
+      if (input.supplyCompany) {
+        await db
+          .insert(rebuildSupplyCompany)
+          .values({
+            supplyCompanyId: input.supplyCompany.supplyCompanyId,
+            payload: input.supplyCompany.payload,
+            updatedAt: input.supplyCompany.updatedAt,
+          })
+          .onConflictDoUpdate({
+            target: rebuildSupplyCompany.supplyCompanyId,
+            set: {
+              payload: input.supplyCompany.payload,
+              updatedAt: input.supplyCompany.updatedAt,
+            },
+          });
+      }
       await db
         .insert(tickets)
         .values({
           supplyGoodsId: input.supplyGoodsId,
-          approvalState: readApprovalState(input.payload),
+          status: nextTicketStatus,
+          businessStatus: nextBusinessStatus,
+          payload: nextTicketPayload,
           updatedAt: input.updatedAt,
         })
         .onConflictDoUpdate({
           target: tickets.supplyGoodsId,
           set: {
-            approvalState: readApprovalState(input.payload),
+            status: nextTicketStatus,
+            businessStatus: nextBusinessStatus,
+            payload: nextTicketPayload,
             updatedAt: input.updatedAt,
           },
         });
+
+      if (shouldSeedPayload) {
+        const ticketRows = await db
+          .select({ id: tickets.id })
+          .from(tickets)
+          .where(eq(tickets.supplyGoodsId, input.supplyGoodsId))
+          .limit(1);
+        const ticketId = ticketRows[0]?.id;
+        if (ticketId) {
+          await db.insert(ticketActionRecords).values({
+            ticketId,
+            action: "import_from_rebuild",
+            origin: buildEmptyOriginPayload(nextTicketPayload),
+            current: nextTicketPayload,
+            operator: { source: "rebuild" },
+            remark: "Rebuild 审核通过后初始化 ticket payload",
+            createdAt: input.updatedAt,
+          });
+        }
+      }
+    },
+
+    async createCallbackRecord(input: SupplyGoodsCallbackRecordInput): Promise<void> {
+      await db.insert(rebuildSupplyGoodsCallbackRecords).values({
+        supplyGoodsId: input.supplyGoodsId,
+        rawPayload: input.rawPayload,
+        payload: input.payload,
+        normalizedPayload: input.normalizedPayload,
+        status: input.status,
+        errorMessage: input.errorMessage,
+        createdAt: input.createdAt,
+      });
     },
   };
 }
@@ -363,27 +530,64 @@ export function getDefaultSupplyGoodsRecordRepository(): SupplyGoodsRecordReposi
 
 export async function syncSupplyGoodsFromCallback(input: {
   supplyGoodsId: string;
+  rawPayload: Record<string, unknown>;
   rebuildClient: RebuildSupplyGoodsClient;
   repository: SupplyGoodsRecordRepository;
   assetUploader?: RebuildAssetUploader | null;
   listFields?: () => Promise<RebuildFieldMetadata[]>;
+  listSupplyCompanyFields?: () => Promise<RebuildFieldMetadata[]>;
+  onSupplyCompanyDiscovered?: () => Promise<void>;
 }): Promise<SupplyGoodsCallbackResult> {
-  const payload = await input.rebuildClient.getSupplyGoods(input.supplyGoodsId);
-  const assets = input.assetUploader
-    ? await mirrorSupplyGoodsAssets({
-        supplyGoodsId: input.supplyGoodsId,
-        payload,
-        fields: input.listFields ? await input.listFields() : [],
-        uploader: input.assetUploader,
-      })
-    : {};
   const updatedAt = new Date();
-  await input.repository.upsertRecord({
-    supplyGoodsId: input.supplyGoodsId,
-    payload,
-    assets,
-    updatedAt,
-  });
+  let payload: Record<string, unknown> = {};
+  let normalizedPayload: Record<string, unknown> = {};
+  try {
+    payload = await input.rebuildClient.getSupplyGoods(input.supplyGoodsId);
+    normalizedPayload = await normalizeSupplyGoodsPayload({
+      supplyGoodsId: input.supplyGoodsId,
+      payload,
+      assetUploader: input.assetUploader,
+      fields: input.listFields ? await input.listFields() : [],
+    });
+    if (extractSupplyCompanyId(normalizedPayload)) {
+      await input.onSupplyCompanyDiscovered?.();
+    }
+    const supplyCompany = await resolveSupplyCompanyRecord({
+      payload: normalizedPayload,
+      rebuildClient: input.rebuildClient,
+      assetUploader: input.assetUploader,
+      fields: input.listSupplyCompanyFields ? await input.listSupplyCompanyFields() : [],
+      updatedAt,
+    });
+    await input.repository.upsertRecord({
+      supplyGoodsId: input.supplyGoodsId,
+      rawPayload: input.rawPayload,
+      payload,
+      normalizedPayload,
+      supplyCompany,
+      updatedAt,
+    });
+    await input.repository.createCallbackRecord({
+      supplyGoodsId: input.supplyGoodsId,
+      rawPayload: input.rawPayload,
+      payload,
+      normalizedPayload,
+      status: "success",
+      errorMessage: null,
+      createdAt: updatedAt,
+    });
+  } catch (error) {
+    await input.repository.createCallbackRecord({
+      supplyGoodsId: input.supplyGoodsId,
+      rawPayload: input.rawPayload,
+      payload,
+      normalizedPayload,
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : String(error),
+      createdAt: updatedAt,
+    });
+    throw error;
+  }
 
   return {
     supplyGoodsId: input.supplyGoodsId,
@@ -407,4 +611,146 @@ function readApprovalState(payload: Record<string, unknown>): string {
     }
   }
   return "unknown";
+}
+
+export function isSupplyGoodsApprovalPassed(payload: Record<string, unknown>): boolean {
+  return isApprovalStatePassed(readApprovalState(payload));
+}
+
+export function buildTicketPayloadFromSupplyGoods(
+  payload: Record<string, unknown>,
+  supplyCompany?: SupplyCompanyRecordUpsertInput | null,
+): Record<string, unknown> {
+  if (!isSupplyGoodsApprovalPassed(payload)) return {};
+  return mergeSupplyCompanyIntoTicketPayload(payload, supplyCompany);
+}
+
+export function mergeSupplyCompanyIntoTicketPayload(
+  payload: Record<string, unknown>,
+  supplyCompany?: SupplyCompanyRecordUpsertInput | null,
+): Record<string, unknown> {
+  return hydrateTicketPayloadCompany(payload, supplyCompany);
+}
+
+export function hydrateTicketPayloadCompany(
+  payload: Record<string, unknown>,
+  supplyCompany?: SupplyCompanyRecordUpsertInput | null,
+): Record<string, unknown> {
+  if (!supplyCompany) return { ...payload };
+  const company = payload.company;
+  if (!isRecord(company)) return { ...payload };
+  const guestId = supplyCompany.payload.guestId;
+  if (typeof guestId !== "string" || !guestId.trim()) return { ...payload };
+  return {
+    ...payload,
+    company: {
+      ...company,
+      guestId: guestId.trim(),
+    },
+  };
+}
+
+export function extractSupplyCompanyId(payload: Record<string, unknown>): string | null {
+  const company = payload.company;
+  if (!isRecord(company)) return null;
+  const entity = company.entity;
+  if (entity !== undefined && entity !== SUPPLY_COMPANY_ENTITY) return null;
+  const candidates = [
+    company.id,
+    company.SupplyCompanyId,
+    company.supplyCompanyId,
+    company.value,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return null;
+}
+
+async function resolveSupplyCompanyRecord(input: {
+  payload: Record<string, unknown>;
+  rebuildClient: RebuildSupplyGoodsClient;
+  assetUploader?: RebuildAssetUploader | null;
+  fields: RebuildFieldMetadata[];
+  updatedAt: Date;
+}): Promise<SupplyCompanyRecordUpsertInput | null> {
+  const supplyCompanyId = extractSupplyCompanyId(input.payload);
+  if (!supplyCompanyId || !input.rebuildClient.getSupplyCompany) return null;
+
+  try {
+    const payload = await input.rebuildClient.getSupplyCompany(supplyCompanyId);
+    return {
+      supplyCompanyId,
+      payload: await normalizeSupplyCompanyPayload({
+        supplyCompanyId,
+        payload,
+        assetUploader: input.assetUploader,
+        fields: input.fields,
+      }),
+      updatedAt: input.updatedAt,
+    };
+  } catch (error) {
+    console.warn(`[REBUILD] SupplyCompany 同步失败: ${supplyCompanyId} ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+export async function normalizeSupplyGoodsPayload(input: {
+  supplyGoodsId: string;
+  payload: Record<string, unknown>;
+  assetUploader?: RebuildAssetUploader | null;
+  fields: RebuildFieldMetadata[];
+}): Promise<Record<string, unknown>> {
+  const normalizedPayload = await normalizeRebuildPayload({
+    entityName: SUPPLY_GOODS_ENTITY,
+    recordId: input.supplyGoodsId,
+    payload: input.payload,
+    assetUploader: input.assetUploader,
+    fields: input.fields,
+  });
+  if (isRecord(input.payload.company)) {
+    normalizedPayload.company = { ...input.payload.company };
+  }
+  return normalizedPayload;
+}
+
+export async function normalizeSupplyCompanyPayload(input: {
+  supplyCompanyId: string;
+  payload: Record<string, unknown>;
+  assetUploader?: RebuildAssetUploader | null;
+  fields: RebuildFieldMetadata[];
+}): Promise<Record<string, unknown>> {
+  return normalizeRebuildPayload({
+    entityName: SUPPLY_COMPANY_ENTITY,
+    recordId: input.supplyCompanyId,
+    payload: input.payload,
+    assetUploader: input.assetUploader,
+    fields: input.fields,
+  });
+}
+
+export async function normalizeRebuildPayload(input: {
+  entityName: string;
+  recordId: string;
+  payload: Record<string, unknown>;
+  assetUploader?: RebuildAssetUploader | null;
+  fields: RebuildFieldMetadata[];
+}): Promise<Record<string, unknown>> {
+  if (!input.assetUploader) return { ...input.payload };
+  const assets = await mirrorRebuildAssets({
+    entityName: input.entityName,
+    recordId: input.recordId,
+    payload: input.payload,
+    fields: input.fields,
+    uploader: input.assetUploader,
+  });
+  return replacePayloadAssetUrls(input.payload, assets);
+}
+
+export function buildEmptyOriginPayload(payload: Record<string, unknown>): Record<string, null> {
+  return Object.fromEntries(Object.keys(payload).map((key) => [key, null]));
+}
+
+function isEmptyRecord(payload: Record<string, unknown>): boolean {
+  return Object.keys(payload).length === 0;
 }

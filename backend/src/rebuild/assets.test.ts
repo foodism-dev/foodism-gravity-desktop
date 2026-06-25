@@ -380,6 +380,39 @@ describe("REBUILD 资产镜像", () => {
     expect(assets).toEqual({});
   });
 
+  test("Given license number text field, When mirroring assets, Then it does not upload the identifier", async () => {
+    const uploads: Array<{ fieldName: string; sourcePath: string }> = [];
+    const uploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        uploads.push({ fieldName: input.fieldName, sourcePath: input.sourcePath });
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.fieldName}`,
+        };
+      },
+    };
+
+    const assets = await mirrorSupplyGoodsAssets({
+      supplyGoodsId: "944-license",
+      payload: {
+        businessLicenseNo: "92310110MAK616385H",
+      },
+      fields: [
+        {
+          entityName: "SupplyCompany",
+          fieldName: "businessLicenseNo",
+          label: "营业执照编号",
+          fieldType: "TEXT",
+          raw: { name: "businessLicenseNo", displayType: "TEXT" },
+        },
+      ],
+      uploader,
+    });
+
+    expect(uploads).toEqual([]);
+    expect(assets).toEqual({});
+  });
+
   test("Given no asset prefix, When uploading asset to R2, Then object key starts from supplygoods", async () => {
     const putUrls: string[] = [];
     const uploader = createRebuildR2AssetUploader({
@@ -400,9 +433,11 @@ describe("REBUILD 资产镜像", () => {
         prefix: "",
         region: "auto",
       },
-      async fetchImpl(input) {
-        putUrls.push(String(input));
-        return new Response(null, { status: 200 });
+      async fetchImpl(input, init) {
+        if (init?.method === "PUT") {
+          putUrls.push(String(input));
+        }
+        return new Response(null, { status: init?.method === "HEAD" ? 404 : 200 });
       },
     });
 
@@ -416,6 +451,42 @@ describe("REBUILD 资产镜像", () => {
     expect(result.url).toContain("https://fg.foodism.pro/supplygoods/944-demo/mainPic/");
     expect(result.url).not.toContain("upload_file");
     expect(result.url).not.toContain("rebuild/supplygoods");
+  });
+
+  test("Given R2 public object already exists, When uploading asset, Then it reuses the existing url without PUT", async () => {
+    const requests: Array<{ url: string; method: string }> = [];
+    const uploader = createRebuildR2AssetUploader({
+      downloader: {
+        async downloadAsset() {
+          return {
+            bytes: new Uint8Array([1, 2, 3]),
+            contentType: "image/jpeg",
+          };
+        },
+      },
+      r2Config: {
+        endpointUrl: "https://account.r2.cloudflarestorage.com",
+        accessKeyId: "access-key",
+        secretAccessKey: "secret-key",
+        bucket: "foodism-gravity-desktop",
+        publicBaseUrl: "https://fg.foodism.pro",
+        prefix: "",
+        region: "auto",
+      },
+      async fetchImpl(input, init) {
+        requests.push({ url: String(input), method: init?.method ?? "GET" });
+        return new Response(null, { status: init?.method === "HEAD" ? 200 : 500 });
+      },
+    });
+
+    const result = await uploader.uploadAsset({
+      supplyGoodsId: "944-demo",
+      fieldName: "mainPic",
+      sourcePath: "rb/20260624/main.jpg",
+    });
+
+    expect(requests.map((request) => request.method)).toEqual(["HEAD"]);
+    expect(result.url).toContain("https://fg.foodism.pro/supplygoods/944-demo/mainPic/");
   });
 
   test("Given skill R2 prefix exists, When resolving asset prefix, Then assets do not inherit it", () => {
