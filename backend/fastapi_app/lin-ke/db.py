@@ -42,6 +42,34 @@ def fetch_supply_goods_payloads(settings: Settings, supply_goods_ids: List[str])
     return {str(row["supply_goods_id"]): row["payload"] for row in rows}
 
 
+def fetch_rebuild_field_option_labels(
+    settings: Settings,
+    entity_name: str,
+    field_values: Dict[str, str],
+) -> Dict[str, str]:
+    values = {field: str(value).strip() for field, value in field_values.items() if str(value).strip()}
+    if not values:
+        return {}
+    with connect(settings) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT field_name, option_value, option_label
+                FROM rebuild_field_options
+                WHERE entity_name = %s
+                  AND field_name = ANY(%s)
+                  AND option_value = ANY(%s)
+                """,
+                (entity_name, list(values.keys()), list(values.values())),
+            )
+            rows = cur.fetchall()
+    return {
+        str(row["field_name"]): str(row["option_label"])
+        for row in rows
+        if values.get(str(row["field_name"])) == str(row["option_value"])
+    }
+
+
 def list_account_configs(settings: Settings) -> List[Dict[str, Any]]:
     with connect(settings) as conn:
         with conn.cursor() as cur:

@@ -54,9 +54,11 @@ class LinKeServiceTests(unittest.TestCase):
         def fail_session(settings, account_config):
             raise LinKeServiceError({"ok": False, "stage": "cookie", "reason": "blocked"})
 
-        with patch("fastapi_app.lin_ke.lin_ke_service.resolve_lin_ke_mapping", side_effect=mappings), patch(
-            "fastapi_app.lin_ke.lin_ke_service.db.update_supply_goods_lin_ke_mapping", return_value=True
-        ) as update_mapping, patch("fastapi_app.lin_ke.lin_ke_service.make_session", side_effect=fail_session):
+        with patch("fastapi_app.lin_ke.lin_ke_service.db.fetch_rebuild_field_option_labels", return_value={}), patch(
+            "fastapi_app.lin_ke.lin_ke_service.resolve_lin_ke_mapping", side_effect=mappings
+        ), patch("fastapi_app.lin_ke.lin_ke_service.db.update_supply_goods_lin_ke_mapping", return_value=True) as update_mapping, patch(
+            "fastapi_app.lin_ke.lin_ke_service.make_session", side_effect=fail_session
+        ):
             for _ in range(2):
                 with self.assertRaises(LinKeServiceError):
                     save_supply_goods_draft(
@@ -70,6 +72,55 @@ class LinKeServiceTests(unittest.TestCase):
         self.assertEqual(update_mapping.call_args_list[0].args[1], "944-test")
         self.assertEqual(update_mapping.call_args_list[0].args[2]["categoryId"], "1004001")
         self.assertEqual(update_mapping.call_args_list[1].args[2]["productType"], 11)
+
+    def test_save_draft_maps_rebuild_option_ids_before_lin_ke_mapping(self):
+        payload = self.payload()
+        payload["mealType"] = {
+            "text": "012-0184a87067a64664",
+            "value": "012-0184a87067a64664",
+        }
+        payload["classification"] = {
+            "text": "019-017d6b4bb3cd5e39",
+            "value": "019-017d6b4bb3cd5e39",
+        }
+
+        def fail_session(settings, account_config):
+            raise LinKeServiceError({"ok": False, "stage": "cookie", "reason": "blocked"})
+
+        with patch(
+            "fastapi_app.lin_ke.lin_ke_service.db.fetch_rebuild_field_option_labels",
+            return_value={
+                "mealType": "主套餐A",
+                "classification": "同城优享 / 中式餐饮",
+            },
+        ) as fetch_labels, patch(
+            "fastapi_app.lin_ke.lin_ke_service.db.update_supply_goods_lin_ke_mapping", return_value=True
+        ) as update_mapping, patch(
+            "fastapi_app.lin_ke.lin_ke_service.make_session", side_effect=fail_session
+        ):
+            with self.assertRaises(LinKeServiceError):
+                save_supply_goods_draft(
+                    DummySettings(),
+                    payload,
+                    {"cookie_file_path": "/tmp/cookie.json"},
+                    supply_goods_id="944-test",
+                )
+
+        fetch_labels.assert_called_once_with(
+            DummySettings(),
+            "SupplyGoods",
+            {
+                "mealType": "012-0184a87067a64664",
+                "classification": "019-017d6b4bb3cd5e39",
+            },
+        )
+        mapping = update_mapping.call_args.args[2]
+        self.assertEqual(mapping["productType"], 1)
+        self.assertEqual(mapping["productTypeName"], "团购套餐")
+        self.assertEqual(mapping["categoryId"], "1001015")
+        self.assertEqual(mapping["categoryPath"], "美食 > 地方菜 > 其他地方菜")
+        self.assertEqual(payload["mealType"]["text"], "012-0184a87067a64664")
+        self.assertEqual(payload["classification"]["text"], "019-017d6b4bb3cd5e39")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,43 @@ class LinKeServiceError(Exception):
         super().__init__(payload.get("reason") or payload.get("error") or "lin_ke_service_error")
         self.payload = payload
         self.status_code = status_code
+
+
+OPTION_ENTITY_NAME = "SupplyGoods"
+LIN_KE_MAPPING_OPTION_FIELDS = ("mealType", "classification")
+
+
+def option_lookup_value(payload: Dict[str, Any], field_name: str) -> str:
+    value = payload.get(field_name)
+    if isinstance(value, dict):
+        return (
+            draft.clean_string(value.get("text"))
+            or draft.clean_string(value.get("value"))
+            or draft.clean_string(value.get("id"))
+        )
+    return draft.clean_string(payload.get(f"{field_name}.text")) or draft.clean_string(value)
+
+
+def payload_with_field_option_labels(settings: Settings, payload: Dict[str, Any]) -> Dict[str, Any]:
+    field_values = {
+        field_name: option_lookup_value(payload, field_name)
+        for field_name in LIN_KE_MAPPING_OPTION_FIELDS
+        if option_lookup_value(payload, field_name)
+    }
+    labels = db.fetch_rebuild_field_option_labels(settings, OPTION_ENTITY_NAME, field_values)
+    if not labels:
+        return payload
+
+    resolved = copy.deepcopy(payload)
+    for field_name, label in labels.items():
+        value = resolved.get(field_name)
+        if isinstance(value, dict):
+            value["text"] = label
+        elif field_name in resolved:
+            resolved[field_name] = {"text": label, "value": field_values.get(field_name, "")}
+        else:
+            resolved[f"{field_name}.text"] = label
+    return resolved
 
 
 def make_args(
@@ -86,8 +124,9 @@ def save_supply_goods_draft(
     supply_goods_id: str,
     poi_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    mapping_payload = payload_with_field_option_labels(settings, payload)
     try:
-        lin_ke_mapping = resolve_lin_ke_mapping(payload)
+        lin_ke_mapping = resolve_lin_ke_mapping(mapping_payload)
     except ProductMappingError as exc:
         raise LinKeServiceError(exc.payload, status_code=400) from exc
 
