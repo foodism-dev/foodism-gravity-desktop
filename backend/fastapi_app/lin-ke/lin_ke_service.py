@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 from . import db
 from . import lin_ke_draft_core as draft
-from .config import Settings
+from .config import BACKEND_DIR, Settings
 from .lin_ke_auth import LifePartnerSession, concise_error, load_cookie_file
 from .lin_ke_mapping import ProductMappingError, resolve_lin_ke_mapping
 from .supply_goods import bd_city_text, normalize_supply_goods_for_lin_ke
@@ -92,8 +92,15 @@ def make_args(
     )
 
 
+def resolve_cookie_file_path(cookie_file_path: str) -> Path:
+    path = Path(cookie_file_path or "").expanduser()
+    if path.is_absolute():
+        return path
+    return (BACKEND_DIR / path).resolve()
+
+
 def make_session(settings: Settings, account_config: Dict[str, Any]) -> LifePartnerSession:
-    cookie_path = Path(account_config.get("cookie_file_path") or "").expanduser()
+    cookie_path = resolve_cookie_file_path(account_config.get("cookie_file_path") or "")
     cookie = load_cookie_file(cookie_path)
     if not cookie:
         raise LinKeServiceError(

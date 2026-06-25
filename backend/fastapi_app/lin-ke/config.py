@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 def load_env_file(path: Path) -> None:
@@ -60,4 +60,3 @@ class Settings:
 
 def get_settings() -> Settings:
     return Settings()
-

@@ -1,8 +1,14 @@
 import unittest
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import patch
 
-from fastapi_app.lin_ke.lin_ke_service import LinKeServiceError, save_supply_goods_draft
+from fastapi_app.lin_ke.config import BACKEND_DIR
+from fastapi_app.lin_ke.lin_ke_service import (
+    LinKeServiceError,
+    resolve_cookie_file_path,
+    save_supply_goods_draft,
+)
 
 
 @dataclass(frozen=True)
@@ -14,6 +20,16 @@ class DummySettings:
 
 
 class LinKeServiceTests(unittest.TestCase):
+    def test_resolve_cookie_file_path_uses_backend_dir_for_relative_paths(self):
+        path = resolve_cookie_file_path(".secrets/lin-ke/cookies/shenzhen_shiyi.cookie.json")
+
+        self.assertEqual(path, (BACKEND_DIR / ".secrets/lin-ke/cookies/shenzhen_shiyi.cookie.json").resolve())
+
+    def test_resolve_cookie_file_path_keeps_absolute_paths_compatible(self):
+        path = resolve_cookie_file_path("/tmp/life_partner.cookie.json")
+
+        self.assertEqual(path, Path("/tmp/life_partner.cookie.json"))
+
     def payload(self):
         return {
             "SupplyGoodsId": "944-test",
