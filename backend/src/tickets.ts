@@ -256,6 +256,7 @@ function buildTicketWhere(query: TicketQuery): SQL | undefined {
     conditions.push(
       or(
         ilike(tickets.supplyGoodsId, keyword),
+        sql`${tickets.payload}::text ILIKE ${keyword}`,
         sql`${rebuildSupplyGoods.payload}::text ILIKE ${keyword}`,
       )!,
     );

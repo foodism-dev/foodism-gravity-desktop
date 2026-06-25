@@ -40,6 +40,7 @@ describe("数据库 schema", () => {
     expect(tickets.supplyGoodsId.name).toBe("supply_goods_id");
     expect(tickets.status.name).toBe("status");
     expect(tickets.businessStatus.name).toBe("business_status");
+    expect(tickets.payload.name).toBe("payload");
   });
 
   test("REBUILD 字段元数据表按实体和字段存储定义与选项", () => {
