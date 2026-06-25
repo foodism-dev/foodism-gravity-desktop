@@ -156,6 +156,7 @@ import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getAuthSession, login, logout, saveAuthSession } from './lib/auth-service'
 import { createSsoOidcService, getDefaultSsoOidcConfig } from './lib/auth/sso-oidc-service'
 import type { SsoOidcService } from './lib/auth/sso-oidc-service'
+import { buildSsoLoginCloseButtonScript, isSsoLoginCloseUrl } from './lib/auth/sso-login-window'
 import { getSupplyGoods, getSupplyGoodsApprovalStateOptions, listSupplyGoods } from './lib/rebuild-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
@@ -297,6 +298,16 @@ function closeSsoLoginWindow(): void {
   }
 }
 
+async function injectSsoLoginCloseButton(loginWindow: BrowserWindow): Promise<void> {
+  if (loginWindow.isDestroyed()) return
+
+  try {
+    await loginWindow.webContents.executeJavaScript(buildSsoLoginCloseButtonScript(), true)
+  } catch (error) {
+    console.warn('[SSO] 注入登录窗口关闭按钮失败:', error)
+  }
+}
+
 async function openSsoLoginWindow(url: string): Promise<void> {
   const parentWindow = BrowserWindow.getFocusedWindow()
     ?? BrowserWindow.getAllWindows().find((window) => !window.isDestroyed())
@@ -339,8 +350,13 @@ async function openSsoLoginWindow(url: string): Promise<void> {
       ssoLoginWindow = null
     }
   })
+  loginWindow.webContents.on('did-finish-load', () => {
+    void injectSsoLoginCloseButton(loginWindow)
+  })
   loginWindow.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
-    if (isHttpUrl(popupUrl)) {
+    if (isSsoLoginCloseUrl(popupUrl)) {
+      closeSsoLoginWindow()
+    } else if (isHttpUrl(popupUrl)) {
       void loginWindow.loadURL(popupUrl)
     } else if (isDingTalkUrl(popupUrl)) {
       void shell.openExternal(popupUrl)
@@ -348,6 +364,11 @@ async function openSsoLoginWindow(url: string): Promise<void> {
     return { action: 'deny' }
   })
   loginWindow.webContents.on('will-navigate', (event, nextUrl) => {
+    if (isSsoLoginCloseUrl(nextUrl)) {
+      event.preventDefault()
+      closeSsoLoginWindow()
+      return
+    }
     if (isHttpUrl(nextUrl)) return
     if (isDingTalkUrl(nextUrl)) {
       event.preventDefault()
