@@ -77,6 +77,11 @@ export const rebuildSupplyGoods = pgTable(
     supplyGoodsId: text("supply_goods_id").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     assets: jsonb("assets").$type<Record<string, Array<{ source: string; url: string }>>>().notNull().default({}),
+    linKeProductType: integer("lin_ke_product_type"),
+    linKeCategoryId: text("lin_ke_category_id"),
+    linKeThirdCategoryId: text("lin_ke_third_category_id"),
+    linKeCategoryName: text("lin_ke_category_name"),
+    linKeCategoryPath: text("lin_ke_category_path"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -135,9 +140,26 @@ export const rebuildFieldOptions = pgTable(
   ]
 );
 
+export const linKeAccountConfigs = pgTable(
+  "lin_ke_account_configs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    name: text("name").notNull(),
+    bdCityTexts: jsonb("bd_city_texts").$type<string[]>().notNull(),
+    cookieFilePath: text("cookie_file_path").notNull(),
+    groupId: text("group_id").default("").notNull(),
+    rootLifeAccountId: text("root_life_account_id").default("").notNull(),
+    accountId: text("account_id").default("").notNull(),
+    active: boolean("active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  }
+);
+
 export type RebuildSupplyGoodsRow = typeof rebuildSupplyGoods.$inferSelect;
 export type TicketRow = typeof tickets.$inferSelect;
 export type RebuildFieldRow = typeof rebuildFields.$inferSelect;
 export type RebuildFieldOptionRow = typeof rebuildFieldOptions.$inferSelect;
 export type SkillRow = typeof skills.$inferSelect;
 export type SkillTagRow = typeof skillTags.$inferSelect;
+export type LinKeAccountConfigRow = typeof linKeAccountConfigs.$inferSelect;

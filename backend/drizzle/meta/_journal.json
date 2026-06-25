@@ -36,6 +36,13 @@
       "when": 1782297631986,
       "tag": "0004_quick_hitman",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1782356197343,
+      "tag": "0005_lin_ke_account_configs",
+      "breakpoints": true
     }
   ]
 }
