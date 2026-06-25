@@ -49,6 +49,7 @@ import {
 import { getDefaultSkillPublisher, sha256Bytes, type SkillPublisher } from "./skill-publisher.ts";
 import { getDefaultSkillRepository, type MarketSkill, type SkillRepository } from "./skills.ts";
 import { getDefaultUserRepository, type UserRepository } from "./users.ts";
+import { createLinKeRoutes, type LinKeRoutesOptions } from "./lin-ke/routes.ts";
 
 interface ServerStatus {
   name: string;
@@ -76,6 +77,7 @@ interface ServerAppOptions {
   rebuildFieldMetadataRepository?: RebuildFieldMetadataRepository | null;
   ticketRepository?: TicketRepository | null;
   fetchImpl?: FetchLike;
+  linKeRoutesOptions?: LinKeRoutesOptions;
 }
 
 const DEFAULT_GRAVITY_SSO_ISSUER = "https://fawos.online";
@@ -525,6 +527,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
   };
 
   app.use("/api/*", cors());
+  app.route("/", createLinKeRoutes(options.linKeRoutesOptions));
 
   app.get("/health", (context) => {
     return context.json({ status: "ok" });
