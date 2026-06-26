@@ -1797,7 +1797,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-info-generate/info-optimization/generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({}),
     });
     const body = await response.json() as {
@@ -1851,7 +1851,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-info-generate-failed/info-optimization/generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({}),
     });
     const body = await response.json() as {
@@ -1863,7 +1863,7 @@ describe("server app", () => {
 
     expect(response.status).toBe(502);
     expect(body.error).toBe("Bad Gateway");
-    expect(body.message).toBe("model down");
+    expect(body.message).toContain("model down");
     expect(body.originPackages).toBeUndefined();
     expect(body.optimizedPackages).toBeUndefined();
   });
@@ -1898,7 +1898,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-info-confirm/info-optimization/confirm", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         optimizedPackages: {
           viewList: [

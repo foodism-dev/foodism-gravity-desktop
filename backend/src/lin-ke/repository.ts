@@ -195,14 +195,27 @@ export function createDrizzleLinKeRepository(db: ServerDatabase): LinKeRepositor
 
     async updateSupplyGoodsLinKeMapping(supplyGoodsId: string, mapping: JsonRecord): Promise<boolean> {
       if (!supplyGoodsId) return false;
+      const [currentRow] = await db
+        .select({ payload: rebuildSupplyGoods.payload })
+        .from(rebuildSupplyGoods)
+        .where(eq(rebuildSupplyGoods.supplyGoodsId, supplyGoodsId))
+        .limit(1);
+      if (!currentRow) return false;
+
+      const nextPayload = {
+        ...currentRow.payload,
+        linKeMapping: {
+          productType: parseIntValue(mapping.productType),
+          categoryId: cleanString(mapping.categoryId),
+          thirdCategoryId: cleanString(mapping.thirdCategoryId),
+          categoryName: cleanString(mapping.categoryName),
+          categoryPath: cleanString(mapping.categoryPath),
+        },
+      };
       const rows = await db
         .update(rebuildSupplyGoods)
         .set({
-          linKeProductType: parseIntValue(mapping.productType),
-          linKeCategoryId: cleanString(mapping.categoryId),
-          linKeThirdCategoryId: cleanString(mapping.thirdCategoryId),
-          linKeCategoryName: cleanString(mapping.categoryName),
-          linKeCategoryPath: cleanString(mapping.categoryPath),
+          payload: nextPayload,
           updatedAt: new Date(),
         })
         .where(eq(rebuildSupplyGoods.supplyGoodsId, supplyGoodsId))

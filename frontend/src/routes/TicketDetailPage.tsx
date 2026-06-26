@@ -472,7 +472,6 @@ function LoadedTicketDetail({
       current: {
         linkeGoodsId: goodsId,
       },
-      operator: { source: "operator" },
       remark: "确认已上架并录入林客商品ID",
     });
   }
