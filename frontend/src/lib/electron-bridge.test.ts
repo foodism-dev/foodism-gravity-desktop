@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildOpenBrowserTabMessage,
   buildOpenRebuildApprovalMessage,
   buildReloadWorkOrdersMessage,
   isElectronEmbedded,
+  openBrowserTabInElectron,
   openRebuildApprovalInElectron,
   reloadWorkOrdersInElectron,
 } from "./electron-bridge.ts";
@@ -20,6 +22,14 @@ describe("Electron 嵌入桥接消息", () => {
     expect(buildReloadWorkOrdersMessage()).toEqual({
       type: "proma:reload-work-orders",
     });
+  });
+
+  test("Given http url, When building browser tab message, Then message is stable", () => {
+    expect(buildOpenBrowserTabMessage(" https://www.life-partner.cn/draft/1 ")).toEqual({
+      type: "proma:open-browser-tab",
+      url: "https://www.life-partner.cn/draft/1",
+    });
+    expect(buildOpenBrowserTabMessage("javascript:alert(1)")).toBeNull();
   });
 
   test("Given page is inside iframe, When embedded query is missing, Then it still uses Electron bridge", () => {
@@ -73,5 +83,63 @@ describe("Electron 嵌入桥接消息", () => {
 
     expect(reloadCount).toBe(1);
     expect(parentMessages).toEqual([]);
+  });
+
+  test("Given Electron webview bridge exists, When opening browser tab, Then it uses host bridge", () => {
+    const openedUrls: string[] = [];
+    const parentMessages: unknown[] = [];
+    const currentWindow = {
+      parent: {
+        postMessage(message: unknown) {
+          parentMessages.push(message);
+        },
+      },
+      location: { search: "?embedded=electron" },
+      promaElectronWebview: {
+        openBrowserTab(url: string) {
+          openedUrls.push(url);
+        },
+      },
+    } as unknown as Window;
+
+    expect(openBrowserTabInElectron("https://www.life-partner.cn/draft/1", { currentWindow })).toBe(true);
+
+    expect(openedUrls).toEqual(["https://www.life-partner.cn/draft/1"]);
+    expect(parentMessages).toEqual([]);
+  });
+
+  test("Given no Electron webview bridge, When opening browser tab in iframe, Then it posts host message to parent", () => {
+    const parentMessages: unknown[] = [];
+    const currentWindow = {
+      parent: {
+        postMessage(message: unknown) {
+          parentMessages.push(message);
+        },
+      },
+      location: { search: "" },
+    } as unknown as Window;
+
+    expect(openBrowserTabInElectron("https://www.life-partner.cn/draft/1", { currentWindow })).toBe(true);
+
+    expect(parentMessages).toEqual([{
+      type: "proma:open-browser-tab",
+      url: "https://www.life-partner.cn/draft/1",
+    }]);
+  });
+
+  test("Given unsafe url, When opening browser tab, Then it is rejected before host bridge", () => {
+    const openedUrls: string[] = [];
+    const currentWindow = {
+      parent: {},
+      location: { search: "?embedded=electron" },
+      promaElectronWebview: {
+        openBrowserTab(url: string) {
+          openedUrls.push(url);
+        },
+      },
+    } as unknown as Window;
+
+    expect(openBrowserTabInElectron("javascript:alert(1)", { currentWindow })).toBe(false);
+    expect(openedUrls).toEqual([]);
   });
 });

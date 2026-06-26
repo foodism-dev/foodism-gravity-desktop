@@ -8,6 +8,13 @@ describe('业务浏览器 Host 消息', () => {
       .toBe('RB审核 · 944-019efa94400a73d9')
   })
 
+  test('Given Lin-Ke draft url, When building browser tab title, Then it uses draft context', () => {
+    expect(buildBrowserTabTitle('https://www.life-partner.cn/draft/1')).toBe('林客草稿 · 1')
+    expect(buildBrowserTabTitle('https://www.life-partner.cn/op-merchant/workbench/subapp/goods-list/form-type?product_draft_cache_id=cache-1'))
+      .toBe('林客草稿 · cache-1')
+    expect(buildBrowserTabTitle('https://www.life-partner.cn/op-merchant/workbench')).toBe('林客草稿')
+  })
+
   test('Given open browser tab payload, When checking host message, Then only valid urls pass', () => {
     expect(isOpenBrowserTabMessage({
       type: 'proma:open-browser-tab',

@@ -1,4 +1,5 @@
 const REBUILD_APPROVAL_URL_PATTERN = /\/View\/SupplyGoods\/([^/?#]+)/
+const LIFE_PARTNER_HOST_PATTERN = /(^|\.)life-partner\.cn$/
 
 export interface OpenBrowserTabMessage {
   type: 'proma:open-browser-tab'
@@ -39,7 +40,13 @@ export function buildBrowserTabTitle(url: string): string {
   }
 
   try {
-    return `网页 · ${new URL(url).hostname}`
+    const parsed = new URL(url)
+    if (LIFE_PARTNER_HOST_PATTERN.test(parsed.hostname)) {
+      const draftId = parsed.searchParams.get('product_draft_cache_id')
+        || (/^\/draft\//.test(parsed.pathname) ? parsed.pathname.split('/').filter(Boolean).at(-1) : '')
+      return draftId ? `林客草稿 · ${draftId}` : '林客草稿'
+    }
+    return `网页 · ${parsed.hostname}`
   } catch {
     return '网页'
   }

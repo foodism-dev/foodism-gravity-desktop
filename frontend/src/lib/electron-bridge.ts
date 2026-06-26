@@ -7,10 +7,16 @@ export interface ReloadWorkOrdersMessage {
   type: "proma:reload-work-orders";
 }
 
+export interface OpenBrowserTabMessage {
+  type: "proma:open-browser-tab";
+  url: string;
+}
+
 interface PromaElectronWebviewBridge {
   startSsoLogin?: () => void;
   openRebuildApproval?: (supplyGoodsId: string) => void;
   reloadWorkOrders?: () => void;
+  openBrowserTab?: (url: string) => void;
 }
 
 interface ElectronBridgeWindow extends Window {
@@ -27,6 +33,24 @@ export function buildOpenRebuildApprovalMessage(supplyGoodsId: string): OpenRebu
 export function buildReloadWorkOrdersMessage(): ReloadWorkOrdersMessage {
   return {
     type: "proma:reload-work-orders",
+  };
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function buildOpenBrowserTabMessage(url: string): OpenBrowserTabMessage | null {
+  const normalizedUrl = url.trim();
+  if (!isHttpUrl(normalizedUrl)) return null;
+  return {
+    type: "proma:open-browser-tab",
+    url: normalizedUrl,
   };
 }
 
@@ -74,6 +98,26 @@ export function reloadWorkOrdersInElectron(input: ElectronEmbeddedCheckInput = {
   const parentWindow = input.parentWindow ?? currentWindow.parent;
   if (parentWindow && parentWindow !== currentWindow) {
     parentWindow.postMessage(buildReloadWorkOrdersMessage(), "*");
+    return true;
+  }
+
+  return false;
+}
+
+export function openBrowserTabInElectron(url: string, input: ElectronEmbeddedCheckInput = {}): boolean {
+  const message = buildOpenBrowserTabMessage(url);
+  if (!message) return false;
+
+  const currentWindow = (input.currentWindow ?? window) as ElectronBridgeWindow;
+  const webviewBridge = currentWindow.promaElectronWebview;
+  if (webviewBridge?.openBrowserTab) {
+    webviewBridge.openBrowserTab(message.url);
+    return true;
+  }
+
+  const parentWindow = input.parentWindow ?? currentWindow.parent;
+  if (parentWindow && parentWindow !== currentWindow) {
+    parentWindow.postMessage(message, "*");
     return true;
   }
 

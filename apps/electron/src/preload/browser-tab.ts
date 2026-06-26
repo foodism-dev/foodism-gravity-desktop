@@ -10,6 +10,7 @@ interface PromaElectronWebviewBridge {
   startSsoLogin: () => void
   openRebuildApproval: (supplyGoodsId: string) => void
   reloadWorkOrders: () => void
+  openBrowserTab: (url: string) => void
 }
 
 const bridge: PromaElectronWebviewBridge = {
@@ -24,6 +25,12 @@ const bridge: PromaElectronWebviewBridge = {
   },
   reloadWorkOrders: () => {
     ipcRenderer.send('browser-tab:host-message', { type: 'proma:reload-work-orders' })
+  },
+  openBrowserTab: (url: string) => {
+    ipcRenderer.send('browser-tab:host-message', {
+      type: 'proma:open-browser-tab',
+      url,
+    })
   },
 }
 
