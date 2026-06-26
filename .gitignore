@@ -29,6 +29,7 @@ backend/.secrets/
 # caches
 .eslintcache
 .cache
+.local
 *.tsbuildinfo
 
 # IntelliJ based IDEs
