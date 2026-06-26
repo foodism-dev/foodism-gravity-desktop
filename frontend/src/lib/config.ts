@@ -9,3 +9,11 @@ export function getApiBaseUrl() {
   }
   return normalizeBaseUrl(configuredUrl);
 }
+
+export function getSsoLoginUrl() {
+  const configuredUrl = import.meta.env.VITE_SSO_LOGIN_URL;
+  if (configuredUrl?.trim()) {
+    return configuredUrl.trim();
+  }
+  return `${getApiBaseUrl()}/sso_login`;
+}

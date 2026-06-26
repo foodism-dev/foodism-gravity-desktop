@@ -136,6 +136,10 @@ export function TabBar(): React.ReactElement {
       if (appMode !== 'agent') {
         setCurrentAgentSessionId(null)
       }
+    } else {
+      setAppMode('agent')
+      setCurrentConversationId(null)
+      setCurrentAgentSessionId(null)
     }
   }, [setActiveTabId, setAutomationForm, tabs, agentSessions, appMode, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
 

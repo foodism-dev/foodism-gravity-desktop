@@ -1,5 +1,5 @@
 import { AlertCircle, Clock3, Filter, RefreshCw, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type WheelEvent } from "react";
 import { Link } from "@tanstack/react-router";
 import { useSetAtom } from "jotai";
 
@@ -30,6 +30,7 @@ const BUSINESS_STATUS_OPTIONS: Array<{ value: TicketBusinessStatus; label: strin
   { value: "info_optimization_pending", label: "待信息优化确认" },
   { value: "shelf_confirm_pending", label: "待货架上线确认" },
   { value: "commission_setup_pending", label: "待佣金设置" },
+  { value: "product_online_pending", label: "待商品上线" },
   { value: "online", label: "商品上线" },
 ] as const;
 
@@ -137,13 +138,25 @@ export function TicketsPage({ authState }: TicketsPageProps) {
         </div>
       ) : null}
 
-      <section className="grid min-h-0 flex-1 gap-4 overflow-x-auto pb-2 xl:grid-cols-6">
+      <section
+        className="grid min-h-0 flex-1 auto-cols-[280px] grid-flow-col gap-4 overflow-x-auto pb-2 2xl:auto-cols-[300px]"
+        onWheel={handleBoardWheel}
+      >
         {columns.map((column) => (
           <BusinessStatusColumnView key={column.id} column={column} loading={isLoading} />
         ))}
       </section>
     </div>
   );
+}
+
+function handleBoardWheel(event: WheelEvent<HTMLElement>) {
+  if (!event.shiftKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  const board = event.currentTarget;
+  if (board.scrollWidth <= board.clientWidth) return;
+
+  event.preventDefault();
+  board.scrollLeft += event.deltaY;
 }
 
 function buildBusinessStatusColumns(tickets: TicketRecord[]): BusinessStatusColumn[] {
@@ -164,7 +177,7 @@ function buildBusinessStatusColumns(tickets: TicketRecord[]): BusinessStatusColu
 function BusinessStatusColumnView({ column, loading }: { column: BusinessStatusColumn; loading: boolean }) {
   const tone = getColumnTone(column.id);
   return (
-    <Card className="flex min-h-0 min-w-[260px] flex-col overflow-hidden shadow-sm">
+    <Card className="flex min-h-0 w-full flex-col overflow-hidden shadow-sm">
       <CardHeader className="flex-row items-center justify-between p-4">
         <CardTitle className="text-sm">{column.label}</CardTitle>
         <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold", tone.countClassName)}>

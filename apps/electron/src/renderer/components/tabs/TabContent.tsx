@@ -15,7 +15,9 @@ import { PreviewTabContent } from '@/components/diff/PreviewTabContent'
 import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
 import { MarkdownToc } from '@/components/diff/MarkdownToc'
 import { ScratchPadView } from '@/components/scratch-pad/ScratchPadView'
+import { WorkOrdersWebView } from '@/components/work-orders/WorkOrdersWebView'
 import { TabErrorBoundary } from './TabErrorBoundary'
+import { WebPageTabContent } from './WebPageTabContent'
 
 export interface TabContentProps {
   tabId: string
@@ -46,6 +48,14 @@ export function TabContent({ tabId }: TabContentProps): React.ReactElement {
 
   if (tab.type === 'tutorial') {
     return <TutorialTabContent />
+  }
+
+  if (tab.type === 'work-orders') {
+    return <WorkOrdersWebView />
+  }
+
+  if (tab.type === 'web') {
+    return <WebPageTabContent title={tab.title} url={tab.sessionId} />
   }
 
   if (tab.type === 'chat') {

@@ -16,10 +16,17 @@ export function buildSsoLoginCloseButtonScript(): string {
     style.id = styleId;
     style.textContent = [
       '#' + buttonId + ' {',
+      '  all: initial;',
+      '  box-sizing: border-box;',
       '  position: fixed;',
       '  top: max(14px, env(safe-area-inset-top));',
       '  right: max(14px, env(safe-area-inset-right));',
       '  z-index: 2147483647;',
+      '  display: inline-flex;',
+      '  align-items: center;',
+      '  justify-content: center;',
+      '  width: auto;',
+      '  max-width: 88px;',
       '  height: 32px;',
       '  min-width: 32px;',
       '  border: 0;',

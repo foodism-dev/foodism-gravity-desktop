@@ -16,4 +16,13 @@ describe('sso-login-window', () => {
     expect(script).toContain(SSO_LOGIN_CLOSE_URL)
     expect(script).toContain('proma-sso-close-button')
   })
+
+  test('Given 第三方登录页全局样式 When 注入关闭按钮 Then 使用隔离样式避免被拉伸成横条', () => {
+    const script = buildSsoLoginCloseButtonScript()
+
+    expect(script).toContain('all: initial;')
+    expect(script).toContain('box-sizing: border-box;')
+    expect(script).toContain('width: auto;')
+    expect(script).toContain('max-width: 88px;')
+  })
 })

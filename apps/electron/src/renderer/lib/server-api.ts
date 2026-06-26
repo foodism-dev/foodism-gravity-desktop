@@ -60,6 +60,13 @@ async function parseApiError(response: Response): Promise<string> {
   }
 }
 
+function startElectronSsoLogin(): void {
+  if (typeof window === 'undefined') return
+  window.electronAPI?.startSsoLogin?.().catch((error) => {
+    console.error('[认证] 自动打开 SSO 登录页失败:', error)
+  })
+}
+
 export async function requestServerApi<TResponse>(
   path: string,
   init: RequestInit = {},
@@ -76,7 +83,11 @@ export async function requestServerApi<TResponse>(
   })
 
   if (!response.ok) {
-    throw new Error(await parseApiError(response))
+    const message = await parseApiError(response)
+    if (response.status === 401) {
+      startElectronSsoLogin()
+    }
+    throw new Error(message)
   }
 
   return (await response.json()) as TResponse

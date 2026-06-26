@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
 import { useAtomValue } from 'jotai'
-import { FileText, StickyNote, X, Clock, Blocks } from 'lucide-react'
+import { ClipboardCheck, ExternalLink, FileText, StickyNote, X, Clock, Blocks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TabType, TabMinimapItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
@@ -165,6 +165,12 @@ export function TabBarItem({
       >
         {type === 'preview' && !isNarrow && (
           <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        {type === 'work-orders' && !isNarrow && (
+          <ClipboardCheck className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        {type === 'web' && !isNarrow && (
+          <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
         )}
 
         {/* 标题（窄状态下隐藏，用 spacer 撑开让关闭按钮靠右） */}

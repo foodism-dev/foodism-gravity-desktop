@@ -8,7 +8,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom, useAtom } from 'jotai'
-import { tabsAtom, activeTabIdAtom, activeTabAtom } from '@/atoms/tab-atoms'
+import { WORK_ORDERS_TAB_ID, tabsAtom, activeTabIdAtom, activeTabAtom } from '@/atoms/tab-atoms'
 import { Panel } from '@/components/app-shell/Panel'
 import { WelcomeView } from '@/components/welcome/WelcomeView'
 import { previewPanelOpenMapAtom, previewSplitRatioAtom } from '@/atoms/preview-atoms'
@@ -33,6 +33,7 @@ export function MainArea(): React.ReactElement {
   const activeTab = useAtomValue(activeTabAtom)
   const automationFormOpen = useAtomValue(automationFormAtom).open
   const activeView = useAtomValue(activeViewAtom)
+  const browserTabIdsRef = React.useRef<Set<string>>(new Set())
 
   // Tab 内容渲染降级为非紧急：TabBar 立即高亮新 tab，主区域昂贵渲染（含 PreviewPanel 中
   // DiffTabContent → ProseMirror editor mount + Shiki tokenize）让出主线程，避免点击 tab
@@ -118,6 +119,26 @@ export function MainArea(): React.ReactElement {
       setActiveTabId(tabs[0]!.id)
     }
   }, [tabs, activeTabId, setActiveTabId])
+
+  React.useEffect(() => {
+    const nextIds = new Set<string>()
+    for (const tab of tabs) {
+      if (tab.type === 'work-orders' || tab.type === 'web') {
+        nextIds.add(tab.id)
+      }
+    }
+    if (activeView === 'work-orders') {
+      nextIds.add(WORK_ORDERS_TAB_ID)
+    }
+
+    for (const previousId of browserTabIdsRef.current) {
+      if (nextIds.has(previousId)) continue
+      window.electronAPI.browserTabDestroy({ id: previousId }).catch((error) => {
+        console.error('[业务浏览器] 销毁页面失败:', error)
+      })
+    }
+    browserTabIdsRef.current = nextIds
+  }, [activeView, tabs])
 
   // 关闭动画期间右侧面板的定位样式（脱离 flex 流，保持原宽度，translateX 向右滑出）
   const closingOverlayStyle: React.CSSProperties | undefined = closing

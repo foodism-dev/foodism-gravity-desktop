@@ -20,7 +20,11 @@ interface HandoffExchangeResponse {
 }
 
 export function getStoredToken() {
-  return window.sessionStorage.getItem(TOKEN_KEY);
+  const token = window.sessionStorage.getItem(TOKEN_KEY);
+  if (token) {
+    return token;
+  }
+  return consumeUrlApiToken();
 }
 
 export function getStoredUser(): FrontendUser | null {
@@ -45,6 +49,26 @@ export function storeSession(session: AuthSession) {
 export function clearSession() {
   window.sessionStorage.removeItem(TOKEN_KEY);
   window.sessionStorage.removeItem(USER_KEY);
+}
+
+function consumeUrlApiToken(): string | null {
+  if (!window.location?.href) {
+    return null;
+  }
+  const url = new URL(window.location.href);
+  const token = url.searchParams.get("apiToken")?.trim() || null;
+  if (!token) {
+    return null;
+  }
+
+  window.sessionStorage.setItem(TOKEN_KEY, token);
+  url.searchParams.delete("apiToken");
+  if (window.history?.replaceState) {
+    window.history.replaceState(null, "", url.toString());
+  } else {
+    window.location.href = url.toString();
+  }
+  return token;
 }
 
 export async function exchangeHandoffToken(handoffToken: string): Promise<AuthSession> {

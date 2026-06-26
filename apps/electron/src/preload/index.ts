@@ -188,6 +188,23 @@ export interface ElectronAPI {
   /** 在系统默认浏览器中打开外部链接 */
   openExternal: (url: string) => Promise<void>
 
+  // ===== 原生业务浏览器 Tab =====
+
+  /** 创建或更新业务浏览器 Tab */
+  browserTabEnsure: (input: BrowserTabEnsureInput) => Promise<void>
+  /** 同步业务浏览器 Tab 的窗口坐标 */
+  browserTabSetBounds: (input: BrowserTabBoundsInput) => Promise<void>
+  /** 显示业务浏览器 Tab */
+  browserTabShow: (input: BrowserTabIdInput) => Promise<void>
+  /** 隐藏业务浏览器 Tab */
+  browserTabHide: (input: BrowserTabIdInput) => Promise<void>
+  /** 刷新业务浏览器 Tab */
+  browserTabReload: (input: BrowserTabIdInput) => Promise<void>
+  /** 销毁业务浏览器 Tab */
+  browserTabDestroy: (input: BrowserTabIdInput) => Promise<void>
+  /** 订阅业务页面发给桌面端的 Host 消息 */
+  onBrowserTabHostMessage: (callback: (payload: BrowserTabHostMessagePayload) => void) => () => void
+
   // ===== 窗口控制（Windows 自定义标题栏）=====
 
   /** 最小化窗口 */
@@ -1080,6 +1097,33 @@ export interface ElectronAPI {
   onAutomationChanged: (callback: () => void) => () => void
 }
 
+interface BrowserTabBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface BrowserTabEnsureInput {
+  id: string
+  url: string
+  bounds: BrowserTabBounds
+}
+
+interface BrowserTabBoundsInput {
+  id: string
+  bounds: BrowserTabBounds
+}
+
+interface BrowserTabIdInput {
+  id: string
+}
+
+interface BrowserTabHostMessagePayload {
+  tabId: string
+  message: unknown
+}
+
 interface MigrationExportResult {
   success: boolean
   filePath: string
@@ -1142,6 +1186,31 @@ const electronAPI: ElectronAPI = {
   // 通用工具
   openExternal: (url: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL, url)
+  },
+
+  // 原生业务浏览器 Tab
+  browserTabEnsure: (input: BrowserTabEnsureInput) => {
+    return ipcRenderer.invoke('browser-tab:ensure', input)
+  },
+  browserTabSetBounds: (input: BrowserTabBoundsInput) => {
+    return ipcRenderer.invoke('browser-tab:set-bounds', input)
+  },
+  browserTabShow: (input: BrowserTabIdInput) => {
+    return ipcRenderer.invoke('browser-tab:show', input)
+  },
+  browserTabHide: (input: BrowserTabIdInput) => {
+    return ipcRenderer.invoke('browser-tab:hide', input)
+  },
+  browserTabReload: (input: BrowserTabIdInput) => {
+    return ipcRenderer.invoke('browser-tab:reload', input)
+  },
+  browserTabDestroy: (input: BrowserTabIdInput) => {
+    return ipcRenderer.invoke('browser-tab:destroy', input)
+  },
+  onBrowserTabHostMessage: (callback: (payload: BrowserTabHostMessagePayload) => void) => {
+    const listener = (_: unknown, payload: BrowserTabHostMessagePayload): void => callback(payload)
+    ipcRenderer.on('browser-tab:host-message', listener)
+    return () => { ipcRenderer.removeListener('browser-tab:host-message', listener) }
   },
 
   // 窗口控制

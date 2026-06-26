@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { jwt } from "hono/jwt";
@@ -8,7 +9,9 @@ import {
   extractSsoUser,
   getJwtSecret,
   isLoginRequest,
+  type LoginResponse,
   resolveUserFromTokenPayload,
+  type ApiUser,
   type AuthTokenPayload,
 } from "./auth.ts";
 import {
@@ -56,7 +59,10 @@ interface ServerStatus {
 
 interface ServerVariables {
   jwtPayload: AuthTokenPayload;
+  apiUser: ApiUser;
 }
+
+type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 interface ServerAppOptions {
   userRepository?: UserRepository | null;
@@ -69,7 +75,15 @@ interface ServerAppOptions {
   supplyGoodsRecordRepository?: SupplyGoodsRecordRepository | null;
   rebuildFieldMetadataRepository?: RebuildFieldMetadataRepository | null;
   ticketRepository?: TicketRepository | null;
+  fetchImpl?: FetchLike;
 }
+
+const DEFAULT_GRAVITY_SSO_ISSUER = "https://fawos.online";
+const DEFAULT_WEB_SSO_CLIENT_ID = "gravity-pc";
+export const DEFAULT_WEB_SSO_REDIRECT_URI = "http://127.0.0.1:8787/sso/callback";
+const DEFAULT_WEB_SSO_SCOPE = "openid profile email offline_access";
+const WEB_SSO_STATE_TTL_MS = 10 * 60 * 1000;
+const HANDOFF_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 const SENSITIVE_LOG_KEYS = new Set([
   "accessToken",
@@ -113,8 +127,25 @@ function stringifyForLog(value: unknown): string {
   }
 }
 
+function getErrorCause(error: unknown): unknown {
+  if (error instanceof Error && "cause" in error) {
+    return error.cause;
+  }
+  if (isRecord(error) && "cause" in error) {
+    return error.cause;
+  }
+  return undefined;
+}
+
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error
+    ? error.stack ?? error.message
+    : String(error);
+  const cause = getErrorCause(error);
+  if (cause === undefined) {
+    return message;
+  }
+  return `${message}\nCause: ${getErrorMessage(cause)}`;
 }
 
 function getRecordKeys(value: unknown): string {
@@ -170,9 +201,189 @@ function resolveInternalApiToken(input: string | null | undefined): string | nul
   return Bun.env.PROMA_INTERNAL_API_TOKEN?.trim() || null;
 }
 
+function normalizeBaseUrl(value: string): string {
+  return value.endsWith("/") ? value : `${value}/`;
+}
+
+function base64url(input: Buffer): string {
+  return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+interface WebSsoState {
+  verifier: string;
+  returnTo: string;
+  redirectUri: string;
+  expiresAt: number;
+}
+
+interface HandoffSession {
+  session: LoginResponse;
+  expiresAt: number;
+}
+
+interface WebSsoConfig {
+  issuer: string;
+  clientId: string;
+  scope: string;
+}
+
+interface WebSsoPkce {
+  verifier: string;
+  challenge: string;
+  state: string;
+  nonce: string;
+}
+
+interface SsoTokenSet {
+  access_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  id_token?: string;
+}
+
+function createWebSsoPkce(): WebSsoPkce {
+  const verifier = base64url(randomBytes(48));
+  return {
+    verifier,
+    challenge: base64url(createHash("sha256").update(verifier).digest()),
+    state: base64url(randomBytes(24)),
+    nonce: base64url(randomBytes(24)),
+  };
+}
+
+function resolveConfiguredWebSsoLoginUrl(): string | null {
+  const configuredUrl = Bun.env.GRAVITY_WEB_SSO_LOGIN_URL?.trim() || Bun.env.VITE_SSO_LOGIN_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+  return null;
+}
+
+function resolveWebSsoConfig(): WebSsoConfig {
+  const issuer = Bun.env.GRAVITY_SSO_ISSUER?.trim() || DEFAULT_GRAVITY_SSO_ISSUER;
+  return {
+    issuer,
+    clientId: Bun.env.GRAVITY_WEB_CLIENT_ID?.trim() || Bun.env.GRAVITY_PC_CLIENT_ID?.trim() || DEFAULT_WEB_SSO_CLIENT_ID,
+    scope: Bun.env.GRAVITY_WEB_SCOPE?.trim() || Bun.env.GRAVITY_PC_SCOPE?.trim() || DEFAULT_WEB_SSO_SCOPE,
+  };
+}
+
+function buildConfiguredWebSsoRedirectUrl(context: Context, loginUrl: string): string {
+  const redirectUrl = new URL(loginUrl);
+  const returnTo = context.req.query("returnTo")?.trim();
+  if (returnTo) {
+    redirectUrl.searchParams.set("returnTo", returnTo);
+  }
+  return redirectUrl.toString();
+}
+
+function getRequestOrigin(context: Context): string {
+  return new URL(context.req.url).origin;
+}
+
+function resolveWebSsoRedirectUri(context: Context): string {
+  return Bun.env.GRAVITY_WEB_REDIRECT_URI?.trim()
+    || Bun.env.GRAVITY_PC_REDIRECT_URI?.trim()
+    || DEFAULT_WEB_SSO_REDIRECT_URI;
+}
+
+function resolveWebSsoReturnTo(context: Context): string {
+  return context.req.query("returnTo")?.trim()
+    || Bun.env.GRAVITY_WEB_DEFAULT_RETURN_TO?.trim()
+    || new URL("/", getRequestOrigin(context)).toString();
+}
+
+function buildOidcAuthorizeUrl(config: WebSsoConfig, pkce: WebSsoPkce, redirectUri: string): string {
+  const authorizeUrl = new URL("/oauth2/authorize", normalizeBaseUrl(config.issuer));
+  authorizeUrl.search = new URLSearchParams({
+    response_type: "code",
+    client_id: config.clientId,
+    redirect_uri: redirectUri,
+    scope: config.scope,
+    state: pkce.state,
+    nonce: pkce.nonce,
+    code_challenge: pkce.challenge,
+    code_challenge_method: "S256",
+    login_hint: "dingtalk",
+  }).toString();
+  return authorizeUrl.toString();
+}
+
+function toSsoTokenSet(payload: unknown): SsoTokenSet {
+  if (!isRecord(payload)) return {};
+  return {
+    access_token: typeof payload.access_token === "string" ? payload.access_token : undefined,
+    token_type: typeof payload.token_type === "string" ? payload.token_type : undefined,
+    expires_in: typeof payload.expires_in === "number" ? payload.expires_in : undefined,
+    refresh_token: typeof payload.refresh_token === "string" ? payload.refresh_token : undefined,
+    id_token: typeof payload.id_token === "string" ? payload.id_token : undefined,
+  };
+}
+
+async function readJsonResponse(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+function getAuthResponseError(payload: unknown, fallback: string): string {
+  if (!isRecord(payload)) return fallback;
+  if (typeof payload.message === "string" && payload.message) return payload.message;
+  if (typeof payload.error === "string" && payload.error) return payload.error;
+  return fallback;
+}
+
+async function exchangeWebSsoCode(
+  fetchImpl: FetchLike,
+  config: WebSsoConfig,
+  code: string,
+  state: WebSsoState,
+): Promise<SsoTokenSet> {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: config.clientId,
+    code,
+    redirect_uri: state.redirectUri,
+    code_verifier: state.verifier,
+  });
+  const response = await fetchImpl(new URL("/oauth2/token", normalizeBaseUrl(config.issuer)), {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const payload = await readJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(getAuthResponseError(payload, `SSO token 请求失败: ${response.status}`));
+  }
+  return toSsoTokenSet(payload);
+}
+
+async function fetchWebSsoAccount(fetchImpl: FetchLike, issuer: string, accessToken: string): Promise<unknown> {
+  const response = await fetchImpl(new URL("/oauth2/account", normalizeBaseUrl(issuer)), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const payload = await readJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(getAuthResponseError(payload, `SSO account 请求失败: ${response.status}`));
+  }
+  return payload;
+}
+
 function isAuthorizedInternalRequest(context: Context, expectedToken: string): boolean {
   const token = context.req.header("Authorization")?.trim();
   return Boolean(token && token === `Bearer ${expectedToken}`);
+}
+
+function createTicketOperatorSnapshot(user: ApiUser): Record<string, unknown> {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    source: "jwt",
+  };
 }
 
 function getFormString(formData: FormData, key: string): string | null {
@@ -297,6 +508,21 @@ export function createServerApp(options: ServerAppOptions = {}) {
   });
   const rebuildAssetUploader = options.rebuildAssetUploader ?? getDefaultRebuildAssetUploader();
   const ticketRepository = options.ticketRepository ?? getDefaultTicketRepository();
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const webSsoStates = new Map<string, WebSsoState>();
+  const handoffSessions = new Map<string, HandoffSession>();
+  const jwtMiddleware = jwt({
+    secret: jwtSecret,
+    alg: "HS256",
+  });
+  const requireApiUser = async (
+    context: Context<{ Variables: ServerVariables }>,
+    next: () => Promise<void>,
+  ): Promise<void> => {
+    const payload = context.get("jwtPayload");
+    context.set("apiUser", await resolveUserFromTokenPayload(payload, userRepository));
+    await next();
+  };
 
   app.use("/api/*", cors());
 
@@ -373,7 +599,103 @@ export function createServerApp(options: ServerAppOptions = {}) {
   }
 
   app.post("/create_user", (context) => handleSsoInternalAuth(context, "create_user"));
+  app.get("/sso_login", (context) => {
+    const configuredLoginUrl = resolveConfiguredWebSsoLoginUrl();
+    if (configuredLoginUrl) {
+      const redirectUrl = buildConfiguredWebSsoRedirectUrl(context, configuredLoginUrl);
+      console.log(`[认证] Web SSO 登录跳转: ${redirectUrl}`);
+      return context.redirect(redirectUrl, 302);
+    }
+
+    const pkce = createWebSsoPkce();
+    const redirectUri = resolveWebSsoRedirectUri(context);
+    webSsoStates.set(pkce.state, {
+      verifier: pkce.verifier,
+      returnTo: resolveWebSsoReturnTo(context),
+      redirectUri,
+      expiresAt: Date.now() + WEB_SSO_STATE_TTL_MS,
+    });
+
+    const redirectUrl = buildOidcAuthorizeUrl(resolveWebSsoConfig(), pkce, redirectUri);
+    console.log(`[认证] Web SSO OIDC 登录跳转: ${redirectUrl}`);
+    return context.redirect(redirectUrl, 302);
+  });
   app.post("/sso_login", (context) => handleSsoInternalAuth(context, "sso_login"));
+
+  async function handleWebSsoCallback(context: Context<{ Variables: ServerVariables }>) {
+    const code = context.req.query("code")?.trim();
+    const stateValue = context.req.query("state")?.trim();
+    if (!code || !stateValue) {
+      return context.text("SSO 回调缺少 code 或 state", 400);
+    }
+
+    const state = webSsoStates.get(stateValue);
+    webSsoStates.delete(stateValue);
+    if (!state || state.expiresAt < Date.now()) {
+      return context.text("SSO 登录状态已失效，请重新登录", 400);
+    }
+
+    try {
+      const config = resolveWebSsoConfig();
+      const tokenSet = await exchangeWebSsoCode(fetchImpl, config, code, state);
+      if (!tokenSet.access_token) {
+        return context.text("SSO token 响应缺少 access_token", 502);
+      }
+
+      const account = await fetchWebSsoAccount(fetchImpl, config.issuer, tokenSet.access_token);
+      const ssoUser = extractSsoUser(account);
+      if (!ssoUser) {
+        return context.text("SSO 用户信息不完整", 502);
+      }
+
+      const user = userRepository
+        ? await userRepository.ensureSsoUser(ssoUser)
+        : ssoUser;
+      const session = await createLoginResponse(user, jwtSecret);
+      const handoffToken = randomUUID();
+      handoffSessions.set(handoffToken, {
+        session,
+        expiresAt: Date.now() + HANDOFF_TOKEN_TTL_MS,
+      });
+
+      const returnTo = new URL(state.returnTo, getRequestOrigin(context));
+      returnTo.searchParams.set("handoff", handoffToken);
+      console.log(`[认证] Web SSO 已完成，回跳前端: ${returnTo.origin}${returnTo.pathname}`);
+      return context.redirect(returnTo.toString(), 302);
+    } catch (error) {
+      console.error(`[认证] Web SSO 回调失败: ${getErrorMessage(error)}`);
+      return context.text("SSO 登录失败", 502);
+    }
+  }
+
+  app.get("/callback", handleWebSsoCallback);
+  app.get("/sso/callback", handleWebSsoCallback);
+
+  app.post("/api/auth/handoff/exchange", async (context) => {
+    const body = (await context.req.json().catch(() => null)) as unknown;
+    const handoffToken = isRecord(body) && typeof body.handoffToken === "string"
+      ? body.handoffToken.trim()
+      : "";
+    if (!handoffToken) {
+      return context.json({ error: "Bad Request", message: "handoffToken 不能为空" }, 400);
+    }
+
+    const handoff = handoffSessions.get(handoffToken);
+    handoffSessions.delete(handoffToken);
+    if (!handoff || handoff.expiresAt < Date.now()) {
+      return context.json({ error: "Unauthorized", message: "登录态桥接已失效，请重新登录" }, 401);
+    }
+
+    return context.json(handoff.session);
+  });
+
+  // 用户态业务接口统一从 JWT 解析当前用户，避免信任前端传入的操作者信息。
+  app.use("/api/me", jwtMiddleware, requireApiUser);
+  app.use("/api/tickets", jwtMiddleware, requireApiUser);
+  app.use("/api/tickets/*", jwtMiddleware, requireApiUser);
+  app.use("/api/rebuild/supplygoods/fields/sync", jwtMiddleware, requireApiUser);
+  app.use("/api/rebuild/supplycompany/fields/sync", jwtMiddleware, requireApiUser);
+  app.use("/api/rebuild/fields/options", jwtMiddleware, requireApiUser);
 
   async function handleSupplyGoodsCallback(context: Context<{ Variables: ServerVariables }>) {
     let body: unknown;
@@ -670,6 +992,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
     const result = await ticketRepository.createActionRecord({
       supplyGoodsId,
       ...parsed.value,
+      operator: createTicketOperatorSnapshot(context.get("apiUser")),
     });
     if (!result) {
       return context.json({ error: "Not Found", message: "工单不存在" }, 404);
@@ -681,17 +1004,8 @@ export function createServerApp(options: ServerAppOptions = {}) {
     });
   });
 
-  app.use(
-    "/api/me",
-    jwt({
-      secret: jwtSecret,
-      alg: "HS256",
-    }),
-  );
-
   app.get("/api/me", async (context) => {
-    const payload = context.get("jwtPayload");
-    return context.json({ user: await resolveUserFromTokenPayload(payload, userRepository) });
+    return context.json({ user: context.get("apiUser") });
   });
 
   app.notFound((context) => {

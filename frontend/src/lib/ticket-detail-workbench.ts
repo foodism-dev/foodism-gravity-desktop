@@ -5,6 +5,11 @@ export interface WorkbenchMetaItem {
   value: string;
 }
 
+export interface TicketHeaderBadge {
+  label: string;
+  variant: "success" | "muted";
+}
+
 export interface WorkbenchProgressStep {
   index: number;
   label: string;
@@ -16,6 +21,7 @@ export type TicketFlowKey =
   | "info_optimization"
   | "shelf_confirm"
   | "commission_setup"
+  | "product_online_pending"
   | "product_online";
 
 export interface WorkbenchActionButton {
@@ -42,6 +48,7 @@ const FLOW_STEPS: Array<{ key: TicketFlowKey; label: string }> = [
   { key: "info_optimization", label: "待信息优化确认" },
   { key: "shelf_confirm", label: "待货架上线确认" },
   { key: "commission_setup", label: "待佣金设置" },
+  { key: "product_online_pending", label: "待商品上线" },
   { key: "product_online", label: "商品上线" },
 ];
 
@@ -50,6 +57,7 @@ const BUSINESS_STATUS_FLOW_MAP: Record<TicketBusinessStatus, TicketFlowKey> = {
   info_optimization_pending: "info_optimization",
   shelf_confirm_pending: "shelf_confirm",
   commission_setup_pending: "commission_setup",
+  product_online_pending: "product_online_pending",
   online: "product_online",
 };
 
@@ -58,6 +66,7 @@ const BUSINESS_STATUS_LABEL_MAP: Record<TicketBusinessStatus, string> = {
   info_optimization_pending: "待信息优化确认",
   shelf_confirm_pending: "待货架上线确认",
   commission_setup_pending: "待佣金设置",
+  product_online_pending: "待商品上线",
   online: "商品上线",
 };
 
@@ -93,11 +102,19 @@ export function deriveTicketFlow(ticket: TicketRecord, records: TicketActionReco
   if (!hasPayload(ticket.payload) || !actions.has("info_optimized")) return "info_optimization";
   if (!actions.has("shelf_online_confirmed")) return "shelf_confirm";
   if (!actions.has("commission_configured")) return "commission_setup";
+  if (!actions.has("product_online_confirmed")) return "product_online_pending";
   return "product_online";
 }
 
 export function formatTicketBusinessStatus(status: TicketBusinessStatus): string {
   return BUSINESS_STATUS_LABEL_MAP[status];
+}
+
+export function buildTicketHeaderBadges(ticket: TicketRecord): TicketHeaderBadge[] {
+  return [
+    { label: formatTicketBusinessStatus(ticket.businessStatus), variant: "success" },
+    { label: `工单 · ${formatOverallStatus(ticket.status)}`, variant: "muted" },
+  ];
 }
 
 function buildActionButtons(flow: TicketFlowKey): WorkbenchActionButton[] {
@@ -120,7 +137,16 @@ function buildActionButtons(flow: TicketFlowKey): WorkbenchActionButton[] {
       { label: "手动修改", tone: "secondary" },
     ];
   }
+  if (flow === "product_online_pending") {
+    return [{ label: "确认商品上线", tone: "primary" }];
+  }
   return [{ label: "查看上线任务", tone: "ghost" }];
+}
+
+function formatOverallStatus(status: TicketRecord["status"]): string {
+  if (status === "processing") return "处理中";
+  if (status === "done") return "已完成";
+  return "待处理";
 }
 
 function hasPayload(payload: Record<string, unknown>): boolean {
@@ -139,6 +165,7 @@ function formatActionTitle(record: TicketActionRecord): string {
   if (record.action === "info_optimized") return "信息优化";
   if (record.action === "shelf_online_confirmed") return "货架上线确认";
   if (record.action === "commission_configured") return "佣金设置";
+  if (record.action === "product_online_confirmed") return "商品上线";
   if (record.action === "commission_manual_revision") return "佣金人工修改";
   if (record.action === "return_to_manual_revision") return "返回人工修改";
   if (record.action.includes("agent")) return "Agent";

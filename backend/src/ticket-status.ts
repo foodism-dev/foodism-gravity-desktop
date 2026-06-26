@@ -9,6 +9,7 @@ export const TICKET_BUSINESS_STATUS = {
   INFO_OPTIMIZATION_PENDING: "info_optimization_pending",
   SHELF_CONFIRM_PENDING: "shelf_confirm_pending",
   COMMISSION_SETUP_PENDING: "commission_setup_pending",
+  PRODUCT_ONLINE_PENDING: "product_online_pending",
   ONLINE: "online",
 } as const;
 
@@ -28,8 +29,8 @@ export function matchTicketBusinessStatusByApproval(
   isApprovalPassed: boolean,
   currentBusinessStatus?: TicketBusinessStatus,
 ): TicketBusinessStatus {
-  if (!isApprovalPassed) return TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING;
   if (!currentBusinessStatus || currentBusinessStatus === TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING) {
+    if (!isApprovalPassed) return TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING;
     return TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING;
   }
   return currentBusinessStatus;
@@ -58,7 +59,8 @@ export function getNextTicketBusinessStatusByAction(
 ): TicketBusinessStatus {
   if (action === "info_optimized") return TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING;
   if (action === "shelf_online_confirmed") return TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING;
-  if (action === "commission_configured") return TICKET_BUSINESS_STATUS.ONLINE;
+  if (action === "commission_configured") return TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING;
+  if (action === "product_online_confirmed") return TICKET_BUSINESS_STATUS.ONLINE;
   return currentBusinessStatus;
 }
 

@@ -1,5 +1,6 @@
 import { getStoredToken } from "./auth.ts";
-import { getApiBaseUrl } from "./config.ts";
+import { clearSession } from "./auth.ts";
+import { getApiBaseUrl, getSsoLoginUrl } from "./config.ts";
 import {
   formatPayloadValue,
   getPayloadValue,
@@ -28,6 +29,7 @@ export type TicketBusinessStatus =
   | "info_optimization_pending"
   | "shelf_confirm_pending"
   | "commission_setup_pending"
+  | "product_online_pending"
   | "online";
 
 export interface TicketActionRecord {
@@ -45,7 +47,6 @@ export interface CreateTicketActionRecordInput {
   action: string;
   origin: Record<string, unknown>;
   current: Record<string, unknown>;
-  operator?: Record<string, unknown>;
   remark?: string | null;
 }
 
@@ -132,6 +133,18 @@ interface TicketMetadataResponse {
   field_metadata?: TicketFieldMetadataApiMap;
 }
 
+interface ApiErrorResponse {
+  message?: string;
+}
+
+interface ElectronAuthApi {
+  startSsoLogin?: () => Promise<unknown>;
+}
+
+interface ElectronWebviewBridge {
+  startSsoLogin?: () => void;
+}
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -139,6 +152,66 @@ class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+async function parseApiError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as ApiErrorResponse;
+    return body.message || `请求失败：${response.status}`;
+  } catch {
+    return `请求失败：${response.status}`;
+  }
+}
+
+function buildSsoLoginRedirectUrl(returnTo: string): string {
+  const url = new URL(getSsoLoginUrl());
+  url.searchParams.set("returnTo", returnTo);
+  return url.toString();
+}
+
+function getCurrentReturnToUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.location.href;
+}
+
+function isElectronEmbeddedPage(): boolean {
+  if (typeof window === "undefined") return false;
+  const url = new URL(window.location.href);
+  return url.searchParams.get("embedded") === "electron";
+}
+
+function notifyParentToStartSsoLogin(): boolean {
+  if (typeof window === "undefined" || !isElectronEmbeddedPage()) return false;
+  const webviewBridge = (window as unknown as { promaElectronWebview?: ElectronWebviewBridge }).promaElectronWebview;
+  if (webviewBridge?.startSsoLogin) {
+    webviewBridge.startSsoLogin();
+    return true;
+  }
+  const parent = window.parent as Window | undefined;
+  if (!parent || parent === window) return false;
+  parent.postMessage({ type: "proma:start-sso-login" }, "*");
+  return true;
+}
+
+function redirectToSsoLogin(): void {
+  const returnTo = getCurrentReturnToUrl();
+  if (!returnTo) return;
+  window.location.assign(buildSsoLoginRedirectUrl(returnTo));
+}
+
+function getElectronAuthApi(): ElectronAuthApi | null {
+  if (typeof window === "undefined") return null;
+  const api = (window as unknown as { electronAPI?: ElectronAuthApi }).electronAPI;
+  return api?.startSsoLogin ? api : null;
+}
+
+function startElectronSsoLogin(): boolean {
+  const api = getElectronAuthApi();
+  if (!api?.startSsoLogin) return false;
+  api.startSsoLogin().catch((error) => {
+    console.error("[认证] 自动打开 SSO 登录页失败:", error);
+  });
+  return true;
 }
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -158,7 +231,16 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new ApiError(`请求失败：${response.status}`, response.status);
+    const message = await parseApiError(response);
+    if (response.status === 401) {
+      clearSession();
+      if (!startElectronSsoLogin()) {
+        if (!notifyParentToStartSsoLogin()) {
+          redirectToSsoLogin();
+        }
+      }
+    }
+    throw new ApiError(message, response.status);
   }
 
   return (await response.json()) as T;

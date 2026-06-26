@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createTicketActionRecord, getTicket, getTicketActionRecords, getTicketMetadata } from "./api.ts";
+import { storeSession } from "./auth.ts";
 
 process.env.VITE_API_BASE_URL = "http://localhost:8787";
 
@@ -15,7 +16,7 @@ interface SessionStorageLike {
   removeItem(key: string): void;
 }
 
-function installSessionStorage() {
+function installSessionStorage(input?: { href?: string; parent?: unknown }) {
   const values = new Map<string, string>();
   const sessionStorage: SessionStorageLike = {
     getItem(key) {
@@ -29,17 +30,30 @@ function installSessionStorage() {
     },
   };
   Object.defineProperty(globalThis, "window", {
-    value: { sessionStorage },
+    value: {
+      sessionStorage,
+      location: {
+        href: input?.href ?? "http://localhost:5173/tickets/944-detail?tab=workbench",
+        assign(url: string) {
+          this.href = url;
+        },
+      },
+      parent: input?.parent,
+    },
     configurable: true,
   });
+  return sessionStorage;
 }
 
-function installFetchMock(handler: (url: string, init: RequestInit | undefined) => unknown): FetchCall[] {
+function installFetchMock(
+  handler: (url: string, init: RequestInit | undefined) => unknown,
+  status = 200,
+): FetchCall[] {
   const calls: FetchCall[] = [];
   globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     calls.push({ url, init });
-    return Response.json(handler(url, init));
+    return Response.json(handler(url, init), { status });
   };
   return calls;
 }
@@ -166,5 +180,109 @@ describe("前端 API", () => {
     expect(metadata.fieldMetadata.mainPic?.fieldType).toBe("IMAGE");
     expect(metadata.fieldOptions.showChannel?.[0]?.label).toBe("抖音来客（闭环）");
     expect(calls.map((call) => call.url)).toEqual(["http://localhost:8787/api/tickets/metadata"]);
+  });
+
+  test("Given Electron iframe provides apiToken in URL, When loading ticket data, Then it stores token and sends bearer auth", async () => {
+    const sessionStorage = installSessionStorage({
+      href: "http://localhost:5174/tickets?embedded=electron&apiToken=pc-token",
+    });
+    const calls = installFetchMock(() => ({
+      ticket: {
+        id: 1,
+        supply_goods_id: "944-detail",
+        payload: {},
+        source_payload: {},
+        created_at: "2026-06-24T10:00:00.000Z",
+        updated_at: "2026-06-24T10:00:00.000Z",
+      },
+    }));
+
+    await getTicket("944-detail");
+
+    expect(sessionStorage.getItem("proma_frontend_token")).toBe("pc-token");
+    expect(new Headers(calls[0]?.init?.headers).get("Authorization")).toBe("Bearer pc-token");
+    expect(globalThis.window.location.href).toBe("http://localhost:5174/tickets?embedded=electron");
+  });
+
+  test("Given API returns 401 in web, When loading ticket data, Then it clears session and redirects to SSO", async () => {
+    const sessionStorage = installSessionStorage();
+    storeSession({
+      token: "expired-token",
+      user: { id: "user-1", name: "运营A" },
+    });
+    installFetchMock(() => ({ message: "登录已过期" }), 401);
+
+    await expect(getTicket("944-detail")).rejects.toThrow("登录已过期");
+
+    expect(sessionStorage.getItem("proma_frontend_token")).toBeNull();
+    expect(globalThis.window.location.href).toBe(
+      "http://localhost:8787/sso_login?returnTo=http%3A%2F%2Flocalhost%3A5173%2Ftickets%2F944-detail%3Ftab%3Dworkbench",
+    );
+  });
+
+  test("Given API returns 401 inside Electron, When loading ticket data, Then it opens Electron SSO login", async () => {
+    installSessionStorage();
+    let ssoLoginStarts = 0;
+    Object.defineProperty(globalThis.window, "electronAPI", {
+      value: {
+        startSsoLogin: async () => {
+          ssoLoginStarts += 1;
+          return { authorizeUrl: "https://sso.example.com/oauth2/authorize" };
+        },
+      },
+      configurable: true,
+    });
+    installFetchMock(() => ({ message: "登录已过期" }), 401);
+
+    await expect(getTicket("944-detail")).rejects.toThrow("登录已过期");
+
+    expect(ssoLoginStarts).toBe(1);
+    expect(globalThis.window.location.href).toBe("http://localhost:5173/tickets/944-detail?tab=workbench");
+  });
+
+  test("Given API returns 401 in Electron iframe, When loading ticket data, Then it asks parent to open SSO", async () => {
+    const parentMessages: unknown[] = [];
+    installSessionStorage({
+      href: "http://localhost:5174/tickets?embedded=electron",
+      parent: {
+        postMessage(message: unknown) {
+          parentMessages.push(message);
+        },
+      },
+    });
+    installFetchMock(() => ({ message: "登录已过期" }), 401);
+
+    await expect(getTicket("944-detail")).rejects.toThrow("登录已过期");
+
+    expect(parentMessages).toEqual([{ type: "proma:start-sso-login" }]);
+    expect(globalThis.window.location.href).toBe("http://localhost:5174/tickets?embedded=electron");
+  });
+
+  test("Given API returns 401 inside Electron webview, When loading ticket data, Then it asks host to open SSO", async () => {
+    let hostLoginStarts = 0;
+    const parentMessages: unknown[] = [];
+    installSessionStorage({
+      href: "http://localhost:5174/tickets?embedded=electron",
+      parent: {
+        postMessage(message: unknown) {
+          parentMessages.push(message);
+        },
+      },
+    });
+    Object.defineProperty(globalThis.window, "promaElectronWebview", {
+      value: {
+        startSsoLogin() {
+          hostLoginStarts += 1;
+        },
+      },
+      configurable: true,
+    });
+    installFetchMock(() => ({ message: "登录已过期" }), 401);
+
+    await expect(getTicket("944-detail")).rejects.toThrow("登录已过期");
+
+    expect(hostLoginStarts).toBe(1);
+    expect(parentMessages).toEqual([]);
+    expect(globalThis.window.location.href).toBe("http://localhost:5174/tickets?embedded=electron");
   });
 });

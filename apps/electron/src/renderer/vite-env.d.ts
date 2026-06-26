@@ -41,3 +41,14 @@ interface Window {
   __pendingAttachmentData?: Map<string, string>
   __pendingAgentFileData?: Map<string, string>
 }
+
+declare namespace JSX {
+  interface IntrinsicElements {
+    webview: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+      src?: string
+      title?: string
+      allowpopups?: string
+      partition?: string
+    }
+  }
+}

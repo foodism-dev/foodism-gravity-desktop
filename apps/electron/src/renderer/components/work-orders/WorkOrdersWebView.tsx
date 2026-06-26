@@ -5,44 +5,76 @@
  */
 
 import * as React from 'react'
-import { MonitorUp, RefreshCw } from 'lucide-react'
-import { buildWorkOrderWebUrl } from '@/lib/work-order-navigation'
+import { useAtomValue } from 'jotai'
+import { MonitorUp } from 'lucide-react'
+import { authSessionAtom } from '@/atoms/auth'
+import { useOpenSession } from '@/hooks/useOpenSession'
+import { WORK_ORDERS_TAB_ID } from '@/atoms/tab-atoms'
+import { BrowserPageView } from '@/components/tabs/BrowserPageView'
+import { buildBrowserTabTitle, isOpenBrowserTabMessage } from '@/lib/browser-tab-host-message'
+import { buildRebuildApprovalTab, buildWorkOrderWebUrl } from '@/lib/work-order-navigation'
+
+interface StartSsoLoginMessage {
+  type: 'proma:start-sso-login'
+}
+
+interface OpenRebuildApprovalMessage {
+  type: 'proma:open-rebuild-approval'
+  supplyGoodsId: string
+}
+
+function isStartSsoLoginMessage(value: unknown): value is StartSsoLoginMessage {
+  return typeof value === 'object'
+    && value !== null
+    && 'type' in value
+    && value.type === 'proma:start-sso-login'
+}
+
+function isOpenRebuildApprovalMessage(value: unknown): value is OpenRebuildApprovalMessage {
+  return typeof value === 'object'
+    && value !== null
+    && 'type' in value
+    && value.type === 'proma:open-rebuild-approval'
+    && 'supplyGoodsId' in value
+    && typeof value.supplyGoodsId === 'string'
+    && value.supplyGoodsId.trim().length > 0
+}
 
 export function WorkOrdersWebView(): React.ReactElement {
+  const authSession = useAtomValue(authSessionAtom)
+  const openSession = useOpenSession()
   const workOrderWebUrl = React.useMemo(
-    () => buildWorkOrderWebUrl(import.meta.env.VITE_PROMA_WORK_ORDERS_URL),
-    [],
+    () => buildWorkOrderWebUrl(import.meta.env.VITE_PROMA_WORK_ORDERS_URL, {
+      apiToken: authSession.apiToken,
+    }),
+    [authSession.apiToken],
   )
-  const [reloadKey, setReloadKey] = React.useState(0)
+
+  const handleHostMessage = React.useCallback((message: unknown): void => {
+    if (isOpenBrowserTabMessage(message)) {
+      openSession('web', message.url, buildBrowserTabTitle(message.url))
+      return
+    }
+    if (!isStartSsoLoginMessage(message) && !isOpenRebuildApprovalMessage(message)) return
+    if (isStartSsoLoginMessage(message)) {
+      window.electronAPI.startSsoLogin().catch((error) => {
+        console.error('[我的工单] 打开 SSO 登录页失败:', error)
+      })
+      return
+    }
+    const tab = buildRebuildApprovalTab(message.supplyGoodsId.trim())
+    openSession(tab.type, tab.sessionId, tab.title)
+  }, [openSession])
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-50">
-      <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
-            <MonitorUp className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-[13px] font-semibold text-slate-900">我的工单</div>
-            <div className="truncate text-[11px] text-slate-400">{workOrderWebUrl}</div>
-          </div>
-        </div>
-        <button
-          type="button"
-          aria-label="刷新我的工单"
-          onClick={() => setReloadKey((current) => current + 1)}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-        >
-          <RefreshCw className="size-4" />
-        </button>
-      </div>
-
-      <iframe
-        key={reloadKey}
-        src={workOrderWebUrl}
-        title="我的工单"
-        className="h-full min-h-0 w-full flex-1 border-0 bg-white"
-      />
-    </div>
+    <BrowserPageView
+      id={WORK_ORDERS_TAB_ID}
+      title="我的工单"
+      url={workOrderWebUrl}
+      icon={MonitorUp}
+      iconClassName="bg-emerald-50 text-emerald-700"
+      reloadLabel="刷新我的工单"
+      onHostMessage={handleHostMessage}
+    />
   )
 }

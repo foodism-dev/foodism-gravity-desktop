@@ -30,6 +30,10 @@ describe("工单状态", () => {
     expect(getNextTicketBusinessStatusByAction(
       "commission_configured",
       TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING,
+    )).toBe(TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING);
+    expect(getNextTicketBusinessStatusByAction(
+      "product_online_confirmed",
+      TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING,
     )).toBe(TICKET_BUSINESS_STATUS.ONLINE);
     expect(getNextTicketBusinessStatusByAction(
       "return_to_sales_revision",
@@ -37,8 +41,12 @@ describe("工单状态", () => {
     )).toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
   });
 
-  test("Given approval state changes, When matching business status, Then access review follows approval and later workflow is preserved", () => {
+  test("Given approval state changes, When matching business status, Then only access review follows approval and later workflow is preserved", () => {
     expect(matchTicketBusinessStatusByApproval(false, TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING))
+      .toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
+    expect(matchTicketBusinessStatusByApproval(false, TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING))
+      .toBe(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING);
+    expect(matchTicketBusinessStatusByApproval(false, TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING))
       .toBe(TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING);
     expect(matchTicketBusinessStatusByApproval(true, TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING))
       .toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
@@ -54,7 +62,7 @@ describe("工单状态", () => {
     expect(matchTicketBusinessStatusByApprovalState("通过", TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING))
       .toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
     expect(matchTicketBusinessStatusByApprovalState("审批中", TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING))
-      .toBe(TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING);
+      .toBe(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING);
   });
 
   test("Given business status, When deriving overall ticket status, Then only access review is todo and online is done", () => {
@@ -62,6 +70,7 @@ describe("工单状态", () => {
     expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING)).toBe(TICKET_STATUS.PROCESSING);
     expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING)).toBe(TICKET_STATUS.PROCESSING);
     expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING)).toBe(TICKET_STATUS.PROCESSING);
+    expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING)).toBe(TICKET_STATUS.PROCESSING);
     expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.ONLINE)).toBe(TICKET_STATUS.DONE);
   });
 
@@ -90,6 +99,13 @@ describe("工单状态", () => {
     expect(getNextTicketFlowStateByAction("commission_configured", {
       status: TICKET_STATUS.TODO,
       businessStatus: TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING,
+    })).toEqual({
+      status: TICKET_STATUS.PROCESSING,
+      businessStatus: TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING,
+    });
+    expect(getNextTicketFlowStateByAction("product_online_confirmed", {
+      status: TICKET_STATUS.PROCESSING,
+      businessStatus: TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING,
     })).toEqual({
       status: TICKET_STATUS.DONE,
       businessStatus: TICKET_BUSINESS_STATUS.ONLINE,

@@ -137,6 +137,7 @@ const DEFAULT_PAGE_SIZE = 40;
 const MAX_PAGE_SIZE = 100;
 
 let defaultTicketRepository: TicketRepository | null | undefined;
+type TicketDatabaseExecutor = Pick<ServerDatabase, "select" | "update" | "insert">;
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -217,6 +218,31 @@ export function serializeTicketList(result: TicketListResult): TicketListApiResp
   };
 }
 
+export function mergeTicketPayload(
+  existingPayload: Record<string, unknown>,
+  currentPayload: Record<string, unknown>,
+): Record<string, unknown> {
+  return deepMergeRecords(existingPayload, currentPayload);
+}
+
+function deepMergeRecords(
+  existingPayload: Record<string, unknown>,
+  currentPayload: Record<string, unknown>,
+): Record<string, unknown> {
+  const mergedPayload: Record<string, unknown> = { ...existingPayload };
+  for (const [key, currentValue] of Object.entries(currentPayload)) {
+    const existingValue = mergedPayload[key];
+    mergedPayload[key] = isMergeableRecord(existingValue) && isMergeableRecord(currentValue)
+      ? deepMergeRecords(existingValue, currentValue)
+      : currentValue;
+  }
+  return mergedPayload;
+}
+
+function isMergeableRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function buildTicketWhere(query: TicketQuery): SQL | undefined {
   const conditions: SQL[] = [];
   if (query.status) {
@@ -236,6 +262,29 @@ function buildTicketWhere(query: TicketQuery): SQL | undefined {
   }
 
   return conditions.length > 0 ? and(...conditions) : undefined;
+}
+
+async function getTicketBySupplyGoodsId(
+  executor: TicketDatabaseExecutor,
+  supplyGoodsId: string,
+): Promise<TicketWithSupplyGoods | null> {
+  const rows = await executor
+    .select({
+      id: tickets.id,
+      supplyGoodsId: tickets.supplyGoodsId,
+      status: tickets.status,
+      businessStatus: tickets.businessStatus,
+      payload: tickets.payload,
+      sourcePayload: rebuildSupplyGoods.payload,
+      createdAt: tickets.createdAt,
+      updatedAt: tickets.updatedAt,
+    })
+    .from(tickets)
+    .innerJoin(rebuildSupplyGoods, eq(tickets.supplyGoodsId, rebuildSupplyGoods.supplyGoodsId))
+    .where(eq(tickets.supplyGoodsId, supplyGoodsId))
+    .limit(1);
+
+  return rows[0] ? normalizeTicketRowStatus(rows[0]) : null;
 }
 
 export function createDrizzleTicketRepository(db: ServerDatabase): TicketRepository {
@@ -276,23 +325,7 @@ export function createDrizzleTicketRepository(db: ServerDatabase): TicketReposit
     },
 
     async getTicket(supplyGoodsId: string): Promise<TicketWithSupplyGoods | null> {
-      const rows = await db
-        .select({
-          id: tickets.id,
-          supplyGoodsId: tickets.supplyGoodsId,
-          status: tickets.status,
-          businessStatus: tickets.businessStatus,
-          payload: tickets.payload,
-          sourcePayload: rebuildSupplyGoods.payload,
-          createdAt: tickets.createdAt,
-          updatedAt: tickets.updatedAt,
-        })
-        .from(tickets)
-        .innerJoin(rebuildSupplyGoods, eq(tickets.supplyGoodsId, rebuildSupplyGoods.supplyGoodsId))
-        .where(eq(tickets.supplyGoodsId, supplyGoodsId))
-        .limit(1);
-
-      return rows[0] ? normalizeTicketRowStatus(rows[0]) : null;
+      return getTicketBySupplyGoodsId(db, supplyGoodsId);
     },
 
     async listActionRecords(supplyGoodsId: string): Promise<TicketActionRecord[]> {
@@ -324,57 +357,56 @@ export function createDrizzleTicketRepository(db: ServerDatabase): TicketReposit
     },
 
     async createActionRecord(input: CreateTicketActionRecordInput): Promise<CreateTicketActionRecordResult | null> {
-      const existingTicket = await this.getTicket(input.supplyGoodsId);
-      if (!existingTicket) return null;
+      return db.transaction(async (tx) => {
+        const existingTicket = await getTicketBySupplyGoodsId(tx, input.supplyGoodsId);
+        if (!existingTicket) return null;
 
-      const nextPayload = {
-        ...existingTicket.payload,
-        ...input.current,
-      };
-      const nextState = getNextTicketFlowStateByAction(input.action, {
-        status: normalizeTicketStatus(existingTicket.status),
-        businessStatus: normalizeTicketBusinessStatus(existingTicket.businessStatus),
-      });
-
-      await db
-        .update(tickets)
-        .set({
-          payload: nextPayload,
-          status: nextState.status,
-          businessStatus: nextState.businessStatus,
-          updatedAt: new Date(),
-        })
-        .where(eq(tickets.id, existingTicket.id));
-
-      const insertedRows = await db
-        .insert(ticketActionRecords)
-        .values({
-          ticketId: existingTicket.id,
-          action: input.action,
-          origin: input.origin,
-          current: input.current,
-          operator: input.operator,
-          remark: input.remark,
-        })
-        .returning({
-          id: ticketActionRecords.id,
-          ticketId: ticketActionRecords.ticketId,
-          action: ticketActionRecords.action,
-          origin: ticketActionRecords.origin,
-          current: ticketActionRecords.current,
-          operator: ticketActionRecords.operator,
-          remark: ticketActionRecords.remark,
-          createdAt: ticketActionRecords.createdAt,
+        const nextPayload = mergeTicketPayload(existingTicket.payload, input.current);
+        const nextState = getNextTicketFlowStateByAction(input.action, {
+          status: normalizeTicketStatus(existingTicket.status),
+          businessStatus: normalizeTicketBusinessStatus(existingTicket.businessStatus),
         });
 
-      const updatedTicket = await this.getTicket(input.supplyGoodsId);
-      const record = insertedRows[0];
-      if (!updatedTicket || !record) return null;
+        await tx
+          .update(tickets)
+          .set({
+            payload: nextPayload,
+            status: nextState.status,
+            businessStatus: nextState.businessStatus,
+            updatedAt: new Date(),
+          })
+          .where(eq(tickets.id, existingTicket.id));
 
-      return {
-        ticket: updatedTicket,
-        record,
-      };
+        const insertedRows = await tx
+          .insert(ticketActionRecords)
+          .values({
+            ticketId: existingTicket.id,
+            action: input.action,
+            origin: input.origin,
+            current: input.current,
+            operator: input.operator,
+            remark: input.remark,
+          })
+          .returning({
+            id: ticketActionRecords.id,
+            ticketId: ticketActionRecords.ticketId,
+            action: ticketActionRecords.action,
+            origin: ticketActionRecords.origin,
+            current: ticketActionRecords.current,
+            operator: ticketActionRecords.operator,
+            remark: ticketActionRecords.remark,
+            createdAt: ticketActionRecords.createdAt,
+          });
+
+        const updatedTicket = await getTicketBySupplyGoodsId(tx, input.supplyGoodsId);
+        const record = insertedRows[0];
+        if (!updatedTicket || !record) return null;
+
+        return {
+          ticket: updatedTicket,
+          record,
+        };
+      });
     },
   };
 }

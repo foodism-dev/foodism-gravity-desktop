@@ -3,7 +3,7 @@
  */
 
 import * as React from 'react'
-import { Loader2, LockKeyhole, QrCode, ScanLine } from 'lucide-react'
+import { CheckCircle2, Loader2, LockKeyhole, QrCode, RefreshCw, ScanLine, ShieldCheck } from 'lucide-react'
 import { useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { authSessionAtom } from '@/atoms/auth'
@@ -20,11 +20,13 @@ export function LoginView(): React.ReactElement {
     const cleanupCompleted = window.electronAPI.onAuthSsoCompleted?.((session) => {
       setAuthSession(session)
       setIsSubmitting(false)
+      setAuthorizeUrl(null)
       setError(null)
       toast.success('登录成功')
     })
     const cleanupError = window.electronAPI.onAuthSsoError?.((message) => {
       setIsSubmitting(false)
+      setAuthorizeUrl(null)
       setError(message)
     })
 
@@ -65,6 +67,16 @@ export function LoginView(): React.ReactElement {
                 登录后进入本地优先的 AI Agent 工作流，配置、会话与工作区继续保存在你的设备上。
               </p>
             </div>
+            <div className="relative grid gap-3 text-sm text-white/78">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 size={17} className="text-emerald-200" />
+                <span>企业身份验证后自动回到桌面端</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <CheckCircle2 size={17} className="text-emerald-200" />
+                <span>本地配置与会话仍保存在当前设备</span>
+              </div>
+            </div>
           </section>
 
           <section className="flex min-h-[560px] items-center bg-dialog p-6 sm:p-10">
@@ -75,22 +87,16 @@ export function LoginView(): React.ReactElement {
                 </div>
                 <h2 className="text-2xl font-semibold tracking-normal">登录万店引力</h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  使用 Gravity SSO 完成钉钉身份验证。
+                  使用钉钉完成企业身份验证，授权成功后会自动进入工作台。
                 </p>
               </div>
 
               <div className="space-y-4">
                 <div className="rounded-[8px] bg-muted/55 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[#16a34a]/10 text-[#15803d]">
-                      <QrCode size={20} />
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium">钉钉扫码登录</div>
-                      <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                        授权完成后会自动回到桌面端。
-                      </div>
-                    </div>
+                  <div className="grid gap-3">
+                    <LoginStep index={1} icon={<ScanLine size={17} />} title="打开授权窗口" description="点击下方按钮，在新窗口中打开 Gravity SSO。" />
+                    <LoginStep index={2} icon={<QrCode size={17} />} title="钉钉扫码确认" description="使用钉钉扫码，并在手机上确认身份。" />
+                    <LoginStep index={3} icon={<ShieldCheck size={17} />} title="自动进入工作台" description="验证成功后窗口会关闭，桌面端会自动登录。" />
                   </div>
                 </div>
 
@@ -101,8 +107,24 @@ export function LoginView(): React.ReactElement {
                 )}
 
                 {authorizeUrl && isSubmitting && (
-                  <div className="break-all rounded-[8px] bg-[#16a34a]/10 px-3 py-2 text-xs leading-5 text-[#166534]">
-                    已在应用内打开授权窗口：{authorizeUrl}
+                  <div className="rounded-[8px] bg-[#16a34a]/10 p-4 text-sm text-[#166534]">
+                    <div className="flex items-center gap-2 font-medium">
+                      <Loader2 size={16} className="animate-spin" />
+                      正在等待钉钉确认
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-[#166534]/78">
+                      授权窗口已打开。如果窗口被遮挡，可以重新唤起；不想继续时直接关闭授权窗口即可。
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="mt-3 h-8 px-2 text-[#15803d] hover:bg-[#16a34a]/12 hover:text-[#166534]"
+                      onClick={handleSsoLogin}
+                    >
+                      <RefreshCw size={14} />
+                      重新打开授权窗口
+                    </Button>
                   </div>
                 )}
               </div>
@@ -117,11 +139,11 @@ export function LoginView(): React.ReactElement {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="animate-spin" />
-                    等待授权完成
+                    等待钉钉确认
                   </>
                 ) : (
                   <>
-                    应用内打开钉钉 SSO
+                    打开钉钉 SSO
                     <ScanLine />
                   </>
                 )}
@@ -129,6 +151,30 @@ export function LoginView(): React.ReactElement {
             </div>
           </section>
         </div>
+      </div>
+    </div>
+  )
+}
+
+interface LoginStepProps {
+  index: number
+  icon: React.ReactNode
+  title: string
+  description: string
+}
+
+function LoginStep({ index, icon, title, description }: LoginStepProps): React.ReactElement {
+  return (
+    <div className="flex gap-3">
+      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[#16a34a]/10 text-[#15803d]">
+        {icon}
+        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-dialog px-1 text-[10px] font-semibold leading-none text-muted-foreground ring-1 ring-border">
+          {index}
+        </span>
+      </div>
+      <div>
+        <div className="text-sm font-medium text-foreground">{title}</div>
+        <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{description}</div>
       </div>
     </div>
   )

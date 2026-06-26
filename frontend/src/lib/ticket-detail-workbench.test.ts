@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildTicketWorkbenchModel, deriveTicketFlow } from "./ticket-detail-workbench.ts";
+import { buildTicketHeaderBadges, buildTicketWorkbenchModel, deriveTicketFlow } from "./ticket-detail-workbench.ts";
 import type { TicketActionRecord, TicketRecord } from "./api.ts";
 
 const ticket: TicketRecord = {
@@ -33,6 +33,13 @@ const records: TicketActionRecord[] = [
 ];
 
 describe("工单详情工作台模型", () => {
+  test("Given ticket status, When building header badges, Then only business and overall status are shown", () => {
+    expect(buildTicketHeaderBadges(ticket)).toEqual([
+      { label: "待准入审核", variant: "success" },
+      { label: "工单 · 待处理", variant: "muted" },
+    ]);
+  });
+
   test("Given ticket and records, When building workbench model, Then sidebar fields and progress are readable", () => {
     const model = buildTicketWorkbenchModel(ticket, records);
 
@@ -48,6 +55,7 @@ describe("工单详情工作台模型", () => {
       "待信息优化确认",
       "待货架上线确认",
       "待佣金设置",
+      "待商品上线",
       "商品上线",
     ]);
     expect(model.currentFlow).toBe("access_review");
@@ -80,6 +88,7 @@ describe("工单详情工作台模型", () => {
     expect(deriveTicketFlow({ ...approvedTicket, businessStatus: "info_optimization_pending" }, records)).toBe("info_optimization");
     expect(deriveTicketFlow({ ...approvedTicket, businessStatus: "shelf_confirm_pending" }, records)).toBe("shelf_confirm");
     expect(deriveTicketFlow({ ...approvedTicket, businessStatus: "commission_setup_pending" }, records)).toBe("commission_setup");
+    expect(deriveTicketFlow({ ...approvedTicket, businessStatus: "product_online_pending" }, records)).toBe("product_online_pending");
     expect(deriveTicketFlow({ ...approvedTicket, businessStatus: "online" }, records)).toBe("product_online");
   });
 });

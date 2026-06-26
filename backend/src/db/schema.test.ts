@@ -15,6 +15,11 @@ describe("数据库 schema", () => {
     expect(getTableName(rebuildSupplyGoods)).toBe("rebuild_supply_goods");
     expect(rebuildSupplyGoods.supplyGoodsId.name).toBe("supply_goods_id");
     expect("syncedAt" in rebuildSupplyGoods).toBe(false);
+    expect("linKeProductType" in rebuildSupplyGoods).toBe(false);
+    expect("linKeCategoryId" in rebuildSupplyGoods).toBe(false);
+    expect("linKeThirdCategoryId" in rebuildSupplyGoods).toBe(false);
+    expect("linKeCategoryName" in rebuildSupplyGoods).toBe(false);
+    expect("linKeCategoryPath" in rebuildSupplyGoods).toBe(false);
   });
 
   test("SupplyCompany 落库表使用业务命名与 supply_company_id 唯一键", () => {

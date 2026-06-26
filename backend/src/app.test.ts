@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 
 import { createServerApp } from "./app.ts";
 import type { ApiUser } from "./auth.ts";
@@ -30,6 +30,7 @@ import type {
   TicketRepository,
   TicketWithSupplyGoods,
 } from "./tickets.ts";
+import { mergeTicketPayload } from "./tickets.ts";
 import {
   getNextTicketFlowStateByAction,
   normalizeTicketBusinessStatus,
@@ -61,6 +62,11 @@ interface LoginResponse {
     username: string;
     displayName: string;
   };
+}
+
+interface FetchCall {
+  url: URL;
+  init?: RequestInit;
 }
 
 interface MeResponse {
@@ -192,6 +198,16 @@ interface RebuildFieldSyncResponse {
   fields: number;
   options: number;
   updated_at: string;
+}
+
+async function createAuthHeaders(app: ReturnType<typeof createServerApp>): Promise<Record<string, string>> {
+  const loginResponse = await app.request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "admin", password: "foodism123" }),
+  });
+  const body = (await loginResponse.json()) as LoginResponse;
+  return { Authorization: `Bearer ${body.token}` };
 }
 
 interface MemoryMarketSkill {
@@ -371,10 +387,7 @@ function createMemoryTicketRepository(records: TicketWithSupplyGoods[]): {
         if (!ticket) return null;
 
         const updatedAt = new Date("2026-06-24T11:00:00.000Z");
-        ticket.payload = {
-          ...ticket.payload,
-          ...input.current,
-        };
+        ticket.payload = mergeTicketPayload(ticket.payload, input.current);
         const nextState = getNextTicketFlowStateByAction(input.action, {
           status: normalizeTicketStatus(ticket.status),
           businessStatus: normalizeTicketBusinessStatus(ticket.businessStatus),
@@ -817,6 +830,90 @@ describe("server app", () => {
     });
   });
 
+  test("Given a web browser opens sso_login, When returnTo is provided, Then it redirects to the OIDC authorize page", async () => {
+    const app = createServerApp();
+    const response = await app.request(
+      "/sso_login?returnTo=http%3A%2F%2Flocalhost%3A5174%2Ftickets%2F944-detail",
+    );
+    const location = response.headers.get("Location");
+    const url = new URL(location ?? "");
+
+    expect(response.status).toBe(302);
+    expect(url.origin).toBe("https://fawos.online");
+    expect(url.pathname).toBe("/oauth2/authorize");
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("client_id")).toBe("gravity-pc");
+    expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:8787/sso/callback");
+    expect(url.searchParams.get("scope")).toBe("openid profile email offline_access");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("login_hint")).toBe("dingtalk");
+    expect(url.searchParams.get("state")).toBeTruthy();
+    expect(url.searchParams.get("nonce")).toBeTruthy();
+    expect(url.searchParams.get("code_challenge")).toBeTruthy();
+  });
+
+  test("Given SSO callback succeeds, When frontend exchanges handoff token, Then it receives the jwt session", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      calls.push({ url, init });
+      if (url.pathname === "/oauth2/token") {
+        const body = new URLSearchParams(init?.body?.toString());
+        expect(body.get("grant_type")).toBe("authorization_code");
+        expect(body.get("client_id")).toBe("gravity-pc");
+        expect(body.get("code")).toBe("auth-code");
+        expect(body.get("redirect_uri")).toBe("http://127.0.0.1:8787/sso/callback");
+        expect(body.get("code_verifier")).toBeTruthy();
+        return Response.json({ access_token: "access-token", token_type: "Bearer", expires_in: 1800 });
+      }
+      if (url.pathname === "/oauth2/account") {
+        expect(init?.headers).toEqual({ Authorization: "Bearer access-token" });
+        return Response.json({
+          account: {
+            account: {
+              sub: "sso-user-1",
+              preferred_username: "zhangsan",
+              display_name: "张三",
+            },
+          },
+        });
+      }
+      return Response.json({ message: "unexpected url" }, { status: 500 });
+    };
+    const app = createServerApp({ userRepository: null, fetchImpl });
+    const loginResponse = await app.request(
+      "/sso_login?returnTo=http%3A%2F%2Flocalhost%3A5174%2Ftickets%3Ftab%3Dworkbench",
+    );
+    const authorizeUrl = new URL(loginResponse.headers.get("Location") ?? "");
+    const state = authorizeUrl.searchParams.get("state");
+
+    const callbackResponse = await app.request(`/sso/callback?code=auth-code&state=${state}`);
+    const callbackLocation = new URL(callbackResponse.headers.get("Location") ?? "");
+    const handoffToken = callbackLocation.searchParams.get("handoff");
+
+    expect(callbackResponse.status).toBe(302);
+    expect(callbackLocation.origin).toBe("http://localhost:5174");
+    expect(callbackLocation.pathname).toBe("/tickets");
+    expect(callbackLocation.searchParams.get("tab")).toBe("workbench");
+    expect(handoffToken).toBeTruthy();
+
+    const exchangeResponse = await app.request("/api/auth/handoff/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handoffToken }),
+    });
+    const session = (await exchangeResponse.json()) as LoginResponse;
+
+    expect(exchangeResponse.status).toBe(200);
+    expect(typeof session.token).toBe("string");
+    expect(session.user).toEqual({
+      id: "sso-user-1",
+      username: "zhangsan",
+      displayName: "张三",
+    });
+    expect(calls.map((call) => call.url.pathname)).toEqual(["/oauth2/token", "/oauth2/account"]);
+  });
+
   test("Given published market skills, When the skill list is requested, Then it returns searchable public skills without user or version fields", async () => {
     const app = createServerApp({
       skillRepository: createMemorySkillRepository([
@@ -1219,6 +1316,50 @@ describe("server app", () => {
     });
   });
 
+  test("Given SupplyGoods callback sync fails, When logging the error, Then stack and cause are included", async () => {
+    const cause = new Error("底层 PG 错误");
+    cause.stack = "PostgresError: 底层 PG 错误\n    at postgres";
+    const error = new Error("Drizzle 查询失败", { cause });
+    error.stack = "Error: Drizzle 查询失败\n    at upsertRecord";
+    const repository: SupplyGoodsRecordRepository = {
+      async upsertRecord(): Promise<void> {
+        throw error;
+      },
+      async createCallbackRecord(): Promise<void> {},
+    };
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
+        return {
+          SupplyGoodsId: supplyGoodsId,
+          goodsName: "日志测试商品",
+        };
+      },
+    };
+    const errorSpy = spyOn(console, "error").mockImplementation(() => undefined);
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      supplyGoodsRecordRepository: repository,
+    });
+
+    try {
+      const response = await app.request("/api/rebuild/supplygoods/callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supply_goods_id: "944-error-log" }),
+      });
+
+      expect(response.status).toBe(502);
+      const logLine = String(errorSpy.mock.calls[0]?.[0] ?? "");
+      expect(logLine).toContain("Error: Drizzle 查询失败");
+      expect(logLine).toContain("at upsertRecord");
+      expect(logLine).toContain("Cause:");
+      expect(logLine).toContain("PostgresError: 底层 PG 错误");
+      expect(logLine).toContain("at postgres");
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   test("Given tickets exist, When list API is filtered, Then it delegates query and returns current and source payload", async () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository, queries } = createMemoryTicketRepository([
@@ -1243,7 +1384,9 @@ describe("server app", () => {
     ]);
     const app = createServerApp({ ticketRepository: repository });
 
-    const response = await app.request("/api/tickets?businessStatus=access_review_pending&q=%E7%A6%A7&pageNo=2&pageSize=10");
+    const response = await app.request("/api/tickets?businessStatus=access_review_pending&q=%E7%A6%A7&pageNo=2&pageSize=10", {
+      headers: await createAuthHeaders(app),
+    });
     const body = (await response.json()) as TicketsResponse;
 
     expect(response.status).toBe(200);
@@ -1261,6 +1404,15 @@ describe("server app", () => {
     expect(body.tickets[0]?.business_status).toBe(TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING);
     expect(body.tickets[0]?.payload.commission).toEqual({ commissionRate: 0.12 });
     expect(body.tickets[0]?.source_payload.hostNameInput).toBe("禧聚晟宴");
+  });
+
+  test("Given no token, When ticket list API is requested, Then it rejects the request", async () => {
+    const { repository } = createMemoryTicketRepository([]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets");
+
+    expect(response.status).toBe(401);
   });
 
   test("Given a ticket exists, When detail API is requested, Then it returns that ticket", async () => {
@@ -1286,7 +1438,9 @@ describe("server app", () => {
     ]);
     const app = createServerApp({ ticketRepository: repository });
 
-    const response = await app.request("/api/tickets/944-detail");
+    const response = await app.request("/api/tickets/944-detail", {
+      headers: await createAuthHeaders(app),
+    });
     const body = (await response.json()) as TicketDetailResponse;
 
     expect(response.status).toBe(200);
@@ -1315,7 +1469,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-action/action-records", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         action: "commission_filled",
         origin: {
@@ -1356,7 +1510,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-action/action-records", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         action: "commission_filled",
         origin: {
@@ -1386,14 +1540,69 @@ describe("server app", () => {
     expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
     expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
     expect(body.record.action).toBe("commission_filled");
-    expect(body.record.operator.name).toBe("运营A");
+    expect(body.record.operator).toEqual({
+      id: "admin",
+      username: "admin",
+      displayName: "管理员",
+      source: "jwt",
+    });
+  });
+
+  test("Given nested payload fields, When creating an action record, Then current data is deeply merged", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 4,
+        supplyGoodsId: "944-nested-action",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: {
+          goodsNameInput: "原始套餐",
+          company: {
+            id: "945-company",
+            text: "测试公司",
+            entity: "SupplyCompany",
+          },
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-nested-action/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+      body: JSON.stringify({
+        action: "company_guest_bound",
+        origin: {
+          company: {
+            guestId: null,
+          },
+        },
+        current: {
+          company: {
+            guestId: "guest-001",
+          },
+        },
+      }),
+    });
+    const body = (await response.json()) as TicketActionRecordResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ticket.payload.company).toEqual({
+      id: "945-company",
+      text: "测试公司",
+      entity: "SupplyCompany",
+      guestId: "guest-001",
+    });
   });
 
   test("Given an action record without module, When creating it, Then the API accepts the simplified action record", async () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository } = createMemoryTicketRepository([
       {
-        id: 4,
+        id: 5,
         supplyGoodsId: "944-action-without-module",
         status: TICKET_STATUS.TODO,
         businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
@@ -1406,7 +1615,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-action-without-module/action-records", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         action: "info_optimization_started",
         origin: {},
@@ -1424,7 +1633,7 @@ describe("server app", () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository } = createMemoryTicketRepository([
       {
-        id: 5,
+        id: 6,
         supplyGoodsId: "944-status-action",
         status: TICKET_STATUS.TODO,
         businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
@@ -1439,7 +1648,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-status-action/action-records", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         action: "info_optimized",
         origin: {
@@ -1465,7 +1674,7 @@ describe("server app", () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository } = createMemoryTicketRepository([
       {
-        id: 6,
+        id: 7,
         supplyGoodsId: "944-processing-action",
         status: TICKET_STATUS.TODO,
         businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
@@ -1480,7 +1689,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-processing-action/action-records", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         action: "info_optimization_started",
         origin: {},
@@ -1499,7 +1708,7 @@ describe("server app", () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository } = createMemoryTicketRepository([
       {
-        id: 7,
+        id: 8,
         supplyGoodsId: "944-shelf-action",
         status: TICKET_STATUS.PROCESSING,
         businessStatus: TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING,
@@ -1512,7 +1721,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-shelf-action/action-records", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         action: "shelf_online_confirmed",
         origin: { onlineGoodsUrl: null },
@@ -1527,7 +1736,7 @@ describe("server app", () => {
     expect(body.ticket.payload.onlineGoodsUrl).toBe("https://example.com/goods/1");
   });
 
-  test("Given a commission configured action record, When creating it, Then the ticket is done and online", async () => {
+  test("Given a commission configured action record, When creating it, Then the ticket waits for product online", async () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository } = createMemoryTicketRepository([
       {
@@ -1544,7 +1753,7 @@ describe("server app", () => {
 
     const response = await app.request("/api/tickets/944-commission-action/action-records", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         action: "commission_configured",
         origin: { commissionConfigured: null },
@@ -1554,9 +1763,43 @@ describe("server app", () => {
     const body = (await response.json()) as TicketActionRecordResponse;
 
     expect(response.status).toBe(200);
+    expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING);
+    expect(body.ticket.payload.commissionConfigured).toBe(true);
+  });
+
+  test("Given product online action record, When creating it, Then the ticket is done and online", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 10,
+        supplyGoodsId: "944-product-online-action",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING,
+        payload: {
+          commissionConfigured: true,
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const app = createServerApp({ ticketRepository: repository });
+
+    const response = await app.request("/api/tickets/944-product-online-action/action-records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+      body: JSON.stringify({
+        action: "product_online_confirmed",
+        origin: { productOnlineConfirmed: null },
+        current: { productOnlineConfirmed: true },
+      }),
+    });
+    const body = (await response.json()) as TicketActionRecordResponse;
+
+    expect(response.status).toBe(200);
     expect(body.ticket.status).toBe(TICKET_STATUS.DONE);
     expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.ONLINE);
-    expect(body.ticket.payload.commissionConfigured).toBe(true);
+    expect(body.ticket.payload.productOnlineConfirmed).toBe(true);
   });
 
   test("Given field options exist, When ticket metadata API is requested, Then it returns shared field dictionaries", async () => {
@@ -1589,7 +1832,9 @@ describe("server app", () => {
       rebuildFieldMetadataRepository: fieldRepository,
     });
 
-    const response = await app.request("/api/tickets/metadata");
+    const response = await app.request("/api/tickets/metadata", {
+      headers: await createAuthHeaders(app),
+    });
     const body = (await response.json()) as TicketMetadataResponse;
 
     expect(response.status).toBe(200);
@@ -1628,7 +1873,9 @@ describe("server app", () => {
     ]);
     const app = createServerApp({ ticketRepository: repository });
 
-    const response = await app.request("/api/tickets/944-asset-detail");
+    const response = await app.request("/api/tickets/944-asset-detail", {
+      headers: await createAuthHeaders(app),
+    });
     const body = (await response.json()) as TicketDetailResponse;
 
     expect(response.status).toBe(200);
@@ -1716,7 +1963,10 @@ describe("server app", () => {
       rebuildFieldMetadataRepository: repository,
     });
 
-    const response = await app.request("/api/rebuild/supplygoods/fields/sync", { method: "POST" });
+    const response = await app.request("/api/rebuild/supplygoods/fields/sync", {
+      method: "POST",
+      headers: await createAuthHeaders(app),
+    });
     const body = (await response.json()) as RebuildFieldSyncResponse;
 
     expect(response.status).toBe(200);
@@ -1779,7 +2029,10 @@ describe("server app", () => {
       rebuildFieldMetadataRepository: repository,
     });
 
-    const response = await app.request("/api/rebuild/supplycompany/fields/sync", { method: "POST" });
+    const response = await app.request("/api/rebuild/supplycompany/fields/sync", {
+      method: "POST",
+      headers: await createAuthHeaders(app),
+    });
     const body = (await response.json()) as RebuildFieldSyncResponse;
 
     expect(response.status).toBe(200);
@@ -1808,7 +2061,9 @@ describe("server app", () => {
     ]);
     const app = createServerApp({ rebuildFieldMetadataRepository: repository });
 
-    const response = await app.request("/api/rebuild/fields/options?entity=SupplyGoods&field=showChannel");
+    const response = await app.request("/api/rebuild/fields/options?entity=SupplyGoods&field=showChannel", {
+      headers: await createAuthHeaders(app),
+    });
     const body = (await response.json()) as RebuildFieldOptionsResponse;
 
     expect(response.status).toBe(200);

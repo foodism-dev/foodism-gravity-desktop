@@ -1,7 +1,7 @@
 /**
  * Tab Atoms — 当前工作区入口状态管理
  *
- * 顶部只保留当前会话入口；会话恢复与导航交给左侧列表。
+ * 顶部保留已打开的会话入口；会话历史与恢复仍交给左侧列表。
  * 通过桥接 atom 与现有 currentConversationIdAtom / currentAgentSessionIdAtom 同步，
  * 确保所有现有派生 atoms 无需修改。
  */
@@ -22,7 +22,7 @@ import type { PreviewFile } from './preview-atoms'
 // ===== 类型定义 =====
 
 /** 标签页类型（Settings 不作为 Tab，保留独立视图） */
-export type TabType = 'chat' | 'agent' | 'scratch' | 'preview' | 'tutorial'
+export type TabType = 'chat' | 'agent' | 'scratch' | 'preview' | 'tutorial' | 'work-orders' | 'web'
 
 /** Scratch Pad 专用的固定 sessionId */
 export const SCRATCH_PAD_ID = '__scratch-pad__'
@@ -31,8 +31,13 @@ export const SCRATCH_PAD_ID = '__scratch-pad__'
 export const TUTORIAL_TAB_ID = '__tutorial__'
 export const TUTORIAL_TAB_TITLE = '使用教程'
 
+/** 我的工单 Tab 固定 ID */
+export const WORK_ORDERS_TAB_ID = '__work-orders__'
+export const WORK_ORDERS_TAB_TITLE = '我的工单'
+
 /** 会话预览 Tab 的 ID 前缀：运行时临时入口，不参与持久化 */
 const PREVIEW_TAB_PREFIX = '__preview__:'
+const WEB_TAB_PREFIX = 'web:'
 
 /** Scratch Pad 标签默认标题 */
 export const SCRATCH_PAD_TITLE = 'Scratch Pad'
@@ -197,12 +202,31 @@ export function getPreviewTabTitle(filePath: string): string {
   return `预览：${getFileBaseName(filePath)}`
 }
 
+export function createWebTabId(url: string): string {
+  return `${WEB_TAB_PREFIX}${url}`
+}
+
 export function isPreviewTab(tab: TabItem): boolean {
   return tab.type === 'preview' || tab.id.startsWith(PREVIEW_TAB_PREFIX)
 }
 
 function isSessionTab(tab: TabItem): boolean {
   return tab.type === 'chat' || tab.type === 'agent'
+}
+
+function isPrimaryTab(tab: TabItem): boolean {
+  return isSessionTab(tab) || tab.type === 'work-orders' || tab.type === 'web'
+}
+
+function getSessionTabs(tabs: TabItem[]): TabItem[] {
+  return tabs.filter((tab) => isPrimaryTab(tab))
+}
+
+function placePreviewAfterOwner(sessionTabs: TabItem[], ownerTab: TabItem, previewTab: TabItem): TabItem[] {
+  const tabsWithOwner = sessionTabs.some((tab) => tab.id === ownerTab.id)
+    ? sessionTabs
+    : [...sessionTabs, ownerTab]
+  return tabsWithOwner.flatMap((tab) => tab.id === ownerTab.id ? [tab, previewTab] : [tab])
 }
 
 function getPersistentTabs(tabs: TabItem[]): TabItem[] {
@@ -227,7 +251,7 @@ export function getPersistableTabState(
   }
 }
 
-/** 打开或聚焦会话入口：始终用目标会话替换当前会话，避免顶部累积多个 Tab。
+/** 打开或聚焦会话入口：会话 Tab 已存在时激活，否则追加到顶部。
  *  restore 提示存在时，切回带预览的会话会一并重建其预览 Tab 并回到上次视图。 */
 export function openTab(
   tabs: TabItem[],
@@ -256,7 +280,8 @@ export function openTab(
   }
 
   if (item.type === 'preview') {
-    const ownerAgentTab = tabs.find((t) => t.type === 'agent' && t.sessionId === item.sessionId) ?? {
+    const sessionTabs = getSessionTabs(tabs)
+    const ownerAgentTab = sessionTabs.find((t) => t.type === 'agent' && t.sessionId === item.sessionId) ?? {
       id: item.sessionId,
       type: 'agent' as const,
       sessionId: item.sessionId,
@@ -270,14 +295,15 @@ export function openTab(
     }
 
     return {
-      tabs: [ownerAgentTab, previewTab],
+      tabs: placePreviewAfterOwner(sessionTabs, ownerAgentTab, previewTab),
       activeTabId: previewTab.id,
     }
   }
 
-  const existingTab = tabs.find((t) => t.sessionId === item.sessionId && t.type === item.type)
+  const sessionTabs = getSessionTabs(tabs)
+  const existingTab = sessionTabs.find((t) => t.sessionId === item.sessionId && t.type === item.type)
   const sessionTab: TabItem = existingTab ?? {
-    id: item.sessionId,
+    id: item.type === 'web' ? createWebTabId(item.sessionId) : item.sessionId,
     type: item.type,
     sessionId: item.sessionId,
     title: item.title,
@@ -292,13 +318,13 @@ export function openTab(
       title: restore.previewTitle,
     }
     return {
-      tabs: [sessionTab, previewTab],
+      tabs: placePreviewAfterOwner(sessionTabs, sessionTab, previewTab),
       activeTabId: restore.lastView === 'preview' ? previewTab.id : sessionTab.id,
     }
   }
 
   return {
-    tabs: [sessionTab],
+    tabs: existingTab ? sessionTabs : [...sessionTabs, sessionTab],
     activeTabId: sessionTab.id,
   }
 }
@@ -353,7 +379,7 @@ export function closeTab(
   return { tabs: newTabs, activeTabId: newActiveTabId }
 }
 
-/** 重排标签顺序（当前只保留当前会话与临时预览，保留函数用于兼容旧调用） */
+/** 重排标签顺序 */
 export function reorderTabs(
   tabs: TabItem[],
   fromIndex: number,

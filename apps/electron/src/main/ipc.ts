@@ -120,6 +120,7 @@ import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/r
 import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
+import { registerBrowserTabViewIpc } from './lib/browser-tab-view-manager'
 import {
   listChannels,
   createChannel,
@@ -298,6 +299,12 @@ function closeSsoLoginWindow(): void {
   }
 }
 
+function cancelSsoLoginWindow(message = '已关闭登录窗口，可重新打开授权窗口。'): void {
+  ssoOidcService?.stopCallbackServer()
+  closeSsoLoginWindow()
+  broadcastAuthEvent(AUTH_IPC_CHANNELS.SSO_ERROR, message)
+}
+
 async function injectSsoLoginCloseButton(loginWindow: BrowserWindow): Promise<void> {
   if (loginWindow.isDestroyed()) return
 
@@ -321,10 +328,10 @@ async function openSsoLoginWindow(url: string): Promise<void> {
   }
 
   const loginWindow = new BrowserWindow({
-    width: 520,
-    height: 720,
-    minWidth: 420,
-    minHeight: 560,
+    width: 880,
+    height: 760,
+    minWidth: 760,
+    minHeight: 640,
     title: 'Gravity SSO 登录',
     parent: parentWindow ?? undefined,
     modal: Boolean(parentWindow),
@@ -348,6 +355,8 @@ async function openSsoLoginWindow(url: string): Promise<void> {
   loginWindow.on('closed', () => {
     if (ssoLoginWindow === loginWindow) {
       ssoLoginWindow = null
+      ssoOidcService?.stopCallbackServer()
+      broadcastAuthEvent(AUTH_IPC_CHANNELS.SSO_ERROR, '已关闭登录窗口，可重新打开授权窗口。')
     }
   })
   loginWindow.webContents.on('did-finish-load', () => {
@@ -355,7 +364,7 @@ async function openSsoLoginWindow(url: string): Promise<void> {
   })
   loginWindow.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
     if (isSsoLoginCloseUrl(popupUrl)) {
-      closeSsoLoginWindow()
+      cancelSsoLoginWindow()
     } else if (isHttpUrl(popupUrl)) {
       void loginWindow.loadURL(popupUrl)
     } else if (isDingTalkUrl(popupUrl)) {
@@ -366,7 +375,7 @@ async function openSsoLoginWindow(url: string): Promise<void> {
   loginWindow.webContents.on('will-navigate', (event, nextUrl) => {
     if (isSsoLoginCloseUrl(nextUrl)) {
       event.preventDefault()
-      closeSsoLoginWindow()
+      cancelSsoLoginWindow()
       return
     }
     if (isHttpUrl(nextUrl)) return
@@ -934,6 +943,7 @@ export function resolveAppIconPath(variantId: string): string | null {
 
 export function registerIpcHandlers(): void {
   console.log('[IPC] 正在注册 IPC 处理器...')
+  registerBrowserTabViewIpc()
 
   // ===== 运行时相关 =====
 

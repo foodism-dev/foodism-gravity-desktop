@@ -57,6 +57,13 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
         return
       }
 
+      if (newActiveTab.type === 'work-orders' || newActiveTab.type === 'web' || newActiveTab.type === 'tutorial') {
+        setAppMode('agent')
+        setCurrentConversationId(null)
+        setCurrentAgentSessionId(null)
+        return
+      }
+
       // Agent / 会话预览
       setAppMode('agent')
       setCurrentAgentSessionId(newActiveTab.sessionId)

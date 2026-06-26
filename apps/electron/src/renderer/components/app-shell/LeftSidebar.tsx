@@ -70,6 +70,8 @@ import {
   closeTab,
   updateTabTitle,
   sessionViewStateMapAtom,
+  WORK_ORDERS_TAB_ID,
+  WORK_ORDERS_TAB_TITLE,
 } from '@/atoms/tab-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { authSessionAtom } from '@/atoms/auth'
@@ -91,6 +93,7 @@ import {
 import { detectIsMac } from '@/lib/platform'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { WORK_ORDER_NAV_ITEM } from '@/lib/work-order-navigation'
+import { getAuthDisplayName } from '@/lib/auth-display-name'
 import foodismLogo from '@/assets/models/foodism.png'
 import {
   replaceAgentSessionInFreshnessOrder,
@@ -480,7 +483,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
   const promptConfig = useAtomValue(promptConfigAtom)
   const setSelectedPromptId = useSetAtom(selectedPromptIdAtom)
-  const displayUserName = authSession.user?.username || userProfile.userName
+  const displayUserName = getAuthDisplayName({
+    authUser: authSession.user,
+    fallbackName: userProfile.userName,
+  })
 
   // Agent 模式状态
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
@@ -709,8 +715,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   /** 打开我的工单 */
   const handleOpenWorkOrders = React.useCallback((): void => {
     setAutomationForm({ open: false, draft: null })
-    setActiveView(WORK_ORDER_NAV_ITEM.view)
-  }, [setAutomationForm, setActiveView])
+    openSession('work-orders', WORK_ORDERS_TAB_ID, WORK_ORDERS_TAB_TITLE)
+  }, [setAutomationForm, openSession])
 
   /** 打开 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
@@ -1655,7 +1661,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 onClick={handleOpenWorkOrders}
                 className={cn(
                   'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
-                  activeView === WORK_ORDER_NAV_ITEM.view
+                  activeTabId === WORK_ORDERS_TAB_ID
                     ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
                     : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
                 )}
@@ -1861,7 +1867,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       {/* 我的工单入口：作为工作流入口放在任务中心上方，不参与置顶列表层级。 */}
       <div className="px-3 pt-2 pb-0.5">
         <WorkOrderSidebarEntry
-          active={activeView === WORK_ORDER_NAV_ITEM.view}
+          active={activeTabId === WORK_ORDERS_TAB_ID}
           onClick={handleOpenWorkOrders}
         />
       </div>

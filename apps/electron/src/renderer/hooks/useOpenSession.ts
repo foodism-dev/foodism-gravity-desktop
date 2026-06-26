@@ -81,8 +81,12 @@ export function useOpenSession(): OpenSessionFn {
             agentWorkspaceId: session.workspaceId,
           }).catch(console.error)
         }
-      } else {
+      } else if (type === 'scratch' || type === 'tutorial') {
         setAppMode('scratch')
+        setCurrentConversationId(null)
+        setCurrentAgentSessionId(null)
+      } else {
+        setAppMode('agent')
         setCurrentConversationId(null)
         setCurrentAgentSessionId(null)
       }
