@@ -11,7 +11,7 @@ import { authSessionAtom } from '@/atoms/auth'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { WORK_ORDERS_TAB_ID } from '@/atoms/tab-atoms'
 import { BrowserPageView } from '@/components/tabs/BrowserPageView'
-import { buildBrowserTabTitle, isOpenBrowserTabMessage } from '@/lib/browser-tab-host-message'
+import { buildBrowserTabTitle, isOpenBrowserTabMessage, isReloadWorkOrdersMessage } from '@/lib/browser-tab-host-message'
 import { buildRebuildApprovalTab, buildWorkOrderWebUrl } from '@/lib/work-order-navigation'
 
 interface StartSsoLoginMessage {
@@ -55,6 +55,12 @@ export function WorkOrdersWebView(): React.ReactElement {
       openSession('web', message.url, buildBrowserTabTitle(message.url))
       return
     }
+    if (isReloadWorkOrdersMessage(message)) {
+      window.electronAPI.browserTabReload({ id: WORK_ORDERS_TAB_ID }).catch((error) => {
+        console.error('[我的工单] 刷新页面失败:', error)
+      })
+      return
+    }
     if (!isStartSsoLoginMessage(message) && !isOpenRebuildApprovalMessage(message)) return
     if (isStartSsoLoginMessage(message)) {
       window.electronAPI.startSsoLogin().catch((error) => {
@@ -74,6 +80,7 @@ export function WorkOrdersWebView(): React.ReactElement {
       icon={MonitorUp}
       iconClassName="bg-emerald-50 text-emerald-700"
       reloadLabel="刷新我的工单"
+      showToolbar={false}
       onHostMessage={handleHostMessage}
     />
   )

@@ -5,6 +5,10 @@ export interface OpenBrowserTabMessage {
   url: string
 }
 
+export interface ReloadWorkOrdersMessage {
+  type: 'proma:reload-work-orders'
+}
+
 function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value)
@@ -20,6 +24,12 @@ export function isOpenBrowserTabMessage(value: unknown): value is OpenBrowserTab
   return message.type === 'proma:open-browser-tab'
     && typeof message.url === 'string'
     && isHttpUrl(message.url)
+}
+
+export function isReloadWorkOrdersMessage(value: unknown): value is ReloadWorkOrdersMessage {
+  if (typeof value !== 'object' || value === null) return false
+  const message = value as Partial<ReloadWorkOrdersMessage>
+  return message.type === 'proma:reload-work-orders'
 }
 
 export function buildBrowserTabTitle(url: string): string {

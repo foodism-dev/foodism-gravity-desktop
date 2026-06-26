@@ -1,12 +1,24 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildOpenRebuildApprovalMessage, isElectronEmbedded, openRebuildApprovalInElectron } from "./electron-bridge.ts";
+import {
+  buildOpenRebuildApprovalMessage,
+  buildReloadWorkOrdersMessage,
+  isElectronEmbedded,
+  openRebuildApprovalInElectron,
+  reloadWorkOrdersInElectron,
+} from "./electron-bridge.ts";
 
 describe("Electron 嵌入桥接消息", () => {
   test("Given supply goods id, When building RB approval message, Then message is stable", () => {
     expect(buildOpenRebuildApprovalMessage("F00-838")).toEqual({
       type: "proma:open-rebuild-approval",
       supplyGoodsId: "F00-838",
+    });
+  });
+
+  test("Given work order reload request, When building host message, Then message is stable", () => {
+    expect(buildReloadWorkOrdersMessage()).toEqual({
+      type: "proma:reload-work-orders",
     });
   });
 
@@ -37,6 +49,29 @@ describe("Electron 嵌入桥接消息", () => {
     expect(openRebuildApprovalInElectron("944-019efa94400a73d9", { currentWindow })).toBe(true);
 
     expect(hostMessages).toEqual(["944-019efa94400a73d9"]);
+    expect(parentMessages).toEqual([]);
+  });
+
+  test("Given page is inside Electron webview, When refreshing work orders, Then it asks host to reload native webview", () => {
+    let reloadCount = 0;
+    const parentMessages: unknown[] = [];
+    const currentWindow = {
+      parent: {
+        postMessage(message: unknown) {
+          parentMessages.push(message);
+        },
+      },
+      location: { search: "?embedded=electron" },
+      promaElectronWebview: {
+        reloadWorkOrders() {
+          reloadCount += 1;
+        },
+      },
+    } as unknown as Window;
+
+    expect(reloadWorkOrdersInElectron({ currentWindow })).toBe(true);
+
+    expect(reloadCount).toBe(1);
     expect(parentMessages).toEqual([]);
   });
 });

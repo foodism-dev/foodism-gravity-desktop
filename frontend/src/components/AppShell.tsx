@@ -1,8 +1,7 @@
-import { ClipboardList, Home, LogOut, ShieldCheck, TicketCheck } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { ClipboardList, Home, LogOut } from "lucide-react";
+import { Link, useRouterState } from "@tanstack/react-router";
 
 import type { AuthState } from "@/App.tsx";
-import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { cn } from "@/lib/utils.ts";
 
@@ -18,57 +17,67 @@ const navItems = [
 ] as const;
 
 export function AppShell({ authState, children, onSignOut }: AppShellProps) {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const shouldHideHeader = shouldHideAppShellHeader(pathname);
+
   return (
     <div className="min-h-screen">
-      <header className="page-band sticky top-0 z-40">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm">
-              <TicketCheck className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold leading-tight">Proma 工单台</div>
-              <div className="text-xs text-muted-foreground">SupplyGoods 审核与回调跟进</div>
-            </div>
+      {shouldHideHeader ? null : (
+        <header className="page-band sticky top-0 z-40">
+          <div className="mx-auto grid h-14 max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-4 sm:px-6 lg:px-8">
+            <AppNavigation className="col-start-2 hidden md:flex" />
+            <AppAuthControls authState={authState} onSignOut={onSignOut} className="col-start-3 justify-end" />
           </div>
+        </header>
+      )}
 
-          <nav className="hidden items-center gap-1 md:flex">
-            {navItems.map((item) => (
-              <Button key={item.to} variant="ghost" size="sm" asChild>
-                <Link
-                  to={item.to}
-                  activeProps={{ className: "bg-muted text-foreground" }}
-                  inactiveProps={{ className: "text-muted-foreground hover:text-foreground" }}
-                  className={cn("rounded-md")}
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              </Button>
-            ))}
-          </nav>
+      <main className={cn("mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8", shouldHideHeader ? "py-3" : "py-6")}>
+        {children}
+      </main>
+    </div>
+  );
+}
 
-          <div className="flex items-center gap-2">
-            {authState.token ? (
-              <>
-                <Badge variant="success" className="hidden sm:inline-flex">
-                  <ShieldCheck className="mr-1 h-3 w-3" />
-                  {authState.user?.name ?? "已登录"}
-                </Badge>
-                <Button variant="ghost" size="icon" onClick={onSignOut} title="退出登录">
-                  <LogOut className="h-4 w-4" />
-                </Button>
-              </>
-            ) : (
-              <Badge variant={authState.isHandoffLoading ? "warning" : "muted"}>
-                {authState.isHandoffLoading ? "桥接中" : "未桥接"}
-              </Badge>
-            )}
-          </div>
-        </div>
-      </header>
+export function shouldHideAppShellHeader(pathname: string): boolean {
+  return pathname === "/tickets" || pathname.startsWith("/tickets/");
+}
 
-      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+export function AppNavigation({ className }: { className?: string }) {
+  return (
+    <nav className={cn("items-center gap-1", className)}>
+      {navItems.map((item) => (
+        <Button key={item.to} variant="ghost" size="sm" asChild>
+          <Link
+            to={item.to}
+            activeProps={{ className: "bg-muted text-foreground" }}
+            inactiveProps={{ className: "text-muted-foreground hover:text-foreground" }}
+            className={cn("rounded-md")}
+          >
+            <item.icon className="h-4 w-4" />
+            {item.label}
+          </Link>
+        </Button>
+      ))}
+    </nav>
+  );
+}
+
+export function AppAuthControls({
+  authState,
+  onSignOut,
+  className,
+}: {
+  authState: AuthState;
+  onSignOut: () => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex items-center gap-2", className)}>
+      {authState.token ? (
+        <Button variant="ghost" size="icon" onClick={onSignOut} title="退出登录">
+          <LogOut className="h-4 w-4" />
+        </Button>
+      ) : null}
     </div>
   );
 }

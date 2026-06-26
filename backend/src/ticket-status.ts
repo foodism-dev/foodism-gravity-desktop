@@ -1,10 +1,12 @@
 export const TICKET_STATUS = {
+  RETURNED: "returned",
   TODO: "todo",
   PROCESSING: "processing",
   DONE: "done",
 } as const;
 
 export const TICKET_BUSINESS_STATUS = {
+  INFO_COMPLETION_PENDING: "info_completion_pending",
   ACCESS_REVIEW_PENDING: "access_review_pending",
   INFO_OPTIMIZATION_PENDING: "info_optimization_pending",
   SHELF_CONFIRM_PENDING: "shelf_confirm_pending",
@@ -40,14 +42,23 @@ export function isApprovalStatePassed(approvalState: string): boolean {
   return ["10", "通过", "审核通过"].includes(approvalState.trim());
 }
 
+export function isApprovalStateRejected(approvalState: string): boolean {
+  const normalizedApprovalState = approvalState.trim();
+  return normalizedApprovalState === "11" || normalizedApprovalState.includes("驳回");
+}
+
 export function matchTicketBusinessStatusByApprovalState(
   approvalState: string,
   currentBusinessStatus?: TicketBusinessStatus,
 ): TicketBusinessStatus {
+  if (isApprovalStateRejected(approvalState)) {
+    return TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING;
+  }
   return matchTicketBusinessStatusByApproval(isApprovalStatePassed(approvalState), currentBusinessStatus);
 }
 
 export function getTicketStatusByBusinessStatus(businessStatus: TicketBusinessStatus): TicketStatus {
+  if (businessStatus === TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING) return TICKET_STATUS.RETURNED;
   if (businessStatus === TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING) return TICKET_STATUS.TODO;
   if (businessStatus === TICKET_BUSINESS_STATUS.ONLINE) return TICKET_STATUS.DONE;
   return TICKET_STATUS.PROCESSING;

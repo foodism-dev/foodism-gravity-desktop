@@ -34,6 +34,7 @@ export function MainArea(): React.ReactElement {
   const automationFormOpen = useAtomValue(automationFormAtom).open
   const activeView = useAtomValue(activeViewAtom)
   const browserTabIdsRef = React.useRef<Set<string>>(new Set())
+  const shouldRenderWorkOrdersView = activeView === 'work-orders' && activeTabId === WORK_ORDERS_TAB_ID
 
   // Tab 内容渲染降级为非紧急：TabBar 立即高亮新 tab，主区域昂贵渲染（含 PreviewPanel 中
   // DiffTabContent → ProseMirror editor mount + Shiki tokenize）让出主线程，避免点击 tab
@@ -127,7 +128,7 @@ export function MainArea(): React.ReactElement {
         nextIds.add(tab.id)
       }
     }
-    if (activeView === 'work-orders') {
+    if (shouldRenderWorkOrdersView) {
       nextIds.add(WORK_ORDERS_TAB_ID)
     }
 
@@ -138,7 +139,7 @@ export function MainArea(): React.ReactElement {
       })
     }
     browserTabIdsRef.current = nextIds
-  }, [activeView, tabs])
+  }, [shouldRenderWorkOrdersView, tabs])
 
   // 关闭动画期间右侧面板的定位样式（脱离 flex 流，保持原宽度，translateX 向右滑出）
   const closingOverlayStyle: React.CSSProperties | undefined = closing
@@ -183,7 +184,7 @@ export function MainArea(): React.ReactElement {
                 // Automations 列表视图：全屏取代 TabBar + TabContent
                 <AutomationsListView />
               )
-            ) : activeView === 'work-orders' ? (
+            ) : shouldRenderWorkOrdersView ? (
               // 我的工单 Web 视图：在右侧工作区内承载 frontend 工单台。
               <WorkOrdersWebView />
             ) : activeView === 'agent-skills' ? (

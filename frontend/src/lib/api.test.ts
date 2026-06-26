@@ -8,6 +8,8 @@ import {
   getTicket,
   getTicketActionRecords,
   getTicketMetadata,
+  listAllTickets,
+  listTickets,
 } from "./api.ts";
 import { storeSession } from "./auth.ts";
 
@@ -252,6 +254,73 @@ describe("前端 API", () => {
 
     expect(result.state).toBe("completed");
     expect(result.returnValue?.draftUrl).toBe("https://www.life-partner.cn/draft");
+  });
+
+  test("Given ticket status filter, When listing tickets, Then it sends status query instead of business status", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      tickets: [],
+      total: 0,
+      pageNo: 1,
+      pageSize: 80,
+    }));
+
+    await listTickets({ status: "processing", q: "桑拿鸡", pageNo: 1, pageSize: 80 });
+
+    expect(calls[0]?.url).toBe("http://localhost:8787/api/tickets?status=processing&q=%E6%A1%91%E6%8B%BF%E9%B8%A1&pageNo=1&pageSize=80");
+  });
+
+  test("Given tickets span multiple pages, When listing all tickets, Then it keeps loading until every page is included", async () => {
+    installSessionStorage();
+    const calls = installFetchMock((url) => {
+      const requestUrl = new URL(url);
+      const pageNo = Number(requestUrl.searchParams.get("pageNo"));
+      if (pageNo === 1) {
+        return {
+          tickets: [
+            {
+              id: 1,
+              supply_goods_id: "944-new",
+              status: "processing",
+              business_status: "info_optimization_pending",
+              payload: {},
+              source_payload: {},
+              created_at: "2026-06-26T10:00:00.000Z",
+              updated_at: "2026-06-26T10:00:00.000Z",
+            },
+          ],
+          total: 2,
+          pageNo: 1,
+          pageSize: 1,
+        };
+      }
+      return {
+        tickets: [
+          {
+            id: 2,
+            supply_goods_id: "944-rejected",
+            status: "returned",
+            business_status: "info_completion_pending",
+            payload: {},
+            source_payload: {},
+            created_at: "2026-06-25T10:00:00.000Z",
+            updated_at: "2026-06-25T10:00:00.000Z",
+          },
+        ],
+        total: 2,
+        pageNo: 2,
+        pageSize: 1,
+      };
+    });
+
+    const result = await listAllTickets({ pageSize: 1 });
+
+    expect(result.tickets.map((ticket) => ticket.supplyGoodsId)).toEqual(["944-new", "944-rejected"]);
+    expect(result.tickets[1]?.status).toBe("returned");
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://localhost:8787/api/tickets?pageNo=1&pageSize=1",
+      "http://localhost:8787/api/tickets?pageNo=2&pageSize=1",
+    ]);
   });
 
   test("Given Electron iframe provides apiToken in URL, When loading ticket data, Then it stores token and sends bearer auth", async () => {

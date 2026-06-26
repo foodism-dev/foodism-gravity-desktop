@@ -22,7 +22,7 @@
     },
     "apps/electron": {
       "name": "@proma/electron",
-      "version": "0.12.88",
+      "version": "0.12.89",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "0.3.185",
         "@anthropic-ai/sdk": "^0.93.0",
@@ -138,7 +138,7 @@
     },
     "backend": {
       "name": "@proma/server",
-      "version": "0.1.40",
+      "version": "0.1.41",
       "dependencies": {
         "bullmq": "^5.79.1",
         "drizzle-orm": "^0.45.2",
@@ -154,7 +154,7 @@
     },
     "frontend": {
       "name": "@proma/frontend",
-      "version": "0.1.32",
+      "version": "0.1.33",
       "dependencies": {
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",

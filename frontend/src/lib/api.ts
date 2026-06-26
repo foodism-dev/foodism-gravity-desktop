@@ -20,11 +20,13 @@ export interface TicketRecord {
 }
 
 export type TicketStatus =
+  | "returned"
   | "todo"
   | "processing"
   | "done";
 
 export type TicketBusinessStatus =
+  | "info_completion_pending"
   | "access_review_pending"
   | "info_optimization_pending"
   | "shelf_confirm_pending"
@@ -119,6 +121,8 @@ interface TicketListResponse {
   pageNo: number;
   pageSize: number;
 }
+
+const DEFAULT_TICKET_PAGE_SIZE = 100;
 
 interface TicketDetailResponse {
   ticket: TicketApiRecord;
@@ -341,6 +345,34 @@ export async function listTickets(query: TicketListQuery = {}): Promise<TicketLi
     pageNo: response.pageNo,
     pageSize: response.pageSize,
   };
+}
+
+export async function listAllTickets(query: Omit<TicketListQuery, "pageNo"> = {}): Promise<TicketListResult> {
+  const pageSize = query.pageSize ?? DEFAULT_TICKET_PAGE_SIZE;
+  const tickets: TicketRecord[] = [];
+  let pageNo = 1;
+  let total = 0;
+
+  while (true) {
+    const result = await listTickets({
+      ...query,
+      pageNo,
+      pageSize,
+    });
+    total = result.total;
+    tickets.push(...result.tickets);
+
+    if (tickets.length >= total || result.tickets.length === 0) {
+      return {
+        tickets,
+        total,
+        pageNo: 1,
+        pageSize,
+      };
+    }
+
+    pageNo += 1;
+  }
 }
 
 export async function getTicket(supplyGoodsId: string): Promise<TicketRecord> {

@@ -49,8 +49,10 @@ describe("工单详情工作台模型", () => {
       { label: "商品名称", value: "双人套餐（牛买双拼）" },
       { label: "当前节点", value: "待准入审核" },
     ]);
-    expect(model.progressSteps[0]).toEqual({ index: 1, label: "待准入审核", state: "active" });
+    expect(model.progressSteps[0]).toEqual({ index: 1, label: "待完善信息", state: "done" });
+    expect(model.progressSteps[1]).toEqual({ index: 2, label: "待准入审核", state: "active" });
     expect(model.progressSteps.map((step) => step.label)).toEqual([
+      "待完善信息",
       "待准入审核",
       "待信息优化确认",
       "待货架上线确认",
@@ -78,6 +80,12 @@ describe("工单详情工作台模型", () => {
   });
 
   test("Given approval and action records, When deriving ticket flow, Then it follows the lightweight workflow", () => {
+    expect(deriveTicketFlow({
+      ...ticket,
+      status: "returned",
+      businessStatus: "info_completion_pending",
+      payload: {},
+    }, [])).toBe("info_completion");
     expect(deriveTicketFlow({ ...ticket, businessStatus: "access_review_pending", payload: {} }, [])).toBe("access_review");
 
     const approvedTicket = {
@@ -128,5 +136,25 @@ describe("工单详情工作台模型", () => {
     );
 
     expect(model.actionButtons.map((button) => button.label)).toEqual(["重试创建草稿"]);
+  });
+
+  test("Given rejected ticket needs completion, When building workbench model, Then it shows returned status and Rebuild action", () => {
+    const model = buildTicketWorkbenchModel({
+      ...ticket,
+      status: "returned",
+      businessStatus: "info_completion_pending",
+    }, []);
+
+    expect(buildTicketHeaderBadges({
+      ...ticket,
+      status: "returned",
+      businessStatus: "info_completion_pending",
+    })).toEqual([
+      { label: "待完善信息", variant: "success" },
+      { label: "工单 · 已驳回", variant: "muted" },
+    ]);
+    expect(model.metaItems.find((item) => item.label === "当前节点")?.value).toBe("待完善信息");
+    expect(model.progressSteps[0]).toEqual({ index: 1, label: "待完善信息", state: "active" });
+    expect(model.actionButtons[0]?.label).toBe("跳转 Rebuild 审核");
   });
 });

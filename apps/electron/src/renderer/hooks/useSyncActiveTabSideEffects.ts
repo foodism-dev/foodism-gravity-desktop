@@ -12,6 +12,7 @@
 import { useCallback } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { appModeAtom } from '@/atoms/app-mode'
+import { activeViewAtom } from '@/atoms/active-view'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
@@ -25,6 +26,7 @@ export type SyncActiveTabSideEffects = (newActiveTab: TabItem | null) => void
 
 export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
   const setAppMode = useSetAtom(appModeAtom)
+  const setActiveView = useSetAtom(activeViewAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
@@ -34,6 +36,8 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
 
   return useCallback<SyncActiveTabSideEffects>(
     (newActiveTab) => {
+      setActiveView('conversations')
+
       if (!newActiveTab) {
         // 所有标签都已关闭
         setCurrentConversationId(null)
@@ -89,6 +93,7 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
     [
       appMode,
       setAppMode,
+      setActiveView,
       setCurrentConversationId,
       setCurrentAgentSessionId,
       setCurrentAgentWorkspaceId,

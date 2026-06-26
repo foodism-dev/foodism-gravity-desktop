@@ -3,9 +3,14 @@ export interface OpenRebuildApprovalMessage {
   supplyGoodsId: string;
 }
 
+export interface ReloadWorkOrdersMessage {
+  type: "proma:reload-work-orders";
+}
+
 interface PromaElectronWebviewBridge {
   startSsoLogin?: () => void;
   openRebuildApproval?: (supplyGoodsId: string) => void;
+  reloadWorkOrders?: () => void;
 }
 
 interface ElectronBridgeWindow extends Window {
@@ -16,6 +21,12 @@ export function buildOpenRebuildApprovalMessage(supplyGoodsId: string): OpenRebu
   return {
     type: "proma:open-rebuild-approval",
     supplyGoodsId,
+  };
+}
+
+export function buildReloadWorkOrdersMessage(): ReloadWorkOrdersMessage {
+  return {
+    type: "proma:reload-work-orders",
   };
 }
 
@@ -46,6 +57,23 @@ export function openRebuildApprovalInElectron(
   const parentWindow = input.parentWindow ?? currentWindow.parent;
   if (parentWindow && parentWindow !== currentWindow) {
     parentWindow.postMessage(buildOpenRebuildApprovalMessage(supplyGoodsId), "*");
+    return true;
+  }
+
+  return false;
+}
+
+export function reloadWorkOrdersInElectron(input: ElectronEmbeddedCheckInput = {}): boolean {
+  const currentWindow = (input.currentWindow ?? window) as ElectronBridgeWindow;
+  const webviewBridge = currentWindow.promaElectronWebview;
+  if (webviewBridge?.reloadWorkOrders) {
+    webviewBridge.reloadWorkOrders();
+    return true;
+  }
+
+  const parentWindow = input.parentWindow ?? currentWindow.parent;
+  if (parentWindow && parentWindow !== currentWindow) {
+    parentWindow.postMessage(buildReloadWorkOrdersMessage(), "*");
     return true;
   }
 

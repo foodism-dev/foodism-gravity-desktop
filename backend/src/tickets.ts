@@ -7,6 +7,8 @@ import {
   getTicketStatusByBusinessStatus,
   normalizeTicketBusinessStatus,
   normalizeTicketStatus,
+  TICKET_BUSINESS_STATUS,
+  TICKET_STATUS,
   type TicketBusinessStatus,
   type TicketStatus,
 } from "./ticket-status.ts";
@@ -412,16 +414,19 @@ export function createDrizzleTicketRepository(db: ServerDatabase): TicketReposit
   };
 }
 
-function normalizeTicketRowStatus(
+export function normalizeTicketRowStatus(
   ticket: Omit<TicketWithSupplyGoods, "status" | "businessStatus"> & {
     status: string;
     businessStatus: string;
   },
 ): TicketWithSupplyGoods {
-  const businessStatus = normalizeTicketBusinessStatus(ticket.businessStatus);
+  const status = normalizeTicketStatus(ticket.status);
+  const businessStatus = status === TICKET_STATUS.RETURNED
+    ? TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING
+    : normalizeTicketBusinessStatus(ticket.businessStatus);
   return {
     ...ticket,
-    status: getTicketStatusByBusinessStatus(businessStatus),
+    status: status === TICKET_STATUS.RETURNED ? TICKET_STATUS.RETURNED : getTicketStatusByBusinessStatus(businessStatus),
     businessStatus,
   };
 }

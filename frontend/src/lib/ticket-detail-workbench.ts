@@ -17,6 +17,7 @@ export interface WorkbenchProgressStep {
 }
 
 export type TicketFlowKey =
+  | "info_completion"
   | "access_review"
   | "info_optimization"
   | "shelf_confirm"
@@ -44,6 +45,7 @@ export interface TicketWorkbenchModel {
 }
 
 const FLOW_STEPS: Array<{ key: TicketFlowKey; label: string }> = [
+  { key: "info_completion", label: "待完善信息" },
   { key: "access_review", label: "待准入审核" },
   { key: "info_optimization", label: "待信息优化确认" },
   { key: "shelf_confirm", label: "待货架上线确认" },
@@ -53,6 +55,7 @@ const FLOW_STEPS: Array<{ key: TicketFlowKey; label: string }> = [
 ];
 
 const BUSINESS_STATUS_FLOW_MAP: Record<TicketBusinessStatus, TicketFlowKey> = {
+  info_completion_pending: "info_completion",
   access_review_pending: "access_review",
   info_optimization_pending: "info_optimization",
   shelf_confirm_pending: "shelf_confirm",
@@ -62,6 +65,7 @@ const BUSINESS_STATUS_FLOW_MAP: Record<TicketBusinessStatus, TicketFlowKey> = {
 };
 
 const BUSINESS_STATUS_LABEL_MAP: Record<TicketBusinessStatus, string> = {
+  info_completion_pending: "待完善信息",
   access_review_pending: "待准入审核",
   info_optimization_pending: "待信息优化确认",
   shelf_confirm_pending: "待货架上线确认",
@@ -118,7 +122,7 @@ export function buildTicketHeaderBadges(ticket: TicketRecord): TicketHeaderBadge
 }
 
 function buildActionButtons(flow: TicketFlowKey, records: TicketActionRecord[]): WorkbenchActionButton[] {
-  if (flow === "access_review") {
+  if (flow === "info_completion" || flow === "access_review") {
     return [{ label: "跳转 Rebuild 审核", tone: "primary" }];
   }
   if (flow === "info_optimization") {
@@ -145,6 +149,7 @@ function buildActionButtons(flow: TicketFlowKey, records: TicketActionRecord[]):
 }
 
 function formatOverallStatus(status: TicketRecord["status"]): string {
+  if (status === "returned") return "已驳回";
   if (status === "processing") return "处理中";
   if (status === "done") return "已完成";
   return "待处理";

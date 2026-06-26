@@ -9,6 +9,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 interface PromaElectronWebviewBridge {
   startSsoLogin: () => void
   openRebuildApproval: (supplyGoodsId: string) => void
+  reloadWorkOrders: () => void
 }
 
 const bridge: PromaElectronWebviewBridge = {
@@ -20,6 +21,9 @@ const bridge: PromaElectronWebviewBridge = {
       type: 'proma:open-rebuild-approval',
       supplyGoodsId,
     })
+  },
+  reloadWorkOrders: () => {
+    ipcRenderer.send('browser-tab:host-message', { type: 'proma:reload-work-orders' })
   },
 }
 

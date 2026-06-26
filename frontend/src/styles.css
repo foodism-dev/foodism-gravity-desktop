@@ -40,4 +40,35 @@
   .page-band {
     @apply border-b border-border/70 bg-white/80 backdrop-blur;
   }
+
+  .ticket-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(215 14% 38% / 0.18) transparent;
+  }
+
+  .ticket-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .ticket-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .ticket-scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: hsl(215 14% 38% / 0.16);
+  }
+
+  .ticket-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(215 14% 38% / 0.28);
+  }
+
+  .ticket-scrollbar::-webkit-scrollbar-button {
+    display: none;
+  }
+
+  .ticket-scrollbar::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }

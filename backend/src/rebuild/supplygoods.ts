@@ -13,8 +13,10 @@ import { mirrorRebuildAssets, replacePayloadAssetUrls, type RebuildAssetUploader
 import {
   getTicketStatusByBusinessStatus,
   isApprovalStatePassed,
-  matchTicketBusinessStatusByApproval,
+  matchTicketBusinessStatusByApprovalState,
   normalizeTicketBusinessStatus,
+  type TicketBusinessStatus,
+  type TicketFlowState,
 } from "../ticket-status.ts";
 
 export interface SupplyGoodsRecordUpsertInput {
@@ -419,11 +421,10 @@ export function createDrizzleSupplyGoodsRecordRepository(db: ServerDatabase): Su
       const nextTicketPayload = shouldSeedPayload
         ? buildTicketPayloadFromSupplyGoods(input.normalizedPayload, input.supplyCompany)
         : hydrateTicketPayloadCompany(existingTicket?.payload ?? {}, input.supplyCompany);
-      const nextBusinessStatus = matchTicketBusinessStatusByApproval(
-        isApprovalPassed,
+      const nextTicketState = getSupplyGoodsTicketFlowState(
+        input.normalizedPayload,
         existingTicket ? normalizeTicketBusinessStatus(existingTicket.businessStatus) : undefined,
       );
-      const nextTicketStatus = getTicketStatusByBusinessStatus(nextBusinessStatus);
 
       await db
         .insert(rebuildSupplyGoods)
@@ -460,16 +461,16 @@ export function createDrizzleSupplyGoodsRecordRepository(db: ServerDatabase): Su
         .insert(tickets)
         .values({
           supplyGoodsId: input.supplyGoodsId,
-          status: nextTicketStatus,
-          businessStatus: nextBusinessStatus,
+          status: nextTicketState.status,
+          businessStatus: nextTicketState.businessStatus,
           payload: nextTicketPayload,
           updatedAt: input.updatedAt,
         })
         .onConflictDoUpdate({
           target: tickets.supplyGoodsId,
           set: {
-            status: nextTicketStatus,
-            businessStatus: nextBusinessStatus,
+            status: nextTicketState.status,
+            businessStatus: nextTicketState.businessStatus,
             payload: nextTicketPayload,
             updatedAt: input.updatedAt,
           },
@@ -615,6 +616,20 @@ function readApprovalState(payload: Record<string, unknown>): string {
 
 export function isSupplyGoodsApprovalPassed(payload: Record<string, unknown>): boolean {
   return isApprovalStatePassed(readApprovalState(payload));
+}
+
+export function getSupplyGoodsTicketFlowState(
+  payload: Record<string, unknown>,
+  currentBusinessStatus?: TicketBusinessStatus,
+): TicketFlowState {
+  const businessStatus = matchTicketBusinessStatusByApprovalState(
+    readApprovalState(payload),
+    currentBusinessStatus,
+  );
+  return {
+    status: getTicketStatusByBusinessStatus(businessStatus),
+    businessStatus,
+  };
 }
 
 export function buildTicketPayloadFromSupplyGoods(

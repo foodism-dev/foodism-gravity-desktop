@@ -6,6 +6,7 @@ import {
   getNextTicketFlowStateByAction,
   getTicketStatusByBusinessStatus,
   isApprovalStatePassed,
+  isApprovalStateRejected,
   matchTicketBusinessStatusByApproval,
   matchTicketBusinessStatusByApprovalState,
   TICKET_BUSINESS_STATUS,
@@ -65,7 +66,18 @@ describe("工单状态", () => {
       .toBe(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING);
   });
 
+  test("Given Rebuild product is rejected, When matching business status, Then ticket returns to completion", () => {
+    expect(isApprovalStateRejected("11")).toBe(true);
+    expect(isApprovalStateRejected("驳回")).toBe(true);
+    expect(isApprovalStateRejected("商品驳回")).toBe(true);
+    expect(isApprovalStateRejected("被商品驳回")).toBe(true);
+    expect(isApprovalStateRejected("审批中")).toBe(false);
+    expect(matchTicketBusinessStatusByApprovalState("商品驳回", TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING))
+      .toBe(TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING);
+  });
+
   test("Given business status, When deriving overall ticket status, Then only access review is todo and online is done", () => {
+    expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING)).toBe(TICKET_STATUS.RETURNED);
     expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING)).toBe(TICKET_STATUS.TODO);
     expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING)).toBe(TICKET_STATUS.PROCESSING);
     expect(getTicketStatusByBusinessStatus(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING)).toBe(TICKET_STATUS.PROCESSING);

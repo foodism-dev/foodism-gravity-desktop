@@ -544,9 +544,9 @@ function LoadedTicketDetail({
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="mx-auto grid max-w-[1480px] gap-6 px-5 py-6 xl:grid-cols-[minmax(0,980px)_280px]">
-        <div className="min-w-0 rounded-md bg-slate-100 px-8 py-7">
+    <div className="ticket-scrollbar -mx-4 min-h-screen bg-white sm:-mx-6 lg:-mx-8">
+      <div className="grid gap-4 px-2 py-4 lg:grid-cols-[minmax(0,1fr)_260px] lg:px-3 xl:grid-cols-[minmax(0,1fr)_280px] xl:gap-5">
+        <div className="min-w-0 rounded-md bg-slate-100 px-5 py-6 lg:px-6 xl:px-8 xl:py-7">
           <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
               <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -597,7 +597,6 @@ function LoadedTicketDetail({
             ) : null}
             <DetailSections sections={PACKAGE_SECTIONS} payload={currentPayload} displayContext={metadata} />
             <DetailSections sections={OPERATION_SECTIONS} payload={currentPayload} displayContext={metadata} />
-            <RawPayload title="Rebuild 原始 Payload" payload={sourcePayload} />
           </div>
         </div>
         <TicketActionSidebar
@@ -1243,7 +1242,7 @@ function TicketActionSidebar({
 }) {
   const isBusy = isOptimizing || isActionSubmitting;
   return (
-    <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+    <aside className="space-y-6 lg:sticky lg:top-4 lg:self-start">
       <SidebarSection title="工单属性">
         <div className="space-y-2">
           {model.metaItems.map((item) => (
@@ -1516,7 +1515,7 @@ function ImagePreviewItem({ item }: { item: MediaPreviewItem }) {
           <DialogTitle className="truncate text-base">{item.fileName}</DialogTitle>
           <DialogDescription>图片预览</DialogDescription>
         </DialogHeader>
-        <div className="mt-4 max-h-[72vh] overflow-auto rounded-md bg-slate-950/5 p-2">
+        <div className="ticket-scrollbar mt-4 max-h-[72vh] overflow-auto rounded-md bg-slate-950/5 p-2">
           <img
             src={item.url}
             alt={item.fileName}
@@ -1576,7 +1575,7 @@ function PdfPreview({ item }: { item: MediaPreviewItem }) {
           </div>
         ) : null}
       </div>
-      <div className="h-[68vh] overflow-auto bg-slate-200 p-4">
+      <div className="ticket-scrollbar h-[68vh] overflow-auto bg-slate-200 p-4">
         <Document
           file={pdfUrl}
           options={PDF_PREVIEW_OPTIONS}
@@ -1646,17 +1645,6 @@ function PreviewActions({ item }: { item: MediaPreviewItem }) {
         </a>
       </Button>
     </div>
-  );
-}
-
-function RawPayload({ title, payload }: { title: string; payload: Record<string, unknown> }) {
-  return (
-    <details className="rounded-lg bg-white shadow-sm">
-      <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-700">{title}</summary>
-      <pre className="max-h-[420px] overflow-auto border-t border-slate-100 bg-slate-950 p-4 text-xs leading-6 text-slate-100">
-        {JSON.stringify(payload, null, 2)}
-      </pre>
-    </details>
   );
 }
 

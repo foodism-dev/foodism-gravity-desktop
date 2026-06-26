@@ -4,12 +4,14 @@ import {
   buildEmptyOriginPayload,
   buildTicketPayloadFromSupplyGoods,
   extractSupplyCompanyId,
+  getSupplyGoodsTicketFlowState,
   hydrateTicketPayloadCompany,
   isSupplyGoodsApprovalPassed,
   normalizeSupplyCompanyPayload,
   normalizeSupplyGoodsPayload,
 } from "./supplygoods.ts";
 import type { RebuildAssetUploader } from "./assets.ts";
+import { TICKET_BUSINESS_STATUS, TICKET_STATUS } from "../ticket-status.ts";
 
 describe("SupplyGoods 工单 payload 初始化", () => {
   test("Given Rebuild approvalState value is passed, When building ticket payload, Then it copies Rebuild data", () => {
@@ -99,6 +101,16 @@ describe("SupplyGoods 工单 payload 初始化", () => {
 
     expect(isSupplyGoodsApprovalPassed(payload)).toBe(false);
     expect(buildTicketPayloadFromSupplyGoods(payload)).toEqual({});
+  });
+
+  test("Given Rebuild approvalState is rejected, When deriving callback ticket state, Then ticket returns to completion", () => {
+    expect(getSupplyGoodsTicketFlowState({
+      SupplyGoodsId: "944-rejected",
+      approvalState: { value: 11, text: "商品驳回" },
+    }, TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING)).toEqual({
+      status: TICKET_STATUS.RETURNED,
+      businessStatus: TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING,
+    });
   });
 
   test("Given asset uploader exists, When normalizing SupplyGoods payload, Then media fields are replaced by R2 urls", async () => {

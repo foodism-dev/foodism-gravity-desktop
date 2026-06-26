@@ -148,8 +148,8 @@ function LandingRoute() {
 }
 
 function TicketsRoute() {
-  const { authState } = rootRoute.useRouteContext();
-  return <TicketsPage authState={authState} />;
+  const { authState, onSignOut } = rootRoute.useRouteContext();
+  return <TicketsPage authState={authState} onSignOut={onSignOut} />;
 }
 
 function TicketDetailRoute() {
