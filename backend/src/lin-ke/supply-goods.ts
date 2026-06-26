@@ -39,6 +39,66 @@ function encodePackages(packages: JsonRecord, wasString: boolean): unknown {
   return wasString ? JSON.stringify(packages) : packages;
 }
 
+export function displaySupplyGoodsPackages(value: unknown): JsonRecord {
+  return parsePackages(value).packages;
+}
+
+export function applyEditablePackages(
+  basePackagesValue: unknown,
+  editedPackagesValue: unknown,
+  outputTemplateValue: unknown = basePackagesValue,
+): { packages: unknown; changes: JsonRecord[] } {
+  const parsedBase = parsePackages(basePackagesValue);
+  const parsedTemplate = parsePackages(outputTemplateValue);
+  const editedPackages = isRecord(editedPackagesValue) ? editedPackagesValue : {};
+  const nextPackages = deepClone(parsedBase.packages);
+  const baseViewList = Array.isArray(parsedBase.packages.viewList) ? parsedBase.packages.viewList : [];
+  const nextViewList = Array.isArray(nextPackages.viewList) ? nextPackages.viewList : [];
+  const editedViewList = Array.isArray(editedPackages.viewList) ? editedPackages.viewList : [];
+  const changes: JsonRecord[] = [];
+
+  for (const [groupIndex, baseGroup] of baseViewList.entries()) {
+    const nextGroup = nextViewList[groupIndex];
+    const editedGroup = editedViewList[groupIndex];
+    if (!isRecord(baseGroup) || !isRecord(nextGroup) || !isRecord(editedGroup)) continue;
+
+    const groupName = cleanString(editedGroup.groupName);
+    const oldGroupName = cleanString(baseGroup.groupName);
+    if (groupName && groupName !== oldGroupName) {
+      nextGroup.groupName = groupName;
+      changes.push({
+        path: `packages.viewList[${groupIndex}].groupName`,
+        before: oldGroupName,
+        after: groupName,
+      });
+    }
+
+    const baseItems = Array.isArray(baseGroup.list) ? baseGroup.list : [];
+    const nextItems = Array.isArray(nextGroup.list) ? nextGroup.list : [];
+    const editedItems = Array.isArray(editedGroup.list) ? editedGroup.list : [];
+    for (const [itemIndex, baseItem] of baseItems.entries()) {
+      const nextItem = nextItems[itemIndex];
+      const editedItem = editedItems[itemIndex];
+      if (!isRecord(baseItem) || !isRecord(nextItem) || !isRecord(editedItem)) continue;
+      const title = cleanString(editedItem.title);
+      const oldTitle = cleanString(baseItem.title);
+      if (title && title !== oldTitle) {
+        nextItem.title = title;
+        changes.push({
+          path: `packages.viewList[${groupIndex}].list[${itemIndex}].title`,
+          before: oldTitle,
+          after: title,
+        });
+      }
+    }
+  }
+
+  return {
+    packages: encodePackages(nextPackages, parsedTemplate.wasString),
+    changes,
+  };
+}
+
 export function extractMenuForOptimization(payload: JsonRecord): JsonRecord[] {
   const { packages } = parsePackages(payload.packages);
   const viewList = Array.isArray(packages.viewList) ? packages.viewList : [];

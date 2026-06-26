@@ -18,10 +18,12 @@
     "db:studio": "drizzle-kit studio",
     "dev": "bun run --hot src/index.ts",
     "start": "bun run src/index.ts",
+    "worker:lin-ke": "bun run src/lin-ke/worker.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test src"
   },
   "dependencies": {
+    "bullmq": "^5.79.1",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.26",
     "postgres": "^3.4.9",

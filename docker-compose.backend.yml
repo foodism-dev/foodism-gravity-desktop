@@ -19,6 +19,18 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: foodism-gravity-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: .
@@ -29,8 +41,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-self-hosted-ci}
       PORT: ${PORT:-8787}
       REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
@@ -47,3 +62,34 @@ services:
       RB_IMAGE_BASE_URL: ${RB_IMAGE_BASE_URL:-}
     ports:
       - "${BACKEND_PORT:-8787}:8787"
+
+  backend-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: foodism-gravity-backend:latest
+    container_name: foodism-gravity-backend-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-self-hosted-ci}
+      REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
+      REBUILD_APP_ID: ${REBUILD_APP_ID:-}
+      REBUILD_APP_SECRET: ${REBUILD_APP_SECRET:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPTIMIZE_MODEL: ${OPTIMIZE_MODEL:-gpt-4o-mini}
+      OPTIMIZE_CONCURRENCY: ${OPTIMIZE_CONCURRENCY:-5}
+      OPTIMIZE_MAX_BATCH_SIZE: ${OPTIMIZE_MAX_BATCH_SIZE:-20}
+      OPTIMIZE_RETRIES: ${OPTIMIZE_RETRIES:-3}
+      LIN_KE_BASE_URL: ${LIN_KE_BASE_URL:-https://www.life-partner.cn}
+      LIN_KE_TIMEOUT: ${LIN_KE_TIMEOUT:-60}
+      LIN_KE_DRAFT_WORKER_CONCURRENCY: ${LIN_KE_DRAFT_WORKER_CONCURRENCY:-1}
+      RB_IMAGE_BASE_URL: ${RB_IMAGE_BASE_URL:-}
+    command: ["bun", "run", "worker:lin-ke"]

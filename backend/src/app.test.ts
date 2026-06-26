@@ -39,6 +39,7 @@ import {
   TICKET_STATUS,
 } from "./ticket-status.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
+import type { LinKeDraftJobStatus, LinKeDraftQueueClient } from "./lin-ke/draft-queue.ts";
 
 process.env.DATABASE_URL = "";
 process.env.PROMA_SERVER_JWT_SECRET = "";
@@ -410,6 +411,29 @@ function createMemoryTicketRepository(records: TicketWithSupplyGoods[]): {
 
         return { ticket, record };
       },
+    },
+  };
+}
+
+function createMemoryLinKeDraftQueue(): LinKeDraftQueueClient & { jobs: string[]; statuses: Map<string, LinKeDraftJobStatus> } {
+  const jobs: string[] = [];
+  const statuses = new Map<string, LinKeDraftJobStatus>();
+  return {
+    jobs,
+    statuses,
+    async addCreateDraftJob(supplyGoodsId: string) {
+      jobs.push(supplyGoodsId);
+      const jobId = `job-${jobs.length}`;
+      statuses.set(jobId, {
+        jobId,
+        state: "waiting",
+        failedReason: "",
+        returnValue: null,
+      });
+      return jobId;
+    },
+    async getCreateDraftJobStatus(jobId: string) {
+      return statuses.get(jobId) ?? null;
     },
   };
 }
@@ -1704,6 +1728,202 @@ describe("server app", () => {
     expect(body.ticket.payload.goodsNameInput).toBe("原始套餐");
   });
 
+  test("Given a ticket, When generating info optimization, Then only original and optimized packages are returned", async () => {
+    const originalPackages = JSON.stringify({
+      viewList: [
+        {
+          groupName: "原始组",
+          list: [{ title: "原始菜", price: "12.00", num: "1" }],
+        },
+      ],
+    });
+    const { repository, actionRecords } = createMemoryTicketRepository([
+      {
+        id: 9,
+        supplyGoodsId: "944-info-generate",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: {
+          packages: JSON.stringify({
+            viewList: [
+              {
+                groupName: "历史优化组",
+                list: [{ title: "历史优化菜", price: "12.00", num: "1" }],
+              },
+            ],
+          }),
+        },
+        sourcePayload: { packages: originalPackages },
+        createdAt: new Date("2026-06-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-06-24T10:00:00.000Z"),
+      },
+    ]);
+    actionRecords.push({
+      id: 1,
+      ticketId: 9,
+      action: "info_optimized",
+      origin: {},
+      current: {},
+      operator: {},
+      remark: "历史优化记录",
+      createdAt: new Date("2026-06-24T10:30:00.000Z"),
+    });
+    const optimizedPayloads: Record<string, unknown>[] = [];
+    const app = createServerApp({
+      ticketRepository: repository,
+      linKeRoutesOptions: {
+        repository: null,
+        async optimizePayload(_settings, payload) {
+          optimizedPayloads.push(payload);
+          return {
+            payload: {
+              ...payload,
+              packages: JSON.stringify({
+                viewList: [
+                  {
+                    groupName: "优化组",
+                    list: [{ title: "优化菜", price: "12.00", num: "1" }],
+                  },
+                ],
+              }),
+            },
+            changes: [],
+            fallback: false,
+            error: "",
+          };
+        },
+      },
+    });
+
+    const response = await app.request("/api/tickets/944-info-generate/info-optimization/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const body = await response.json() as {
+      originPackages: Record<string, unknown>;
+      optimizedPackages: Record<string, unknown>;
+      payload?: unknown;
+      fallback?: unknown;
+      error?: unknown;
+    };
+
+    expect(response.status).toBe(200);
+    expect(optimizedPayloads).toHaveLength(1);
+    expect(optimizedPayloads[0]?.packages).toBe(originalPackages);
+    expect(((body.originPackages.viewList as Record<string, unknown>[])[0]?.groupName)).toBe("原始组");
+    expect(((body.optimizedPackages.viewList as Record<string, unknown>[])[0]?.groupName)).toBe("优化组");
+    expect(body.payload).toBeUndefined();
+    expect(body.fallback).toBeUndefined();
+    expect(body.error).toBeUndefined();
+  });
+
+  test("Given optimizer fails, When generating info optimization, Then API returns error without packages", async () => {
+    const originalPackages = JSON.stringify({
+      viewList: [
+        {
+          groupName: "原始组",
+          list: [{ title: "原始菜", price: "12.00", num: "1" }],
+        },
+      ],
+    });
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 10,
+        supplyGoodsId: "944-info-generate-failed",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: { packages: originalPackages },
+        sourcePayload: { packages: originalPackages },
+        createdAt: new Date("2026-06-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-06-24T10:00:00.000Z"),
+      },
+    ]);
+    const app = createServerApp({
+      ticketRepository: repository,
+      linKeRoutesOptions: {
+        repository: null,
+        async optimizePayload() {
+          throw new Error("model down");
+        },
+      },
+    });
+
+    const response = await app.request("/api/tickets/944-info-generate-failed/info-optimization/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const body = await response.json() as {
+      error?: string;
+      message?: string;
+      originPackages?: unknown;
+      optimizedPackages?: unknown;
+    };
+
+    expect(response.status).toBe(502);
+    expect(body.error).toBe("Bad Gateway");
+    expect(body.message).toBe("model down");
+    expect(body.originPackages).toBeUndefined();
+    expect(body.optimizedPackages).toBeUndefined();
+  });
+
+  test("Given edited packages, When confirming info optimization, Then packages are stored and draft job is enqueued without advancing flow", async () => {
+    const originalPackages = JSON.stringify({
+      viewList: [
+        {
+          groupName: "原始组",
+          list: [{ title: "原始菜", price: "12.00", num: "1" }],
+        },
+      ],
+    });
+    const { repository, actionRecords } = createMemoryTicketRepository([
+      {
+        id: 10,
+        supplyGoodsId: "944-info-confirm",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: { packages: originalPackages },
+        sourcePayload: { packages: originalPackages },
+        createdAt: new Date("2026-06-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-06-24T10:00:00.000Z"),
+      },
+    ]);
+    const queue = createMemoryLinKeDraftQueue();
+    const app = createServerApp({
+      ticketRepository: repository,
+      linKeDraftQueue: queue,
+      linKeRoutesOptions: { repository: null },
+    });
+
+    const response = await app.request("/api/tickets/944-info-confirm/info-optimization/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        optimizedPackages: {
+          viewList: [
+            {
+              groupName: "优化组",
+              list: [{ title: "优化菜", price: "99.00", num: "9" }],
+            },
+          ],
+        },
+      }),
+    });
+    const body = await response.json() as TicketActionRecordResponse & { jobId: string };
+    const storedPackages = JSON.parse(body.ticket.payload.packages as string);
+
+    expect(response.status).toBe(200);
+    expect(body.jobId).toBe("job-1");
+    expect(queue.jobs).toEqual(["944-info-confirm"]);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
+    expect(storedPackages.viewList[0].groupName).toBe("优化组");
+    expect(storedPackages.viewList[0].list[0].title).toBe("优化菜");
+    expect(storedPackages.viewList[0].list[0].price).toBe("12.00");
+    expect(storedPackages.viewList[0].list[0].num).toBe("1");
+    expect(actionRecords[0]?.action).toBe("info_optimization_generated");
+  });
+
   test("Given a shelf confirmation action record, When creating it, Then the ticket moves to commission setup", async () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository } = createMemoryTicketRepository([
@@ -1724,8 +1944,8 @@ describe("server app", () => {
       headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
       body: JSON.stringify({
         action: "shelf_online_confirmed",
-        origin: { onlineGoodsUrl: null },
-        current: { onlineGoodsUrl: "https://example.com/goods/1" },
+        origin: { linkeGoodsId: null },
+        current: { linkeGoodsId: "123456" },
       }),
     });
     const body = (await response.json()) as TicketActionRecordResponse;
@@ -1733,7 +1953,7 @@ describe("server app", () => {
     expect(response.status).toBe(200);
     expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
     expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING);
-    expect(body.ticket.payload.onlineGoodsUrl).toBe("https://example.com/goods/1");
+    expect(body.ticket.payload.linkeGoodsId).toBe("123456");
   });
 
   test("Given a commission configured action record, When creating it, Then the ticket waits for product online", async () => {

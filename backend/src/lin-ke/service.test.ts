@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
-import type { LinKeSettings } from "./config.ts";
+import { BACKEND_DIR, type LinKeSettings } from "./config.ts";
 import type { LinKeAccountConfig, LinKeRepository } from "./repository.ts";
 import {
   LinKeServiceError,
@@ -93,7 +93,7 @@ function repository(labels: Record<string, string> = {}): LinKeRepository & { up
 describe("Lin-Ke service", () => {
   test("Given relative cookie path, When resolving, Then backend directory is used", () => {
     expect(resolveCookieFilePath(".secrets/lin-ke/cookies/shenzhen.cookie.json"))
-      .toBe(join(process.cwd(), ".secrets/lin-ke/cookies/shenzhen.cookie.json"));
+      .toBe(join(BACKEND_DIR, ".secrets/lin-ke/cookies/shenzhen.cookie.json"));
   });
 
   test("Given absolute cookie path, When resolving, Then it stays absolute", () => {

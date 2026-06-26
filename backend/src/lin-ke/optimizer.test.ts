@@ -41,7 +41,9 @@ function samplePayload() {
 describe("Lin-Ke optimizer", () => {
   test("Given system prompt, Then it keeps generic style and constraints", () => {
     expect(SYSTEM_PROMPT).toContain("判断");
-    expect(SYSTEM_PROMPT).toContain("原文已经清晰");
+    expect(SYSTEM_PROMPT).toContain("逐个检查每一个套餐组和每一个菜品名称");
+    expect(SYSTEM_PROMPT).toContain("整批原样返回");
+    expect(SYSTEM_PROMPT).toContain("单条原文已经清晰");
     expect(SYSTEM_PROMPT).toContain("贴合餐厅风格");
     expect(SYSTEM_PROMPT).toContain("禁止虚构");
     expect(SYSTEM_PROMPT).toContain("禁止改价格、数量、ID、套餐结构、选择规则");
@@ -74,18 +76,14 @@ describe("Lin-Ke optimizer", () => {
     }
   });
 
-  test("Given repeated model failures, When optimizing, Then original payload is returned as fallback", async () => {
+  test("Given repeated model failures, When optimizing, Then it throws instead of returning original payload", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = Object.assign(async () => new Response("model down", { status: 500 }), {
       preconnect: originalFetch.preconnect,
     });
     const original = samplePayload();
     try {
-      const result = await optimizePayloadWithRetries(settings(), original);
-      expect(result.fallback).toBe(true);
-      expect(result.payload).toEqual(original);
-      expect(result.changes).toEqual([]);
-      expect(result.error).toContain("model down");
+      await expect(optimizePayloadWithRetries(settings(), original)).rejects.toThrow("model down");
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -50,6 +50,37 @@ describe("Lin-Ke SupplyGoods normalization", () => {
     expect(payload.goodsName).toBe(original.goodsName);
   });
 
+  test("Given partial model output, When applying menu optimization, Then untouched items remain unchanged", () => {
+    const original = {
+      ...samplePayload(),
+      packages: JSON.stringify({
+        viewList: [
+          {
+            groupName: "主菜",
+            groupSelectNum: "1",
+            groupId: 0,
+            groupPrice: "128.00",
+            list: [
+              { price: "88.00", num: "1", id: 0, title: "蟹" },
+              { price: "40.00", num: "1", id: 1, title: "虾" },
+            ],
+          },
+        ],
+        totalPrice: "128.00",
+      }),
+    };
+    const { payload, changes } = applyMenuOptimization(original, {
+      groups: [{ index: 0, groupName: "招牌主菜", items: [{ index: 0, title: "鲜活大闸蟹" }] }],
+    });
+
+    const packages = JSON.parse(payload.packages as string);
+    expect(packages.viewList[0].groupName).toBe("招牌主菜");
+    expect(packages.viewList[0].list[0].title).toBe("鲜活大闸蟹");
+    expect(packages.viewList[0].list[1].title).toBe("虾");
+    expect(packages.viewList[0].list[1].price).toBe("40.00");
+    expect(changes).toHaveLength(2);
+  });
+
   test("Given malformed packages, When optimizing, Then payload is unchanged", () => {
     const original = { ...samplePayload(), packages: "{bad json" };
     expect(extractMenuForOptimization(original)).toEqual([]);

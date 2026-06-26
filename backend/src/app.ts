@@ -50,6 +50,16 @@ import { getDefaultSkillPublisher, sha256Bytes, type SkillPublisher } from "./sk
 import { getDefaultSkillRepository, type MarketSkill, type SkillRepository } from "./skills.ts";
 import { getDefaultUserRepository, type UserRepository } from "./users.ts";
 import { createLinKeRoutes, type LinKeRoutesOptions } from "./lin-ke/routes.ts";
+import { getLinKeSettings } from "./lin-ke/config.ts";
+import { optimizePayloadWithRetries } from "./lin-ke/optimizer.ts";
+import {
+  applyEditablePackages,
+  displaySupplyGoodsPackages,
+} from "./lin-ke/supply-goods.ts";
+import {
+  getDefaultLinKeDraftQueue,
+  type LinKeDraftQueueClient,
+} from "./lin-ke/draft-queue.ts";
 
 interface ServerStatus {
   name: string;
@@ -78,6 +88,7 @@ interface ServerAppOptions {
   ticketRepository?: TicketRepository | null;
   fetchImpl?: FetchLike;
   linKeRoutesOptions?: LinKeRoutesOptions;
+  linKeDraftQueue?: LinKeDraftQueueClient | null;
 }
 
 const DEFAULT_GRAVITY_SSO_ISSUER = "https://fawos.online";
@@ -161,6 +172,10 @@ function getNestedRecord(value: unknown, path: string[]): unknown {
     current = current[key];
   }
   return current;
+}
+
+function readRecordValue(payload: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(payload, key) ? payload[key] : null;
 }
 
 function logSsoPayload(body: unknown, authAction: "create_user" | "sso_login"): void {
@@ -525,6 +540,12 @@ export function createServerApp(options: ServerAppOptions = {}) {
     context.set("apiUser", await resolveUserFromTokenPayload(payload, userRepository));
     await next();
   };
+  const linKeSettings = options.linKeRoutesOptions?.settings ?? getLinKeSettings();
+  const optimizeLinKePayload = options.linKeRoutesOptions?.optimizePayload ?? optimizePayloadWithRetries;
+  const configuredLinKeDraftQueue = options.linKeDraftQueue;
+  const resolveLinKeDraftQueue = () => (
+    configuredLinKeDraftQueue !== undefined ? configuredLinKeDraftQueue : getDefaultLinKeDraftQueue()
+  );
 
   app.use("/api/*", cors());
   app.route("/", createLinKeRoutes(options.linKeRoutesOptions));
@@ -939,6 +960,127 @@ export function createServerApp(options: ServerAppOptions = {}) {
       pageSize: context.req.query("pageSize"),
     });
     return context.json(serializeTicketList(await ticketRepository.listTickets(query)));
+  });
+
+  app.post("/api/tickets/:supplyGoodsId/info-optimization/generate", async (context) => {
+    if (!ticketRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    const supplyGoodsId = context.req.param("supplyGoodsId").trim();
+    const ticket = await ticketRepository.getTicket(supplyGoodsId);
+    if (!ticket) {
+      return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+    }
+
+    const ticketSourcePayload = ticket.sourcePayload ?? {};
+    const ticketPayload = ticket.payload ?? {};
+    const sourcePayload = readRecordValue(ticketSourcePayload, "packages") ? ticketSourcePayload : ticketPayload;
+    const originPackagesValue = readRecordValue(sourcePayload, "packages");
+
+    try {
+      const result = await optimizeLinKePayload(linKeSettings, sourcePayload);
+      return context.json({
+        originPackages: displaySupplyGoodsPackages(originPackagesValue),
+        optimizedPackages: displaySupplyGoodsPackages(readRecordValue(result.payload, "packages")),
+      });
+    } catch (error) {
+      return context.json({ error: "Bad Gateway", message: getErrorMessage(error) }, 502);
+    }
+  });
+
+  app.post("/api/tickets/:supplyGoodsId/info-optimization/confirm", async (context) => {
+    if (!ticketRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+    const linKeDraftQueue = resolveLinKeDraftQueue();
+    if (!linKeDraftQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
+    }
+
+    const body = (await context.req.json().catch(() => null)) as unknown;
+    if (!isRecord(body) || !isRecord(body.optimizedPackages)) {
+      return context.json({ error: "Bad Request", message: "optimizedPackages 必须是 JSON 对象" }, 400);
+    }
+
+    const supplyGoodsId = context.req.param("supplyGoodsId").trim();
+    const ticket = await ticketRepository.getTicket(supplyGoodsId);
+    if (!ticket) {
+      return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+    }
+
+    const sourcePayload = ticket.sourcePayload ?? ticket.payload;
+    const sourcePackages = readRecordValue(sourcePayload, "packages");
+    const currentPackages = readRecordValue(ticket.payload, "packages") ?? sourcePackages;
+    const appliedPackages = applyEditablePackages(sourcePackages, body.optimizedPackages, currentPackages);
+
+    const actionResult = await ticketRepository.createActionRecord({
+      supplyGoodsId,
+      action: "info_optimization_generated",
+      origin: {
+        packages: readRecordValue(ticket.payload, "packages"),
+      },
+      current: {
+        packages: appliedPackages.packages,
+      },
+      operator: {
+        source: "operator",
+      },
+      remark: "确认信息优化内容，等待创建林客草稿",
+    });
+    if (!actionResult) {
+      return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+    }
+
+    try {
+      const jobId = await linKeDraftQueue.addCreateDraftJob(supplyGoodsId);
+      return context.json({
+        ticket: serializeTicket(actionResult.ticket),
+        record: serializeTicketActionRecord(actionResult.record),
+        jobId,
+      });
+    } catch (error) {
+      return context.json({ error: "Bad Gateway", message: `林客草稿任务入队失败：${getErrorMessage(error)}` }, 502);
+    }
+  });
+
+  app.get("/api/tickets/:supplyGoodsId/lin-ke-draft-jobs/:jobId", async (context) => {
+    const linKeDraftQueue = resolveLinKeDraftQueue();
+    if (!linKeDraftQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
+    }
+
+    const jobId = context.req.param("jobId").trim();
+    const status = await linKeDraftQueue.getCreateDraftJobStatus(jobId);
+    if (!status) {
+      return context.json({ error: "Not Found", message: "林客草稿任务不存在" }, 404);
+    }
+    return context.json(status);
+  });
+
+  app.post("/api/tickets/:supplyGoodsId/lin-ke-draft/retry", async (context) => {
+    if (!ticketRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+    const linKeDraftQueue = resolveLinKeDraftQueue();
+    if (!linKeDraftQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
+    }
+
+    const supplyGoodsId = context.req.param("supplyGoodsId").trim();
+    const ticket = await ticketRepository.getTicket(supplyGoodsId);
+    if (!ticket) {
+      return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+    }
+    if (!readRecordValue(ticket.payload, "packages")) {
+      return context.json({ error: "Bad Request", message: "请先确认信息优化内容" }, 400);
+    }
+
+    try {
+      return context.json({ jobId: await linKeDraftQueue.addCreateDraftJob(supplyGoodsId) });
+    } catch (error) {
+      return context.json({ error: "Bad Gateway", message: `林客草稿任务入队失败：${getErrorMessage(error)}` }, 502);
+    }
   });
 
   app.get("/api/tickets/metadata", async (context) => {
