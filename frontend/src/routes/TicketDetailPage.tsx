@@ -47,7 +47,7 @@ import {
   type TicketRecord,
 } from "@/lib/api.ts";
 import { getPayloadDisplayText, type FieldDisplayContext } from "@/lib/field-display.ts";
-import { isElectronEmbedded, openRebuildApprovalInElectron } from "@/lib/electron-bridge.ts";
+import { isElectronEmbedded, openBrowserTabInElectron, openRebuildApprovalInElectron } from "@/lib/electron-bridge.ts";
 import { buildMediaPreviewItems, type MediaPreviewItem, type MediaPreviewKind } from "@/lib/media-preview.ts";
 import {
   haveSameVisiblePackageNames,
@@ -1083,18 +1083,15 @@ function CommissionSetupPanel({
             <CardTitle className="text-lg">费用比例填写</CardTitle>
             <p className="mt-2 text-sm text-slate-500">填写后点击右侧「同步佣金设置」，同步到林客费用设置。</p>
           </div>
-          <Button variant="outline" className="bg-blue-50 text-blue-700 hover:bg-blue-100" disabled={!looksLikeUrl(linkeDraftUrl)} asChild={looksLikeUrl(linkeDraftUrl)}>
-            {looksLikeUrl(linkeDraftUrl) ? (
-              <a href={linkeDraftUrl} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-4 w-4" />
-                打开林客核对
-              </a>
-            ) : (
-              <span className="inline-flex items-center gap-2">
-                <ExternalLink className="h-4 w-4" />
-                打开林客核对
-              </span>
-            )}
+          <Button
+            type="button"
+            variant="outline"
+            className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+            disabled={!looksLikeUrl(linkeDraftUrl)}
+            onClick={() => openLinKeDraftUrl(linkeDraftUrl)}
+          >
+            <ExternalLink className="h-4 w-4" />
+            打开林客核对
           </Button>
         </div>
       </CardHeader>
@@ -1326,11 +1323,14 @@ function TicketActionSidebar({
           {model.currentFlow === "shelf_confirm" ? (
             <>
               {looksLikeUrl(linkeDraftUrl) ? (
-                <Button asChild variant="outline" className="h-10 w-full bg-blue-50 text-blue-700 hover:bg-blue-100">
-                  <a href={linkeDraftUrl} target="_blank" rel="noreferrer">
-                    <ExternalLink className="h-4 w-4" />
-                    查看林客草稿
-                  </a>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 w-full bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  onClick={() => openLinKeDraftUrl(linkeDraftUrl)}
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  查看林客草稿
                 </Button>
               ) : null}
               <Input
@@ -1472,6 +1472,14 @@ function openRebuildApproval(supplyGoodsId: string) {
     return;
   }
   window.open(buildSupplyGoodsApprovalUrl(supplyGoodsId), "_blank", "noopener,noreferrer");
+}
+
+function openLinKeDraftUrl(url: string) {
+  if (!looksLikeUrl(url)) return;
+  if (isElectronEmbedded() && openBrowserTabInElectron(url)) {
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function SidebarSection({ title, children }: { title: string; children: ReactNode }) {
