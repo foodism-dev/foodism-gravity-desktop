@@ -7,6 +7,7 @@ import {
   ImageIcon,
   LinkIcon,
   Maximize2,
+  Pencil,
   RotateCcw,
   RefreshCw,
   Send,
@@ -36,8 +37,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import {
   createTicketActionRecord,
+  confirmTicketInfoOptimization,
+  getLinKeDraftJobStatus,
   getTicket,
   getTicketActionRecords,
+  retryLinKeDraftJob,
   type TicketActionRecord,
   type TicketMetadata,
   type TicketRecord,
@@ -46,6 +50,7 @@ import { getPayloadDisplayText, type FieldDisplayContext } from "@/lib/field-dis
 import { isElectronEmbedded, openRebuildApprovalInElectron } from "@/lib/electron-bridge.ts";
 import { buildMediaPreviewItems, type MediaPreviewItem, type MediaPreviewKind } from "@/lib/media-preview.ts";
 import {
+  haveSameVisiblePackageNames,
   requestTicketInfoOptimization,
   type TicketInfoOptimizationResult,
 } from "@/lib/ticket-info-optimization.ts";
@@ -318,22 +323,70 @@ function LoadedTicketDetail({
   const merchant = displayPayloadText(currentPayload, metadata, "hostNameInput", "rbhost.hostName", "rbhost") || "未提供商户";
   const workbenchModel = useMemo(() => buildTicketWorkbenchModel(ticket, records), [ticket, records]);
   const headerBadges = useMemo(() => buildTicketHeaderBadges(ticket), [ticket]);
+  const originalOptimizationPackages = useMemo(() => {
+    const sourcePackages = readPackagesFromPayload(sourcePayload);
+    return hasPackageContent(sourcePackages) ? sourcePackages : readPackagesFromPayload(ticket.payload);
+  }, [sourcePayload, ticket.payload]);
   const [optimizationResult, setOptimizationResult] = useState<TicketInfoOptimizationResult | null>(null);
+  const [editedOptimizedPackages, setEditedOptimizedPackages] = useState<Record<string, unknown> | null>(null);
+  const [isOptimizationEditable, setIsOptimizationEditable] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationErrorMessage, setOptimizationErrorMessage] = useState("");
-  const [shelfGoodsUrl, setShelfGoodsUrl] = useState("");
+  const [draftJobId, setDraftJobId] = useState("");
+  const [isDraftJobPolling, setIsDraftJobPolling] = useState(false);
+  const [linkeGoodsId, setLinkeGoodsId] = useState("");
   const [linkeCommission, setLinkeCommission] = useState<CommissionRateValues>(() => buildInitialLinkeCommission(ticket.payload));
   const [isActionSubmitting, setIsActionSubmitting] = useState(false);
   const [actionErrorMessage, setActionErrorMessage] = useState("");
+  const canConfirmOptimization = Boolean(editedOptimizedPackages && hasPackageContent(editedOptimizedPackages));
 
   useEffect(() => {
-    if (workbenchModel.currentFlow !== "info_optimization") {
-      setOptimizationResult(null);
-      setOptimizationErrorMessage("");
-      return;
-    }
-    void runInfoOptimization(1);
+    setOptimizationResult(null);
+    setEditedOptimizedPackages(null);
+    setIsOptimizationEditable(false);
+    setOptimizationErrorMessage("");
+    setDraftJobId("");
+    setIsDraftJobPolling(false);
   }, [ticket.supplyGoodsId, workbenchModel.currentFlow]);
+
+  useEffect(() => {
+    if (!draftJobId) return;
+    let isCancelled = false;
+    let timeoutId: number | undefined;
+
+    async function pollDraftJob() {
+      setIsDraftJobPolling(true);
+      try {
+        const status = await getLinKeDraftJobStatus(ticket.supplyGoodsId, draftJobId);
+        if (isCancelled) return;
+        if (status.state === "completed") {
+          setDraftJobId("");
+          setIsDraftJobPolling(false);
+          await refreshTicketAndRecords();
+          return;
+        }
+        if (status.state === "failed") {
+          setDraftJobId("");
+          setIsDraftJobPolling(false);
+          setActionErrorMessage(status.failedReason || "林客草稿创建失败");
+          await refreshTicketAndRecords();
+          return;
+        }
+        timeoutId = window.setTimeout(() => void pollDraftJob(), 2000);
+      } catch (error) {
+        if (isCancelled) return;
+        setDraftJobId("");
+        setIsDraftJobPolling(false);
+        setActionErrorMessage(error instanceof Error ? error.message : "林客草稿任务查询失败");
+      }
+    }
+
+    void pollDraftJob();
+    return () => {
+      isCancelled = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [draftJobId, ticket.supplyGoodsId]);
 
   useEffect(() => {
     setLinkeCommission(buildInitialLinkeCommission(ticket.payload));
@@ -342,8 +395,13 @@ function LoadedTicketDetail({
   async function runInfoOptimization(generation: number) {
     setIsOptimizing(true);
     setOptimizationErrorMessage("");
+    setIsOptimizationEditable(false);
+    setOptimizationResult(null);
+    setEditedOptimizedPackages(null);
     try {
-      setOptimizationResult(await requestTicketInfoOptimization(ticket, generation));
+      const result = await requestTicketInfoOptimization(ticket, generation);
+      setOptimizationResult(result);
+      setEditedOptimizedPackages(result.optimizedPackages);
     } catch (error) {
       setOptimizationErrorMessage(error instanceof Error ? error.message : "信息优化生成失败");
     } finally {
@@ -351,32 +409,71 @@ function LoadedTicketDetail({
     }
   }
 
+  function enableManualOptimizationEdit() {
+    const basePackages = editedOptimizedPackages ?? optimizationResult?.optimizedPackages ?? originalOptimizationPackages;
+    if (!hasPackageContent(basePackages)) {
+      setOptimizationErrorMessage("未提供套餐内容，无法人工修改");
+      return;
+    }
+    setOptimizationErrorMessage("");
+    setEditedOptimizedPackages(cloneRecord(basePackages));
+    setIsOptimizationEditable(true);
+  }
+
+  async function refreshTicketAndRecords() {
+    const [nextTicket, nextRecords] = await Promise.all([
+      getTicket(ticket.supplyGoodsId),
+      getTicketActionRecords(ticket.supplyGoodsId),
+    ]);
+    onTicketUpdated(nextTicket);
+    setRecords(nextRecords);
+  }
+
   async function confirmInfoOptimization() {
-    if (!optimizationResult) return;
-    await submitTicketAction({
-      action: "info_optimized",
-      origin: optimizationResult.origin,
-      current: optimizationResult.current,
-      remark: "确认采用信息优化结果",
-    });
-    setOptimizationResult(null);
+    if (!editedOptimizedPackages || !hasPackageContent(editedOptimizedPackages)) return;
+    setIsActionSubmitting(true);
+    setActionErrorMessage("");
+    try {
+      const result = await confirmTicketInfoOptimization(ticket.supplyGoodsId, editedOptimizedPackages);
+      onTicketUpdated(result.ticket);
+      setRecords((currentRecords) => [result.record, ...currentRecords]);
+      setDraftJobId(result.jobId);
+    } catch (error) {
+      setActionErrorMessage(error instanceof Error ? error.message : "确认信息优化失败");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  }
+
+  async function retryDraftCreation() {
+    setIsActionSubmitting(true);
+    setActionErrorMessage("");
+    try {
+      const result = await retryLinKeDraftJob(ticket.supplyGoodsId);
+      setDraftJobId(result.jobId);
+    } catch (error) {
+      setActionErrorMessage(error instanceof Error ? error.message : "重试创建林客草稿失败");
+    } finally {
+      setIsActionSubmitting(false);
+    }
   }
 
   async function confirmShelfOnline() {
-    const url = shelfGoodsUrl.trim();
-    if (!url) {
-      setActionErrorMessage("请先填写商品链接");
+    const goodsId = linkeGoodsId.trim();
+    if (!goodsId) {
+      setActionErrorMessage("请先填写林客商品ID");
       return;
     }
     await submitTicketAction({
       action: "shelf_online_confirmed",
       origin: {
-        onlineGoodsUrl: readRecordValue(ticket.payload, "onlineGoodsUrl"),
+        linkeGoodsId: readRecordValue(ticket.payload, "linkeGoodsId"),
       },
       current: {
-        onlineGoodsUrl: url,
+        linkeGoodsId: goodsId,
       },
-      remark: "确认货架上线并录入商品链接",
+      operator: { source: "operator" },
+      remark: "确认已上架并录入林客商品ID",
     });
   }
 
@@ -430,15 +527,6 @@ function LoadedTicketDetail({
     });
   }
 
-  async function returnToManualRevision() {
-    await submitTicketAction({
-      action: "return_to_manual_revision",
-      origin: {},
-      current: {},
-      remark: "返回人工修改信息优化内容",
-    });
-  }
-
   async function submitTicketAction(input: Parameters<typeof createTicketActionRecord>[1]) {
     setIsActionSubmitting(true);
     setActionErrorMessage("");
@@ -447,7 +535,7 @@ function LoadedTicketDetail({
       onTicketUpdated(result.ticket);
       setRecords((currentRecords) => [result.record, ...currentRecords]);
       if (input.action === "shelf_online_confirmed") {
-        setShelfGoodsUrl("");
+        setLinkeGoodsId("");
       }
     } catch (error) {
       setActionErrorMessage(error instanceof Error ? error.message : "操作失败");
@@ -491,6 +579,12 @@ function LoadedTicketDetail({
             {workbenchModel.currentFlow === "info_optimization" ? (
               <InfoOptimizationDiff
                 result={optimizationResult}
+                originPackages={optimizationResult?.originPackages ?? originalOptimizationPackages}
+                editedPackages={editedOptimizedPackages}
+                isEditable={isOptimizationEditable}
+                onEditedPackagesChange={setEditedOptimizedPackages}
+                onRunOptimization={() => void runInfoOptimization((optimizationResult?.generation ?? 0) + 1)}
+                onEnableManualEdit={enableManualOptimizationEdit}
                 isLoading={isOptimizing}
                 errorMessage={optimizationErrorMessage}
               />
@@ -498,7 +592,7 @@ function LoadedTicketDetail({
             {workbenchModel.currentFlow === "commission_setup" ? (
               <CommissionSetupPanel
                 values={linkeCommission}
-                onlineGoodsUrl={readPayloadText(ticket.payload, "onlineGoodsUrl", "shelfGoodsUrl")}
+                linkeDraftUrl={readPayloadText(ticket.payload, "linkeDraftUrl")}
                 onChange={(label, value) => setLinkeCommission((current) => ({ ...current, [label]: value }))}
               />
             ) : null}
@@ -513,17 +607,19 @@ function LoadedTicketDetail({
           isLoadingRecords={isLoadingRecords}
           recordErrorMessage={actionErrorMessage || recordErrorMessage}
           isOptimizing={isOptimizing}
-          isActionSubmitting={isActionSubmitting}
-          canConfirmOptimization={Boolean(optimizationResult)}
-          shelfGoodsUrl={shelfGoodsUrl}
-          onShelfGoodsUrlChange={setShelfGoodsUrl}
-          onRegenerateOptimization={() => void runInfoOptimization((optimizationResult?.generation ?? 0) + 1)}
+          isActionSubmitting={isActionSubmitting || isDraftJobPolling}
+          isDraftJobPolling={isDraftJobPolling}
+          canConfirmOptimization={canConfirmOptimization}
+          canRetryDraftCreation={hasPackageContent(readPackagesFromPayload(ticket.payload))}
+          linkeGoodsId={linkeGoodsId}
+          linkeDraftUrl={readPayloadText(ticket.payload, "linkeDraftUrl")}
+          onLinkeGoodsIdChange={setLinkeGoodsId}
           onConfirmOptimization={() => void confirmInfoOptimization()}
+          onRetryDraftCreation={() => void retryDraftCreation()}
           onConfirmShelfOnline={() => void confirmShelfOnline()}
           onConfirmCommission={() => void confirmCommission()}
           onConfirmProductOnline={() => void confirmProductOnline()}
           onManualModifyCommission={() => void manualModifyCommission()}
-          onReturnToManualRevision={() => void returnToManualRevision()}
         />
       </div>
     </div>
@@ -532,6 +628,27 @@ function LoadedTicketDetail({
 
 function readRecordValue(payload: Record<string, unknown>, key: string): unknown {
   return Object.hasOwn(payload, key) ? payload[key] : null;
+}
+
+function readPackagesFromPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  return displayPackagesValue(readRecordValue(payload, "packages"));
+}
+
+function displayPackagesValue(value: unknown): Record<string, unknown> {
+  if (isRecord(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (isRecord(parsed)) return parsed;
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function hasPackageContent(packages: Record<string, unknown>): boolean {
+  return readPackageGroups(packages).length > 0;
 }
 
 function readPayloadText(payload: Record<string, unknown>, ...fields: string[]): string {
@@ -728,67 +845,236 @@ function MediaItem({ item }: { item: MediaPreviewItem }) {
 
 function InfoOptimizationDiff({
   result,
+  originPackages,
+  editedPackages,
+  isEditable,
+  onEditedPackagesChange,
+  onRunOptimization,
+  onEnableManualEdit,
   isLoading,
   errorMessage,
 }: {
   result: TicketInfoOptimizationResult | null;
+  originPackages: Record<string, unknown>;
+  editedPackages: Record<string, unknown> | null;
+  isEditable: boolean;
+  onEditedPackagesChange: (packages: Record<string, unknown>) => void;
+  onRunOptimization: () => void;
+  onEnableManualEdit: () => void;
   isLoading: boolean;
   errorMessage: string;
 }) {
+  function updateGroupName(groupIndex: number, value: string) {
+    if (!editedPackages) return;
+    onEditedPackagesChange(updatePackageGroupName(editedPackages, groupIndex, value));
+  }
+
+  function updateItemTitle(groupIndex: number, itemIndex: number, value: string) {
+    if (!editedPackages) return;
+    onEditedPackagesChange(updatePackageItemTitle(editedPackages, groupIndex, itemIndex, value));
+  }
+
+  const isUnchangedOptimization = Boolean(
+    result && editedPackages && haveSameVisiblePackageNames(originPackages, editedPackages),
+  );
+
   return (
     <Card className="border-0 bg-white shadow-sm">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Sparkles className="h-4 w-4 text-violet-500" />
-          信息优化对比
-        </CardTitle>
-        <p className="text-sm text-slate-500">当前 mock 只优化商品标题，后续可替换为真实优化接口。</p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Sparkles className="h-4 w-4 text-violet-500" />
+              信息优化对比
+            </CardTitle>
+            <p className="mt-2 text-sm text-slate-500">仅优化套餐组名和菜品名称，确认后会创建林客上品草稿。</p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button type="button" size="sm" onClick={onRunOptimization} disabled={isLoading} className="bg-emerald-600 text-white hover:bg-emerald-700">
+              <Sparkles className="h-4 w-4" />
+              {isLoading ? "优化中" : "AI优化"}
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={onEnableManualEdit} disabled={isLoading} className="bg-white">
+              <Pencil className="h-4 w-4" />
+              人工修改
+            </Button>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         {errorMessage ? (
           <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-600">{errorMessage}</div>
-        ) : isLoading && !result ? (
-          <div className="rounded-md bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">正在生成优化结果...</div>
-        ) : result ? (
-          <div className="grid gap-4 lg:grid-cols-2">
-            <TitleDiffPanel title="原始标题" value={result.origin.goodsNameInput} tone="origin" />
-            <TitleDiffPanel title={`优化标题 #${result.generation}`} value={result.current.goodsNameInput} tone="current" />
+        ) : null}
+        {isUnchangedOptimization ? (
+          <div className="rounded-md bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 ring-1 ring-emerald-100">
+            AI已执行，本次未产生可见改动，可重试或人工修改。
           </div>
-        ) : (
-          <div className="rounded-md bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">等待生成优化结果</div>
-        )}
+        ) : null}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <PackagePreviewPanel title="原始" packages={originPackages} tone="origin" />
+          {isLoading ? (
+            <PackageEmptyPanel title="优化后" message="正在生成优化结果..." />
+          ) : isEditable && editedPackages ? (
+            <PackageEditPanel
+              title="优化后"
+              packages={editedPackages}
+              onGroupNameChange={updateGroupName}
+              onItemTitleChange={updateItemTitle}
+            />
+          ) : editedPackages ? (
+            <PackagePreviewPanel title="优化后" packages={editedPackages} tone="current" />
+          ) : result ? (
+            <PackagePreviewPanel title="优化后" packages={result.optimizedPackages} tone="current" />
+          ) : (
+            <PackageEmptyPanel title="优化后" message="暂无优化结果" />
+          )}
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function TitleDiffPanel({
+function PackageEmptyPanel({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="rounded-md bg-emerald-50 p-4 ring-1 ring-emerald-100">
+      <div className="text-xs font-medium text-emerald-700">{title}</div>
+      <div className="mt-3 rounded-md bg-white px-3 py-8 text-center text-sm text-slate-500 ring-1 ring-emerald-100">
+        {message}
+      </div>
+    </div>
+  );
+}
+
+function PackagePreviewPanel({
   title,
-  value,
+  packages,
   tone,
 }: {
   title: string;
-  value: string;
+  packages: Record<string, unknown>;
   tone: "origin" | "current";
 }) {
+  const groups = readPackageGroups(packages);
   return (
     <div className={cn(
       "rounded-md p-4 ring-1",
       tone === "origin" ? "bg-slate-50 ring-slate-100" : "bg-emerald-50 ring-emerald-100",
     )}>
       <div className={cn("text-xs font-medium", tone === "origin" ? "text-slate-500" : "text-emerald-700")}>{title}</div>
-      <div className="mt-3 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-950">{value || "未提供"}</div>
+      <div className="mt-3 space-y-3">
+        {groups.length > 0 ? groups.map((group, groupIndex) => (
+          <div key={`${groupIndex}-${readText(group.groupName)}`} className="rounded-md bg-white p-3 ring-1 ring-slate-100">
+            <div className="text-sm font-semibold leading-6 text-slate-950">{readText(group.groupName) || "未命名套餐组"}</div>
+            <div className="mt-2 space-y-1">
+              {readPackageItems(group).map((item, itemIndex) => (
+                <div key={`${itemIndex}-${readText(item.title)}`} className="text-xs leading-5 text-slate-600">
+                  {readText(item.title) || "未命名菜品"}
+                </div>
+              ))}
+            </div>
+          </div>
+        )) : (
+          <div className="rounded-md bg-white px-3 py-4 text-sm text-slate-500 ring-1 ring-slate-100">未提供套餐内容</div>
+        )}
+      </div>
     </div>
   );
 }
 
+function PackageEditPanel({
+  title,
+  packages,
+  onGroupNameChange,
+  onItemTitleChange,
+}: {
+  title: string;
+  packages: Record<string, unknown>;
+  onGroupNameChange: (groupIndex: number, value: string) => void;
+  onItemTitleChange: (groupIndex: number, itemIndex: number, value: string) => void;
+}) {
+  const groups = readPackageGroups(packages);
+  return (
+    <div className="rounded-md bg-emerald-50 p-4 ring-1 ring-emerald-100">
+      <div className="text-xs font-medium text-emerald-700">{title}</div>
+      <div className="mt-3 space-y-3">
+        {groups.length > 0 ? groups.map((group, groupIndex) => (
+          <div key={groupIndex} className="rounded-md bg-white p-3 ring-1 ring-emerald-100">
+            <Input
+              value={readText(group.groupName)}
+              onChange={(event) => onGroupNameChange(groupIndex, event.target.value)}
+              className="h-9 bg-white text-sm font-semibold"
+            />
+            <div className="mt-2 space-y-2">
+              {readPackageItems(group).map((item, itemIndex) => (
+                <Input
+                  key={itemIndex}
+                  value={readText(item.title)}
+                  onChange={(event) => onItemTitleChange(groupIndex, itemIndex, event.target.value)}
+                  className="h-8 bg-slate-50 text-xs"
+                />
+              ))}
+            </div>
+          </div>
+        )) : (
+          <div className="rounded-md bg-white px-3 py-4 text-sm text-slate-500 ring-1 ring-emerald-100">未提供套餐内容</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function updatePackageGroupName(packages: Record<string, unknown>, groupIndex: number, value: string): Record<string, unknown> {
+  const next = cloneRecord(packages);
+  const groups = readPackageGroups(next);
+  const group = groups[groupIndex];
+  if (group) group.groupName = value;
+  return next;
+}
+
+function updatePackageItemTitle(
+  packages: Record<string, unknown>,
+  groupIndex: number,
+  itemIndex: number,
+  value: string,
+): Record<string, unknown> {
+  const next = cloneRecord(packages);
+  const group = readPackageGroups(next)[groupIndex];
+  const item = group ? readPackageItems(group)[itemIndex] : null;
+  if (item) item.title = value;
+  return next;
+}
+
+function readPackageGroups(packages: Record<string, unknown>): Record<string, unknown>[] {
+  return Array.isArray(packages.viewList)
+    ? packages.viewList.filter(isDisplayRecord)
+    : [];
+}
+
+function readPackageItems(group: Record<string, unknown>): Record<string, unknown>[] {
+  return Array.isArray(group.list)
+    ? group.list.filter(isDisplayRecord)
+    : [];
+}
+
+function readText(value: unknown): string {
+  return typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
+}
+
+function isDisplayRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function CommissionSetupPanel({
   values,
-  onlineGoodsUrl,
+  linkeDraftUrl,
   onChange,
 }: {
   values: CommissionRateValues;
-  onlineGoodsUrl: string;
+  linkeDraftUrl: string;
   onChange: (label: string, value: string) => void;
 }) {
   return (
@@ -799,9 +1085,9 @@ function CommissionSetupPanel({
             <CardTitle className="text-lg">费用比例填写</CardTitle>
             <p className="mt-2 text-sm text-slate-500">填写后点击右侧「同步佣金设置」，同步到林客费用设置。</p>
           </div>
-          <Button variant="outline" className="bg-blue-50 text-blue-700 hover:bg-blue-100" disabled={!looksLikeUrl(onlineGoodsUrl)} asChild={looksLikeUrl(onlineGoodsUrl)}>
-            {looksLikeUrl(onlineGoodsUrl) ? (
-              <a href={onlineGoodsUrl} target="_blank" rel="noreferrer">
+          <Button variant="outline" className="bg-blue-50 text-blue-700 hover:bg-blue-100" disabled={!looksLikeUrl(linkeDraftUrl)} asChild={looksLikeUrl(linkeDraftUrl)}>
+            {looksLikeUrl(linkeDraftUrl) ? (
+              <a href={linkeDraftUrl} target="_blank" rel="noreferrer">
                 <ExternalLink className="h-4 w-4" />
                 打开林客核对
               </a>
@@ -924,16 +1210,18 @@ function TicketActionSidebar({
   recordErrorMessage,
   isOptimizing,
   isActionSubmitting,
+  isDraftJobPolling,
   canConfirmOptimization,
-  shelfGoodsUrl,
-  onShelfGoodsUrlChange,
-  onRegenerateOptimization,
+  canRetryDraftCreation,
+  linkeGoodsId,
+  linkeDraftUrl,
+  onLinkeGoodsIdChange,
   onConfirmOptimization,
+  onRetryDraftCreation,
   onConfirmShelfOnline,
   onConfirmCommission,
   onConfirmProductOnline,
   onManualModifyCommission,
-  onReturnToManualRevision,
 }: {
   model: TicketWorkbenchModel;
   ticket: TicketRecord;
@@ -941,16 +1229,18 @@ function TicketActionSidebar({
   recordErrorMessage: string;
   isOptimizing: boolean;
   isActionSubmitting: boolean;
+  isDraftJobPolling: boolean;
   canConfirmOptimization: boolean;
-  shelfGoodsUrl: string;
-  onShelfGoodsUrlChange: (value: string) => void;
-  onRegenerateOptimization: () => void;
+  canRetryDraftCreation: boolean;
+  linkeGoodsId: string;
+  linkeDraftUrl: string;
+  onLinkeGoodsIdChange: (value: string) => void;
   onConfirmOptimization: () => void;
+  onRetryDraftCreation: () => void;
   onConfirmShelfOnline: () => void;
   onConfirmCommission: () => void;
   onConfirmProductOnline: () => void;
   onManualModifyCommission: () => void;
-  onReturnToManualRevision: () => void;
 }) {
   const isBusy = isOptimizing || isActionSubmitting;
   return (
@@ -1030,13 +1320,28 @@ function TicketActionSidebar({
 
       <SidebarSection title="人工操作">
         <div className="space-y-2">
+          {isDraftJobPolling ? (
+            <div className="rounded-md bg-emerald-50 p-3 text-xs font-medium leading-5 text-emerald-700 ring-1 ring-emerald-100">
+              林客草稿创建中，请稍候...
+            </div>
+          ) : null}
           {model.currentFlow === "shelf_confirm" ? (
-            <Input
-              value={shelfGoodsUrl}
-              onChange={(event) => onShelfGoodsUrlChange(event.target.value)}
-              placeholder="填写商品链接"
-              className="h-10 bg-white"
-            />
+            <>
+              {looksLikeUrl(linkeDraftUrl) ? (
+                <Button asChild variant="outline" className="h-10 w-full bg-blue-50 text-blue-700 hover:bg-blue-100">
+                  <a href={linkeDraftUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink className="h-4 w-4" />
+                    查看林客草稿
+                  </a>
+                </Button>
+              ) : null}
+              <Input
+                value={linkeGoodsId}
+                onChange={(event) => onLinkeGoodsIdChange(event.target.value)}
+                placeholder="填写林客商品ID"
+                className="h-10 bg-white"
+              />
+            </>
           ) : null}
           {model.actionButtons.map((actionButton) => (
             <SidebarActionButton
@@ -1045,17 +1350,17 @@ function TicketActionSidebar({
               ticket={ticket}
               disabled={isActionDisabled(actionButton.label, {
                 canConfirmOptimization,
+                canRetryDraftCreation,
                 isBusy,
-                shelfGoodsUrl,
+                linkeGoodsId,
               })}
               onClick={getActionButtonHandler(actionButton.label, {
-                onRegenerateOptimization,
                 onConfirmOptimization,
+                onRetryDraftCreation,
                 onConfirmShelfOnline,
                 onConfirmCommission,
                 onConfirmProductOnline,
                 onManualModifyCommission,
-                onReturnToManualRevision,
               })}
             />
           ))}
@@ -1068,11 +1373,12 @@ function TicketActionSidebar({
 
 function isActionDisabled(
   label: string,
-  state: { canConfirmOptimization: boolean; isBusy: boolean; shelfGoodsUrl: string },
+  state: { canConfirmOptimization: boolean; canRetryDraftCreation: boolean; isBusy: boolean; linkeGoodsId: string },
 ): boolean {
   if (state.isBusy) return true;
   if (label === "确认采用优化") return !state.canConfirmOptimization;
-  if (label === "确认上线并填写商品链接") return state.shelfGoodsUrl.trim().length === 0;
+  if (label === "重试创建草稿") return !state.canRetryDraftCreation;
+  if (label === "确认已上架") return state.linkeGoodsId.trim().length === 0;
   if (label === "查看上线任务") return true;
   return false;
 }
@@ -1080,22 +1386,20 @@ function isActionDisabled(
 function getActionButtonHandler(
   label: string,
   handlers: {
-    onRegenerateOptimization: () => void;
     onConfirmOptimization: () => void;
+    onRetryDraftCreation: () => void;
     onConfirmShelfOnline: () => void;
     onConfirmCommission: () => void;
     onConfirmProductOnline: () => void;
     onManualModifyCommission: () => void;
-    onReturnToManualRevision: () => void;
   },
 ): (() => void) | undefined {
-  if (label === "重新生成") return handlers.onRegenerateOptimization;
   if (label === "确认采用优化") return handlers.onConfirmOptimization;
-  if (label === "确认上线并填写商品链接") return handlers.onConfirmShelfOnline;
+  if (label === "重试创建草稿") return handlers.onRetryDraftCreation;
+  if (label === "确认已上架") return handlers.onConfirmShelfOnline;
   if (label === "同步佣金设置") return handlers.onConfirmCommission;
   if (label === "确认商品上线") return handlers.onConfirmProductOnline;
   if (label === "手动修改") return handlers.onManualModifyCommission;
-  if (label === "返回人工修改") return handlers.onReturnToManualRevision;
   return undefined;
 }
 
@@ -1154,8 +1458,8 @@ function getActionButtonIcon(tone: WorkbenchActionButton["tone"]) {
 
 function getActionHint(flow: TicketWorkbenchModel["currentFlow"]): string {
   if (flow === "access_review") return "准入未完成时，请先回到 Rebuild 完成审核。";
-  if (flow === "info_optimization") return "确认文案后会写入信息优化记录，并进入货架上线确认。";
-  if (flow === "shelf_confirm") return "需要填写商品链接，确认后进入佣金设置。";
+  if (flow === "info_optimization") return "确认后会先创建林客草稿，草稿成功才进入货架上线确认。";
+  if (flow === "shelf_confirm") return "需要填写林客商品ID，确认后进入佣金设置。";
   if (flow === "commission_setup") return "先在左侧填写费用比例，再同步到林客费用设置。";
   if (flow === "product_online_pending") return "确认商品已经完成上线后，工单会进入已完成状态。";
   return "商品已进入上线任务，后续可查看执行结果。";

@@ -43,6 +43,11 @@ export interface TicketActionRecord {
   createdAt: string;
 }
 
+export interface TicketInfoOptimizationResponse {
+  originPackages: Record<string, unknown>;
+  optimizedPackages: Record<string, unknown>;
+}
+
 export interface CreateTicketActionRecordInput {
   action: string;
   origin: Record<string, unknown>;
@@ -126,6 +131,19 @@ interface TicketActionRecordListResponse {
 interface TicketActionRecordCreateResponse {
   ticket: TicketApiRecord;
   record: TicketActionRecordApiRecord;
+}
+
+interface TicketInfoOptimizationConfirmResponse {
+  ticket: TicketApiRecord;
+  record: TicketActionRecordApiRecord;
+  jobId: string;
+}
+
+export interface LinKeDraftJobStatus {
+  jobId: string;
+  state: string;
+  failedReason: string;
+  returnValue: Record<string, unknown> | null;
 }
 
 interface TicketMetadataResponse {
@@ -352,6 +370,47 @@ export async function createTicketActionRecord(
     ticket: normalizeTicket(response.ticket),
     record: normalizeTicketActionRecord(response.record),
   };
+}
+
+export async function generateTicketInfoOptimization(supplyGoodsId: string): Promise<TicketInfoOptimizationResponse> {
+  return await apiFetch<TicketInfoOptimizationResponse>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/info-optimization/generate`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function confirmTicketInfoOptimization(
+  supplyGoodsId: string,
+  optimizedPackages: Record<string, unknown>,
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  const response = await apiFetch<TicketInfoOptimizationConfirmResponse>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/info-optimization/confirm`,
+    {
+      method: "POST",
+      body: JSON.stringify({ optimizedPackages }),
+    },
+  );
+  return {
+    ticket: normalizeTicket(response.ticket),
+    record: normalizeTicketActionRecord(response.record),
+    jobId: response.jobId,
+  };
+}
+
+export async function retryLinKeDraftJob(supplyGoodsId: string): Promise<{ jobId: string }> {
+  return await apiFetch<{ jobId: string }>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-draft/retry`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function getLinKeDraftJobStatus(
+  supplyGoodsId: string,
+  jobId: string,
+): Promise<LinKeDraftJobStatus> {
+  return await apiFetch<LinKeDraftJobStatus>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-draft-jobs/${encodeURIComponent(jobId)}`,
+  );
 }
 
 export async function getTicketMetadata(): Promise<TicketMetadata> {

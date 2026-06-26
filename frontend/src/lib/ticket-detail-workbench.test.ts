@@ -91,4 +91,42 @@ describe("工单详情工作台模型", () => {
     expect(deriveTicketFlow({ ...approvedTicket, businessStatus: "product_online_pending" }, records)).toBe("product_online_pending");
     expect(deriveTicketFlow({ ...approvedTicket, businessStatus: "online" }, records)).toBe("product_online");
   });
+
+  test("Given info optimization flow, When building action buttons, Then only confirmation stays in sidebar", () => {
+    const model = buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "info_optimization_pending",
+        payload: { packages: { viewList: [{ groupName: "原始组" }] } },
+      },
+      records,
+    );
+
+    expect(model.actionButtons.map((button) => button.label)).toEqual(["确认采用优化"]);
+  });
+
+  test("Given draft creation failed, When building action buttons, Then retry stays in sidebar", () => {
+    const model = buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "info_optimization_pending",
+        payload: { packages: { viewList: [{ groupName: "优化组" }] } },
+      },
+      [
+        {
+          id: 2,
+          ticketId: 38,
+          action: "lin_ke_draft_failed",
+          origin: {},
+          current: {},
+          operator: {},
+          remark: "林客草稿创建失败",
+          createdAt: "2026-06-21T10:00:00.000Z",
+        },
+        ...records,
+      ],
+    );
+
+    expect(model.actionButtons.map((button) => button.label)).toEqual(["重试创建草稿"]);
+  });
 });

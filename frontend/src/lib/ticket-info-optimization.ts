@@ -1,43 +1,56 @@
-import type { TicketRecord } from "./api.ts";
+import { generateTicketInfoOptimization, type TicketRecord } from "./api.ts";
 
 export interface TicketInfoOptimizationResult {
   generation: number;
-  origin: {
-    goodsName: string;
-    goodsNameInput: string;
-  };
-  current: {
-    goodsName: string;
-    goodsNameInput: string;
-  };
+  originPackages: Record<string, unknown>;
+  optimizedPackages: Record<string, unknown>;
 }
 
 export async function requestTicketInfoOptimization(
   ticket: TicketRecord,
   generation: number,
 ): Promise<TicketInfoOptimizationResult> {
-  const originTitle = readTitle(ticket);
+  const response = await generateTicketInfoOptimization(ticket.supplyGoodsId);
   return {
     generation,
-    origin: {
-      goodsName: originTitle,
-      goodsNameInput: originTitle,
-    },
-    current: {
-      goodsName: `${originTitle}｜AI优化版${generation}`,
-      goodsNameInput: `${originTitle}｜AI优化版${generation}`,
-    },
+    originPackages: response.originPackages,
+    optimizedPackages: response.optimizedPackages,
   };
 }
 
-function readTitle(ticket: TicketRecord): string {
-  return readString(ticket.payload.goodsNameInput)
-    || readString(ticket.payload.goodsName)
-    || readString(ticket.sourcePayload.goodsNameInput)
-    || readString(ticket.sourcePayload.goodsName)
-    || "未命名商品";
+export function haveSameVisiblePackageNames(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  const leftGroups = readPackageGroups(left);
+  const rightGroups = readPackageGroups(right);
+  if (leftGroups.length !== rightGroups.length) return false;
+
+  return leftGroups.every((leftGroup, groupIndex) => {
+    const rightGroup = rightGroups[groupIndex];
+    if (!rightGroup || readText(leftGroup.groupName) !== readText(rightGroup.groupName)) return false;
+
+    const leftItems = readPackageItems(leftGroup);
+    const rightItems = readPackageItems(rightGroup);
+    if (leftItems.length !== rightItems.length) return false;
+
+    return leftItems.every((leftItem, itemIndex) => readText(leftItem.title) === readText(rightItems[itemIndex]?.title));
+  });
 }
 
-function readString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+function readPackageGroups(packages: Record<string, unknown>): Record<string, unknown>[] {
+  return Array.isArray(packages.viewList)
+    ? packages.viewList.filter(isRecord)
+    : [];
+}
+
+function readPackageItems(group: Record<string, unknown>): Record<string, unknown>[] {
+  return Array.isArray(group.list)
+    ? group.list.filter(isRecord)
+    : [];
+}
+
+function readText(value: unknown): string {
+  return typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

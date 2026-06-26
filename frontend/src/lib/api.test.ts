@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
-import { createTicketActionRecord, getTicket, getTicketActionRecords, getTicketMetadata } from "./api.ts";
+import {
+  confirmTicketInfoOptimization,
+  createTicketActionRecord,
+  generateTicketInfoOptimization,
+  getLinKeDraftJobStatus,
+  getTicket,
+  getTicketActionRecords,
+  getTicketMetadata,
+} from "./api.ts";
 import { storeSession } from "./auth.ts";
 
 process.env.VITE_API_BASE_URL = "http://localhost:8787";
@@ -180,6 +188,70 @@ describe("前端 API", () => {
     expect(metadata.fieldMetadata.mainPic?.fieldType).toBe("IMAGE");
     expect(metadata.fieldOptions.showChannel?.[0]?.label).toBe("抖音来客（闭环）");
     expect(calls.map((call) => call.url)).toEqual(["http://localhost:8787/api/tickets/metadata"]);
+  });
+
+  test("Given optimization response, When generating info optimization, Then it returns packages only", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      originPackages: { viewList: [{ groupName: "原始组" }] },
+      optimizedPackages: { viewList: [{ groupName: "优化组" }] },
+    }));
+
+    const result = await generateTicketInfoOptimization("944-detail");
+
+    expect(result.originPackages.viewList).toEqual([{ groupName: "原始组" }]);
+    expect(result.optimizedPackages.viewList).toEqual([{ groupName: "优化组" }]);
+    expect(calls[0]?.url).toBe("http://localhost:8787/api/tickets/944-detail/info-optimization/generate");
+    expect(calls[0]?.init?.method).toBe("POST");
+  });
+
+  test("Given edited packages, When confirming optimization, Then it posts packages and returns draft job id", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      ticket: {
+        id: 1,
+        supply_goods_id: "944-detail",
+        status: "processing",
+        business_status: "info_optimization_pending",
+        payload: { packages: { viewList: [{ groupName: "优化组" }] } },
+        source_payload: { packages: { viewList: [{ groupName: "原始组" }] } },
+        created_at: "2026-06-24T10:00:00.000Z",
+        updated_at: "2026-06-24T11:00:00.000Z",
+      },
+      record: {
+        id: 3,
+        ticket_id: 1,
+        action: "info_optimization_generated",
+        origin: { packages: null },
+        current: { packages: { viewList: [{ groupName: "优化组" }] } },
+        operator: {},
+        remark: null,
+        created_at: "2026-06-24T11:00:00.000Z",
+      },
+      jobId: "job-1",
+    }));
+
+    const result = await confirmTicketInfoOptimization("944-detail", { viewList: [{ groupName: "优化组" }] });
+
+    expect(result.jobId).toBe("job-1");
+    expect(result.record.action).toBe("info_optimization_generated");
+    expect(calls[0]?.url).toBe("http://localhost:8787/api/tickets/944-detail/info-optimization/confirm");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ optimizedPackages: { viewList: [{ groupName: "优化组" }] } }));
+  });
+
+  test("Given draft job response, When reading job status, Then it returns BullMQ state", async () => {
+    installSessionStorage();
+    installFetchMock(() => ({
+      jobId: "job-1",
+      state: "completed",
+      failedReason: "",
+      returnValue: { draftUrl: "https://www.life-partner.cn/draft" },
+    }));
+
+    const result = await getLinKeDraftJobStatus("944-detail", "job-1");
+
+    expect(result.state).toBe("completed");
+    expect(result.returnValue?.draftUrl).toBe("https://www.life-partner.cn/draft");
   });
 
   test("Given Electron iframe provides apiToken in URL, When loading ticket data, Then it stores token and sends bearer auth", async () => {

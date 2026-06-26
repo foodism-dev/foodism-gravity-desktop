@@ -87,7 +87,7 @@ export function buildTicketWorkbenchModel(ticket: TicketRecord, records: TicketA
       state: index < currentStepIndex ? "done" : index === currentStepIndex ? "active" : "pending",
     })),
     currentFlow,
-    actionButtons: buildActionButtons(currentFlow),
+    actionButtons: buildActionButtons(currentFlow, records),
     activityItems: records.slice(0, 4).map((record) => ({
       title: formatActionTitle(record),
       description: record.remark || `${formatActionTitle(record)} 已记录 ${Object.keys(record.current).length} 个字段`,
@@ -117,19 +117,20 @@ export function buildTicketHeaderBadges(ticket: TicketRecord): TicketHeaderBadge
   ];
 }
 
-function buildActionButtons(flow: TicketFlowKey): WorkbenchActionButton[] {
+function buildActionButtons(flow: TicketFlowKey, records: TicketActionRecord[]): WorkbenchActionButton[] {
   if (flow === "access_review") {
     return [{ label: "跳转 Rebuild 审核", tone: "primary" }];
   }
   if (flow === "info_optimization") {
-    return [
-      { label: "确认采用优化", tone: "primary" },
-      { label: "重新生成", tone: "secondary" },
-      { label: "返回人工修改", tone: "danger" },
-    ];
+    if (records[0]?.action === "lin_ke_draft_failed") {
+      return [
+        { label: "重试创建草稿", tone: "primary" },
+      ];
+    }
+    return [{ label: "确认采用优化", tone: "primary" }];
   }
   if (flow === "shelf_confirm") {
-    return [{ label: "确认上线并填写商品链接", tone: "primary" }];
+    return [{ label: "确认已上架", tone: "primary" }];
   }
   if (flow === "commission_setup") {
     return [
@@ -162,7 +163,9 @@ function buildCurrentPayload(ticket: TicketRecord): Record<string, unknown> {
 
 function formatActionTitle(record: TicketActionRecord): string {
   if (record.action === "import_from_rebuild") return "Rebuild";
+  if (record.action === "info_optimization_generated") return "信息优化确认";
   if (record.action === "info_optimized") return "信息优化";
+  if (record.action === "lin_ke_draft_failed") return "林客草稿失败";
   if (record.action === "shelf_online_confirmed") return "货架上线确认";
   if (record.action === "commission_configured") return "佣金设置";
   if (record.action === "product_online_confirmed") return "商品上线";
