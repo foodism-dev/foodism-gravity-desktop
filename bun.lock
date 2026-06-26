@@ -138,7 +138,7 @@
     },
     "backend": {
       "name": "@proma/server",
-      "version": "0.1.41",
+      "version": "0.1.42",
       "dependencies": {
         "bullmq": "^5.79.1",
         "drizzle-orm": "^0.45.2",
