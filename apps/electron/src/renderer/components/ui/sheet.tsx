@@ -5,8 +5,24 @@ import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { detectIsWindows } from "@/lib/platform"
+import { useNativeBrowserOverlayTracker } from "@/lib/native-browser-overlay"
 
-const Sheet = SheetPrimitive.Root
+const Sheet = ({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof SheetPrimitive.Root>) => {
+  const handleOpenChange = useNativeBrowserOverlayTracker(open ?? defaultOpen, onOpenChange)
+  return (
+    <SheetPrimitive.Root
+      open={open}
+      defaultOpen={defaultOpen}
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  )
+}
 
 const SheetTrigger = SheetPrimitive.Trigger
 

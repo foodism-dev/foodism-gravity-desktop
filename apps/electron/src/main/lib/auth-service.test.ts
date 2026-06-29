@@ -105,6 +105,29 @@ describe('auth-service 登录会话', () => {
     expect(service.getAuthSession()).toEqual({ isAuthenticated: false })
   })
 
+  test('Given SSO 会话已过期但可刷新 When 获取登录状态 Then 保留会话用于渲染进程刷新恢复', () => {
+    const path = createTempAuthPath()
+    const service = createAuthService(path)
+    const session: AuthSession = {
+      isAuthenticated: true,
+      provider: 'gravity-sso',
+      apiToken: 'api-jwt-token',
+      refreshToken: 'refresh-token',
+      user: {
+        id: 'user-001',
+        username: 'zhangsan',
+        displayName: '张三',
+      },
+      loggedInAt: '2026-06-22T08:00:00.000Z',
+      expiresAt: '2000-01-01T00:00:00.000Z',
+      refreshable: true,
+    }
+
+    writeFileSync(path, JSON.stringify(session, null, 2), 'utf-8')
+
+    expect(service.getAuthSession()).toEqual(session)
+  })
+
   test('Given SSO 会话 When 保存会话 Then 后续获取返回同一会话', () => {
     const service = createAuthService(createTempAuthPath())
     const session = {

@@ -3,8 +3,16 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
 import { Check, ChevronRight, Circle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useNativeBrowserOverlayTracker } from "@/lib/native-browser-overlay"
 
-const DropdownMenu = DropdownMenuPrimitive.Root
+const DropdownMenu = ({
+  open,
+  onOpenChange,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Root>) => {
+  const handleOpenChange = useNativeBrowserOverlayTracker(open, onOpenChange)
+  return <DropdownMenuPrimitive.Root open={open} onOpenChange={handleOpenChange} {...props} />
+}
 
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger
 

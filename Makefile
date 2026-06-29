@@ -1,12 +1,12 @@
 SERVER_ENV ?= backend/.env
 BACKEND_COMPOSE = docker compose -f docker-compose.backend.yml
 SERVER_API = ( cd backend && exec bun run src/index.ts )
-LIN_KE_WORKER = ( cd backend && exec bun run src/lin-ke/worker.ts )
+JOBS_WORKER = ( cd backend && exec bun run src/jobs/worker.ts )
 FRONTEND_DEV = ( cd frontend && exec bun run dev )
 DESKTOP_DEV = bun run electron:dev
 LOAD_SERVER_ENV = set -a; [ ! -f "$(SERVER_ENV)" ] || . "$(SERVER_ENV)"; : "$${REDIS_URL:=redis://127.0.0.1:$${REDIS_PORT:-6379}}"; : "$${POSTGRES_DATA_DIR:=$(CURDIR)/.local/postgres-data}"; export REDIS_URL POSTGRES_DATA_DIR; set +a;
 
-.PHONY: dev run-api run-worker run-frontend run-desktop run-infra migrate-local
+.PHONY: dev run-api run-worker run-jobs run-frontend run-desktop run-infra migrate-local
 
 dev:
 	bun run dev
@@ -15,7 +15,10 @@ run-api:
 	@$(LOAD_SERVER_ENV) $(SERVER_API)
 
 run-worker:
-	@$(LOAD_SERVER_ENV) $(LIN_KE_WORKER)
+	@$(LOAD_SERVER_ENV) $(JOBS_WORKER)
+
+run-jobs:
+	@$(LOAD_SERVER_ENV) $(JOBS_WORKER)
 
 run-frontend:
 	$(FRONTEND_DEV)

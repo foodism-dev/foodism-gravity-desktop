@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildTicketHeaderBadges, buildTicketWorkbenchModel, deriveTicketFlow } from "./ticket-detail-workbench.ts";
+import {
+  buildTicketHeaderBadges,
+  buildTicketWorkbenchModel,
+  deriveTicketFlow,
+  isProductOperationRatingEditable,
+} from "./ticket-detail-workbench.ts";
 import type { TicketActionRecord, TicketRecord } from "./api.ts";
 
 const ticket: TicketRecord = {
@@ -49,10 +54,8 @@ describe("工单详情工作台模型", () => {
       { label: "商品名称", value: "双人套餐（牛买双拼）" },
       { label: "当前节点", value: "待准入审核" },
     ]);
-    expect(model.progressSteps[0]).toEqual({ index: 1, label: "待完善信息", state: "done" });
-    expect(model.progressSteps[1]).toEqual({ index: 2, label: "待准入审核", state: "active" });
+    expect(model.progressSteps[0]).toEqual({ index: 1, label: "待准入审核", state: "active" });
     expect(model.progressSteps.map((step) => step.label)).toEqual([
-      "待完善信息",
       "待准入审核",
       "待信息优化确认",
       "待货架上线确认",
@@ -138,6 +141,63 @@ describe("工单详情工作台模型", () => {
     expect(model.actionButtons.map((button) => button.label)).toEqual(["重试创建草稿"]);
   });
 
+  test("Given product operation rating action record, When building activities, Then the record title is readable", () => {
+    const model = buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "access_review_pending",
+        payload: {
+          productOperationRating: {
+            totalScore: 8.6,
+            rating: "S",
+          },
+        },
+      },
+      [
+        {
+          id: 3,
+          ticketId: 38,
+          action: "product_operation_rating_saved",
+          origin: {},
+          current: { productOperationRating: { totalScore: 8.6, rating: "S" } },
+          operator: {},
+          remark: "保存商品运营评级：S（8.6分）",
+          createdAt: "2026-06-21T11:00:00.000Z",
+        },
+        ...records,
+      ],
+    );
+
+    expect(model.activityItems[0]?.title).toBe("商品运营评级");
+  });
+
+  test("Given ticket flow, When checking product operation rating editability, Then only access review and info optimization can save", () => {
+    expect(isProductOperationRatingEditable("access_review")).toBe(true);
+    expect(isProductOperationRatingEditable("info_optimization")).toBe(true);
+    expect(isProductOperationRatingEditable("info_completion")).toBe(false);
+    expect(isProductOperationRatingEditable("shelf_confirm")).toBe(false);
+    expect(isProductOperationRatingEditable("commission_setup")).toBe(false);
+    expect(isProductOperationRatingEditable("product_online_pending")).toBe(false);
+    expect(isProductOperationRatingEditable("product_online")).toBe(false);
+  });
+
+  test("Given action record has operator snapshot, When building activities, Then operator is readable", () => {
+    const model = buildTicketWorkbenchModel(ticket, [
+      {
+        id: 4,
+        ticketId: 38,
+        action: "commission_configured",
+        origin: {},
+        current: { commissionRate: 0.12 },
+        operator: { id: "user-1", username: "lisi", displayName: "李四" },
+        remark: "确认佣金设置",
+        createdAt: "2026-06-21T12:00:00.000Z",
+      },
+    ]);
+
+    expect(model.activityItems[0]?.operatorText).toBe("李四");
+  });
+
   test("Given rejected ticket needs completion, When building workbench model, Then it shows returned status and Rebuild action", () => {
     const model = buildTicketWorkbenchModel({
       ...ticket,
@@ -154,7 +214,8 @@ describe("工单详情工作台模型", () => {
       { label: "工单 · 已驳回", variant: "muted" },
     ]);
     expect(model.metaItems.find((item) => item.label === "当前节点")?.value).toBe("待完善信息");
-    expect(model.progressSteps[0]).toEqual({ index: 1, label: "待完善信息", state: "active" });
+    expect(model.progressSteps.map((step) => step.label)).not.toContain("待完善信息");
+    expect(model.progressSteps.every((step) => step.state === "pending")).toBe(true);
     expect(model.actionButtons[0]?.label).toBe("跳转 Rebuild 审核");
   });
 });

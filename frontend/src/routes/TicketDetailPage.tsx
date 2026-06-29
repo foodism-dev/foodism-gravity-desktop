@@ -22,6 +22,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 
 import type { AuthState } from "@/App.tsx";
 import { ensureTicketMetadataAtom, ticketMetadataStateAtom } from "@/atoms/ticket-metadata.ts";
+import { ProductOperationRatingPanel } from "@/components/tickets/ProductOperationRatingPanel.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
@@ -55,8 +56,15 @@ import {
   type TicketInfoOptimizationResult,
 } from "@/lib/ticket-info-optimization.ts";
 import {
+  PRODUCT_OPERATION_RATING_ACTION,
+  PRODUCT_OPERATION_RATING_PAYLOAD_KEY,
+  readProductOperationRating,
+  type ProductOperationRatingResult,
+} from "@/lib/product-operation-rating.ts";
+import {
   buildTicketHeaderBadges,
   buildTicketWorkbenchModel,
+  isProductOperationRatingEditable,
   type TicketWorkbenchModel,
   type WorkbenchActionButton,
 } from "@/lib/ticket-detail-workbench.ts";
@@ -323,6 +331,10 @@ function LoadedTicketDetail({
   const merchant = displayPayloadText(currentPayload, metadata, "hostNameInput", "rbhost.hostName", "rbhost") || "未提供商户";
   const workbenchModel = useMemo(() => buildTicketWorkbenchModel(ticket, records), [ticket, records]);
   const headerBadges = useMemo(() => buildTicketHeaderBadges(ticket), [ticket]);
+  const productOperationRating = useMemo(
+    () => readProductOperationRating(readRecordValue(ticket.payload, PRODUCT_OPERATION_RATING_PAYLOAD_KEY)),
+    [ticket.payload],
+  );
   const originalOptimizationPackages = useMemo(() => {
     const sourcePackages = readPackagesFromPayload(sourcePayload);
     return hasPackageContent(sourcePackages) ? sourcePackages : readPackagesFromPayload(ticket.payload);
@@ -526,6 +538,19 @@ function LoadedTicketDetail({
     });
   }
 
+  async function saveProductOperationRating(rating: ProductOperationRatingResult) {
+    await submitTicketAction({
+      action: PRODUCT_OPERATION_RATING_ACTION,
+      origin: {
+        [PRODUCT_OPERATION_RATING_PAYLOAD_KEY]: readRecordValue(ticket.payload, PRODUCT_OPERATION_RATING_PAYLOAD_KEY),
+      },
+      current: {
+        [PRODUCT_OPERATION_RATING_PAYLOAD_KEY]: rating,
+      },
+      remark: `保存商品运营评级：${rating.rating}（${rating.totalScore.toFixed(1)}分）`,
+    });
+  }
+
   async function submitTicketAction(input: Parameters<typeof createTicketActionRecord>[1]) {
     setIsActionSubmitting(true);
     setActionErrorMessage("");
@@ -574,6 +599,12 @@ function LoadedTicketDetail({
 
           <div className="space-y-5">
             <DetailSections sections={BASIC_SECTIONS} payload={currentPayload} displayContext={metadata} />
+            <ProductOperationRatingPanel
+              value={productOperationRating}
+              isSubmitting={isActionSubmitting}
+              isEditable={isProductOperationRatingEditable(workbenchModel.currentFlow)}
+              onSave={(rating) => void saveProductOperationRating(rating)}
+            />
             <MediaSection ticket={ticket} metadata={metadata} />
             {workbenchModel.currentFlow === "info_optimization" ? (
               <InfoOptimizationDiff
@@ -1302,6 +1333,9 @@ function TicketActionSidebar({
                   <span className="min-w-0 flex-1">
                     <span className="block font-medium text-slate-800">{item.title}</span>
                     <span className="mt-0.5 block line-clamp-2 text-slate-500">{item.description}</span>
+                    {item.operatorText ? (
+                      <span className="mt-0.5 block text-slate-400">操作人：{item.operatorText}</span>
+                    ) : null}
                   </span>
                   <span className="shrink-0 text-slate-400">{item.time}</span>
                 </div>
@@ -1455,6 +1489,7 @@ function getActionButtonIcon(tone: WorkbenchActionButton["tone"]) {
 }
 
 function getActionHint(flow: TicketWorkbenchModel["currentFlow"]): string {
+  if (flow === "info_completion") return "资料被驳回，请回到 Rebuild 完善信息后重新审核。";
   if (flow === "access_review") return "准入未完成时，请先回到 Rebuild 完成审核。";
   if (flow === "info_optimization") return "确认后会先创建林客草稿，草稿成功才进入货架上线确认。";
   if (flow === "shelf_confirm") return "需要填写林客商品ID，确认后进入佣金设置。";

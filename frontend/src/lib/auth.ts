@@ -20,7 +20,7 @@ interface HandoffExchangeResponse {
 }
 
 export function getStoredToken() {
-  const token = window.sessionStorage.getItem(TOKEN_KEY);
+  const token = readStorageValue(TOKEN_KEY);
   if (token) {
     return token;
   }
@@ -28,7 +28,7 @@ export function getStoredToken() {
 }
 
 export function getStoredUser(): FrontendUser | null {
-  const raw = window.sessionStorage.getItem(USER_KEY);
+  const raw = readStorageValue(USER_KEY);
   if (!raw) {
     return null;
   }
@@ -36,19 +36,19 @@ export function getStoredUser(): FrontendUser | null {
   try {
     return JSON.parse(raw) as FrontendUser;
   } catch {
-    window.sessionStorage.removeItem(USER_KEY);
+    removeStorageValue(USER_KEY);
     return null;
   }
 }
 
 export function storeSession(session: AuthSession) {
-  window.sessionStorage.setItem(TOKEN_KEY, session.token);
-  window.sessionStorage.setItem(USER_KEY, JSON.stringify(session.user));
+  writeStorageValue(TOKEN_KEY, session.token);
+  writeStorageValue(USER_KEY, JSON.stringify(session.user));
 }
 
 export function clearSession() {
-  window.sessionStorage.removeItem(TOKEN_KEY);
-  window.sessionStorage.removeItem(USER_KEY);
+  removeStorageValue(TOKEN_KEY);
+  removeStorageValue(USER_KEY);
 }
 
 function consumeUrlApiToken(): string | null {
@@ -61,7 +61,7 @@ function consumeUrlApiToken(): string | null {
     return null;
   }
 
-  window.sessionStorage.setItem(TOKEN_KEY, token);
+  writeStorageValue(TOKEN_KEY, token);
   url.searchParams.delete("apiToken");
   if (window.history?.replaceState) {
     window.history.replaceState(null, "", url.toString());
@@ -69,6 +69,44 @@ function consumeUrlApiToken(): string | null {
     window.location.href = url.toString();
   }
   return token;
+}
+
+function readStorageValue(key: string): string | null {
+  return safeGetItem(window.localStorage, key) ?? safeGetItem(window.sessionStorage, key);
+}
+
+function writeStorageValue(key: string, value: string) {
+  safeSetItem(window.localStorage, key, value);
+  safeSetItem(window.sessionStorage, key, value);
+}
+
+function removeStorageValue(key: string) {
+  safeRemoveItem(window.localStorage, key);
+  safeRemoveItem(window.sessionStorage, key);
+}
+
+function safeGetItem(storage: Storage | undefined, key: string): string | null {
+  try {
+    return storage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function safeSetItem(storage: Storage | undefined, key: string, value: string) {
+  try {
+    storage?.setItem(key, value);
+  } catch {
+    // 浏览器隐私模式或嵌入环境禁用存储时忽略，保留另一种存储兜底。
+  }
+}
+
+function safeRemoveItem(storage: Storage | undefined, key: string) {
+  try {
+    storage?.removeItem(key);
+  } catch {
+    // 浏览器隐私模式或嵌入环境禁用存储时忽略。
+  }
 }
 
 export async function exchangeHandoffToken(handoffToken: string): Promise<AuthSession> {

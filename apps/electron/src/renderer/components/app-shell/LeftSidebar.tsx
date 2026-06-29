@@ -96,6 +96,7 @@ import { WORK_ORDER_NAV_ITEM } from '@/lib/work-order-navigation'
 import { getAuthDisplayName } from '@/lib/auth-display-name'
 import foodismLogo from '@/assets/models/foodism.png'
 import {
+  mergeAgentSessionListsByFreshness,
   replaceAgentSessionInFreshnessOrder,
   sortAgentSessionsByUpdatedAtDesc,
 } from '@/lib/agent-session-list'
@@ -691,7 +692,9 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       .catch(console.error)
     window.electronAPI
       .listAgentSessions()
-      .then(setAgentSessions)
+      .then((sessions) => {
+        setAgentSessions((prev) => mergeAgentSessionListsByFreshness(prev, sessions))
+      })
       .catch(console.error)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setConversations, setUserProfile, setAgentSessions])
@@ -700,7 +703,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   React.useEffect(() => {
     const handleFocus = (): void => {
       window.electronAPI.listConversations().then(setConversations).catch(console.error)
-      window.electronAPI.listAgentSessions().then(setAgentSessions).catch(console.error)
+      window.electronAPI.listAgentSessions()
+        .then((sessions) => {
+          setAgentSessions((prev) => mergeAgentSessionListsByFreshness(prev, sessions))
+        })
+        .catch(console.error)
     }
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)

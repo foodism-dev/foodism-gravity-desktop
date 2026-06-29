@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildEmptyOriginPayload,
   buildTicketPayloadFromSupplyGoods,
+  canEnterTicketFromSupplyGoodsPayload,
   extractSupplyCompanyId,
   getSupplyGoodsTicketFlowState,
   hydrateTicketPayloadCompany,
@@ -111,6 +112,63 @@ describe("SupplyGoods 工单 payload 初始化", () => {
       status: TICKET_STATUS.RETURNED,
       businessStatus: TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING,
     });
+  });
+
+  test("Given Rebuild approvalState returns to processing, When deriving callback ticket state, Then ticket waits for access review", () => {
+    expect(getSupplyGoodsTicketFlowState({
+      SupplyGoodsId: "944-processing",
+      approvalState: { value: 2, text: "审批中" },
+    }, TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING)).toEqual({
+      status: TICKET_STATUS.TODO,
+      businessStatus: TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING,
+    });
+  });
+
+  test("Given goods company and host are processing or approved, When checking ticket entry, Then it can enter tickets", () => {
+    expect(canEnterTicketFromSupplyGoodsPayload({
+      SupplyGoodsId: "944-ready",
+      approvalState: { value: 2, text: "审批中" },
+      company: {
+        id: "945-company",
+        entity: "SupplyCompany",
+        approvalState: { value: 10, text: "通过" },
+      },
+      rbhost: {
+        id: "946-host",
+        entity: "SupplyHost",
+        approvalState: { value: 2, text: "审批中" },
+      },
+    })).toBe(true);
+  });
+
+  test("Given any linked approval state is not processing or approved, When checking ticket entry, Then it cannot enter tickets", () => {
+    expect(canEnterTicketFromSupplyGoodsPayload({
+      SupplyGoodsId: "944-company-rejected",
+      approvalState: { value: 2, text: "审批中" },
+      company: {
+        id: "945-company",
+        entity: "SupplyCompany",
+        approvalState: { value: 11, text: "驳回" },
+      },
+      rbhost: {
+        id: "946-host",
+        entity: "SupplyHost",
+        approvalState: { value: 2, text: "审批中" },
+      },
+    })).toBe(false);
+    expect(canEnterTicketFromSupplyGoodsPayload({
+      SupplyGoodsId: "944-host-missing",
+      approvalState: { value: 10, text: "通过" },
+      company: {
+        id: "945-company",
+        entity: "SupplyCompany",
+        approvalState: { value: 10, text: "通过" },
+      },
+      rbhost: {
+        id: "946-host",
+        entity: "SupplyHost",
+      },
+    })).toBe(false);
   });
 
   test("Given asset uploader exists, When normalizing SupplyGoods payload, Then media fields are replaced by R2 urls", async () => {

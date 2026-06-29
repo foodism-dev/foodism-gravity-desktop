@@ -47,12 +47,19 @@ export function isApprovalStateRejected(approvalState: string): boolean {
   return normalizedApprovalState === "11" || normalizedApprovalState.includes("驳回");
 }
 
+export function isApprovalStateProcessing(approvalState: string): boolean {
+  return ["2", "审批中", "审核中"].includes(approvalState.trim());
+}
+
 export function matchTicketBusinessStatusByApprovalState(
   approvalState: string,
   currentBusinessStatus?: TicketBusinessStatus,
 ): TicketBusinessStatus {
   if (isApprovalStateRejected(approvalState)) {
     return TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING;
+  }
+  if (isApprovalStateProcessing(approvalState)) {
+    return TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING;
   }
   return matchTicketBusinessStatusByApproval(isApprovalStatePassed(approvalState), currentBusinessStatus);
 }

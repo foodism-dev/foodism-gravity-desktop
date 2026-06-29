@@ -125,7 +125,8 @@ function parseStoredSession(raw: string): AuthSession {
   if (roles.length > 0) session.roles = roles
   if (identities.length > 0) session.identities = identities
   const expiresAt = toStringValue(data.expiresAt)
-  if (data.provider === 'gravity-sso' && expiresAt && isExpired(expiresAt)) {
+  const refreshable = data.refreshable === true
+  if (data.provider === 'gravity-sso' && expiresAt && isExpired(expiresAt) && !refreshable) {
     return LOGGED_OUT_SESSION
   }
   if (expiresAt) session.expiresAt = expiresAt

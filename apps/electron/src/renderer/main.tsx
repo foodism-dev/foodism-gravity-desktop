@@ -56,8 +56,14 @@ import {
 } from './atoms/markdown-font-size'
 import { useGlobalAgentListeners } from './hooks/useGlobalAgentListeners'
 import { useGlobalChatListeners } from './hooks/useGlobalChatListeners'
-import { tabsAtom, activeTabIdAtom, getPersistableTabState, scratchPadContentAtom, scratchPadLoadedAtom } from './atoms/tab-atoms'
-import type { TabItem } from './atoms/tab-atoms'
+import {
+  tabsAtom,
+  activeTabIdAtom,
+  getPersistableTabState,
+  normalizePersistedTabState,
+  scratchPadContentAtom,
+  scratchPadLoadedAtom,
+} from './atoms/tab-atoms'
 import { chatToolsAtom } from './atoms/chat-tool-atoms'
 import { feishuBotStatesAtom } from './atoms/feishu-atoms'
 import { dingtalkBotStatesAtom } from './atoms/dingtalk-atoms'
@@ -630,62 +636,40 @@ function TabStatePersistenceInitializer(): null {
   useEffect(() => {
     Promise.all([
       window.electronAPI.getSettings(),
-      window.electronAPI.listConversations(),
       window.electronAPI.listAgentSessions(),
-    ]).then(([settings, conversations, agentSessions]) => {
+    ]).then(([settings, agentSessions]) => {
       const tabState = settings.tabState
       if (!tabState?.tabs?.length) {
         restoredRef.current = true
         return
       }
 
-      // 产品入口只保留 Agent，旧版 Chat 标签不再恢复到顶部入口。
       const validAgentSessionIds = new Set(agentSessions.map((s) => s.id))
+      const restoredTabState = normalizePersistedTabState(tabState, {
+        validAgentSessionIds,
+        legacyActiveTabId: extractLegacyActiveTabId(tabState),
+      })
 
-      // 过滤 diff 类型 Tab（不持久化），同时过滤掉已被删除的会话
-      const validTabs = tabState.tabs.filter(
-        (t): t is TabItem =>
-          typeof t === 'object' &&
-          t !== null &&
-          'id' in t &&
-          'sessionId' in t &&
-          'type' in t &&
-          'title' in t &&
-          t.type === 'agent' &&
-          validAgentSessionIds.has(t.sessionId),
-      )
-      if (validTabs.length === 0) {
+      if (restoredTabState.tabs.length === 0) {
         restoredRef.current = true
         return
       }
 
-      const validTabIds = new Set(validTabs.map((t) => t.id))
-
-      // 恢复 activeTabId（校验有效性）
-      let restoredActiveTabId: string | null = null
-      if (tabState.activeTabId && validTabIds.has(tabState.activeTabId)) {
-        restoredActiveTabId = tabState.activeTabId
-      } else {
-        // 向后兼容：从旧版 splitLayout 结构中恢复原焦点面板的 activeTabId
-        const legacyId = extractLegacyActiveTabId(tabState)
-        if (legacyId && validTabIds.has(legacyId)) {
-          restoredActiveTabId = legacyId
-        } else {
-          restoredActiveTabId = validTabs[0]?.id ?? null
-        }
-      }
-
-      const activeTab = validTabs.find((t) => t.id === restoredActiveTabId) ?? validTabs[0] ?? null
-      store.set(tabsAtom, activeTab ? [activeTab] : [])
-      store.set(activeTabIdAtom, restoredActiveTabId)
+      const activeTab = restoredTabState.tabs.find((t) => t.id === restoredTabState.activeTabId)
+        ?? restoredTabState.tabs[0]
+        ?? null
+      store.set(tabsAtom, restoredTabState.tabs)
+      store.set(activeTabIdAtom, restoredTabState.activeTabId)
 
       // 同步 appMode 和 currentSessionId
       if (activeTab) {
         store.set(appModeAtom, 'agent')
-        store.set(currentAgentSessionIdAtom, activeTab.sessionId)
+        if (activeTab.type === 'agent') {
+          store.set(currentAgentSessionIdAtom, activeTab.sessionId)
+        }
       }
 
-      console.log(`[TabRestore] 已恢复当前会话入口，历史标签 ${validTabs.length} 个已收敛到左侧列表`)
+      console.log(`[TabRestore] 已恢复标签页 ${restoredTabState.tabs.length} 个，当前激活 ${restoredTabState.activeTabId ?? '无'}`)
     }).catch((err) => console.error('[TabRestore] 恢复标签页失败:', err))
       .finally(() => { restoredRef.current = true })
   }, [store])

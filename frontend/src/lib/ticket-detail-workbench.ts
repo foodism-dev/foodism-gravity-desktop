@@ -33,6 +33,7 @@ export interface WorkbenchActionButton {
 export interface WorkbenchActivityItem {
   title: string;
   description: string;
+  operatorText: string;
   time: string;
 }
 
@@ -45,7 +46,6 @@ export interface TicketWorkbenchModel {
 }
 
 const FLOW_STEPS: Array<{ key: TicketFlowKey; label: string }> = [
-  { key: "info_completion", label: "待完善信息" },
   { key: "access_review", label: "待准入审核" },
   { key: "info_optimization", label: "待信息优化确认" },
   { key: "shelf_confirm", label: "待货架上线确认" },
@@ -95,6 +95,7 @@ export function buildTicketWorkbenchModel(ticket: TicketRecord, records: TicketA
     activityItems: records.slice(0, 4).map((record) => ({
       title: formatActionTitle(record),
       description: record.remark || `${formatActionTitle(record)} 已记录 ${Object.keys(record.current).length} 个字段`,
+      operatorText: formatOperatorText(record.operator),
       time: formatShortDateTime(record.createdAt),
     })),
   };
@@ -112,6 +113,10 @@ export function deriveTicketFlow(ticket: TicketRecord, records: TicketActionReco
 
 export function formatTicketBusinessStatus(status: TicketBusinessStatus): string {
   return BUSINESS_STATUS_LABEL_MAP[status];
+}
+
+export function isProductOperationRatingEditable(flow: TicketFlowKey): boolean {
+  return flow === "access_review" || flow === "info_optimization";
 }
 
 export function buildTicketHeaderBadges(ticket: TicketRecord): TicketHeaderBadge[] {
@@ -175,9 +180,14 @@ function formatActionTitle(record: TicketActionRecord): string {
   if (record.action === "commission_configured") return "佣金设置";
   if (record.action === "product_online_confirmed") return "商品上线";
   if (record.action === "commission_manual_revision") return "佣金人工修改";
+  if (record.action === "product_operation_rating_saved") return "商品运营评级";
   if (record.action === "return_to_manual_revision") return "返回人工修改";
   if (record.action.includes("agent")) return "Agent";
   return record.action;
+}
+
+function formatOperatorText(operator: Record<string, unknown>): string {
+  return readPayloadText(operator, "displayName", "name", "username", "id");
 }
 
 function readPayloadText(payload: Record<string, unknown>, ...fields: string[]): string {

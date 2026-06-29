@@ -1,37 +1,15 @@
-import { Worker, type Job } from "bullmq";
-import { getLinKeSettings, type LinKeSettings } from "./config.ts";
-import {
-  LIN_KE_DRAFT_JOB_NAME,
-  LIN_KE_DRAFT_QUEUE_NAME,
-  type CreateLinKeDraftJobData,
-} from "./draft-queue.ts";
-import {
-  getDefaultLinKeRepository,
-  type LinKeRepository,
-} from "./repository.ts";
+import type { LinKeSettings } from "./config.ts";
+import type { LinKeRepository } from "./repository.ts";
 import { bdCityText } from "./supply-goods.ts";
 import { saveSupplyGoodsDraft } from "./service.ts";
 import { cleanString, conciseError, isRecord, type JsonRecord } from "./utils.ts";
-import { getDefaultTicketRepository, type TicketRepository } from "../tickets.ts";
+import type { TicketRepository } from "../tickets.ts";
 
 export interface LinKeDraftWorkerOptions {
   settings?: LinKeSettings;
   linKeRepository?: LinKeRepository | null;
   ticketRepository?: TicketRepository | null;
   saveDraft?: typeof saveSupplyGoodsDraft;
-}
-
-function readRedisUrl(): string {
-  const redisUrl = Bun.env.REDIS_URL?.trim() || "";
-  if (!redisUrl) {
-    throw new Error("REDIS_URL 未配置，无法启动林客草稿任务 worker");
-  }
-  return redisUrl;
-}
-
-function readWorkerConcurrency(): number {
-  const value = Number.parseInt(Bun.env.LIN_KE_DRAFT_WORKER_CONCURRENCY?.trim() ?? "", 10);
-  return Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 function readPayloadValue(payload: Record<string, unknown>, key: string): unknown {
@@ -120,36 +98,4 @@ export async function processLinKeDraftJob(input: {
     });
     throw error;
   }
-}
-
-export function createLinKeDraftWorker(options: LinKeDraftWorkerOptions = {}) {
-  const settings = options.settings ?? getLinKeSettings();
-  const linKeRepository = options.linKeRepository !== undefined ? options.linKeRepository : getDefaultLinKeRepository();
-  const ticketRepository = options.ticketRepository !== undefined ? options.ticketRepository : getDefaultTicketRepository();
-  const saveDraft = options.saveDraft ?? saveSupplyGoodsDraft;
-
-  if (!linKeRepository) {
-    throw new Error("DATABASE_URL 未配置，Lin-Ke repository 不可用");
-  }
-  if (!ticketRepository) {
-    throw new Error("DATABASE_URL 未配置，ticket repository 不可用");
-  }
-
-  return new Worker<CreateLinKeDraftJobData, JsonRecord, typeof LIN_KE_DRAFT_JOB_NAME>(
-    LIN_KE_DRAFT_QUEUE_NAME,
-    async (job: Job<CreateLinKeDraftJobData, JsonRecord, typeof LIN_KE_DRAFT_JOB_NAME>) => {
-      return await processLinKeDraftJob({
-        supplyGoodsId: job.data.supplyGoodsId,
-        jobId: String(job.id),
-        settings,
-        linKeRepository,
-        ticketRepository,
-        saveDraft,
-      });
-    },
-    {
-      connection: { url: readRedisUrl() },
-      concurrency: readWorkerConcurrency(),
-    },
-  );
 }

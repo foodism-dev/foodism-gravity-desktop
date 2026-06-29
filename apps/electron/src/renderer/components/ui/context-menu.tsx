@@ -3,8 +3,15 @@ import * as ContextMenuPrimitive from "@radix-ui/react-context-menu"
 import { Check, ChevronRight, Circle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useNativeBrowserOverlayTracker } from "@/lib/native-browser-overlay"
 
-const ContextMenu = ContextMenuPrimitive.Root
+const ContextMenu = ({
+  onOpenChange,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Root>) => {
+  const handleOpenChange = useNativeBrowserOverlayTracker(undefined, onOpenChange)
+  return <ContextMenuPrimitive.Root onOpenChange={handleOpenChange} {...props} />
+}
 
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger
 

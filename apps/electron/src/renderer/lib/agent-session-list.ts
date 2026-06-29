@@ -15,3 +15,22 @@ export function replaceAgentSessionInFreshnessOrder(
   const others = sessions.filter((session) => session.id !== updated.id)
   return sortAgentSessionsByUpdatedAtDesc([updated, ...others])
 }
+
+/**
+ * 合并后台刷新回来的会话列表。
+ *
+ * 置顶、重命名这类交互会立即拿到主进程返回的新 session meta；
+ * 但同时可能还有稍早发出的 listAgentSessions() 请求在路上。
+ * 如果旧请求后返回，不能用旧 meta 覆盖本地较新的同 ID 会话状态。
+ */
+export function mergeAgentSessionListsByFreshness(
+  current: readonly AgentSessionMeta[],
+  refreshed: readonly AgentSessionMeta[],
+): AgentSessionMeta[] {
+  const currentById = new Map(current.map((session) => [session.id, session]))
+  return sortAgentSessionsByUpdatedAtDesc(refreshed.map((session) => {
+    const local = currentById.get(session.id)
+    if (local && local.updatedAt > session.updatedAt) return local
+    return session
+  }))
+}

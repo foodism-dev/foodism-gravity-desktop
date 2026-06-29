@@ -1,12 +1,13 @@
 import { Queue } from "bullmq";
+import {
+  GRAVITY_JOBS_QUEUE_NAME,
+  LIN_KE_DRAFT_JOB_NAME,
+  type CreateLinKeDraftJobData,
+} from "../jobs/types.ts";
 import type { JsonRecord } from "./utils.ts";
 
-export const LIN_KE_DRAFT_QUEUE_NAME = "lin-ke-draft";
-export const LIN_KE_DRAFT_JOB_NAME = "create-draft";
-
-export interface CreateLinKeDraftJobData {
-  supplyGoodsId: string;
-}
+export { LIN_KE_DRAFT_JOB_NAME };
+export const LIN_KE_DRAFT_QUEUE_NAME = GRAVITY_JOBS_QUEUE_NAME;
 
 export interface LinKeDraftJobStatus {
   jobId: string;

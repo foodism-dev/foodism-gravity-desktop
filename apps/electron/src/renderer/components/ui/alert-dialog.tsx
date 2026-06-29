@@ -5,8 +5,24 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
+import { useNativeBrowserOverlayTracker } from "@/lib/native-browser-overlay"
 
-const AlertDialog = AlertDialogPrimitive.Root
+const AlertDialog = ({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Root>) => {
+  const handleOpenChange = useNativeBrowserOverlayTracker(open ?? defaultOpen, onOpenChange)
+  return (
+    <AlertDialogPrimitive.Root
+      open={open}
+      defaultOpen={defaultOpen}
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  )
+}
 
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger
 

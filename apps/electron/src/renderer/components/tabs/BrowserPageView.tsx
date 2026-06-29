@@ -8,6 +8,7 @@ import * as React from 'react'
 import { useAtomValue } from 'jotai'
 import { RefreshCw, type LucideIcon } from 'lucide-react'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
+import { useNativeBrowserOverlayOpen } from '@/lib/native-browser-overlay'
 
 export interface BrowserPageViewProps {
   id: string
@@ -32,6 +33,7 @@ export function BrowserPageView({
 }: BrowserPageViewProps): React.ReactElement {
   const contentRef = React.useRef<HTMLDivElement>(null)
   const settingsOpen = useAtomValue(settingsOpenAtom)
+  const nativeBrowserOverlayOpen = useNativeBrowserOverlayOpen()
 
   const getBounds = React.useCallback(() => {
     const rect = contentRef.current?.getBoundingClientRect()
@@ -45,11 +47,11 @@ export function BrowserPageView({
   }, [])
 
   const syncBounds = React.useCallback(() => {
-    if (settingsOpen) return
+    if (settingsOpen || nativeBrowserOverlayOpen) return
     window.electronAPI.browserTabSetBounds({ id, bounds: getBounds() }).catch((error) => {
       console.error('[业务浏览器] 同步页面位置失败:', error)
     })
-  }, [getBounds, id, settingsOpen])
+  }, [getBounds, id, nativeBrowserOverlayOpen, settingsOpen])
 
   React.useEffect(() => {
     let disposed = false
@@ -86,9 +88,9 @@ export function BrowserPageView({
   }, [id, onHostMessage])
 
   React.useEffect(() => {
-    if (settingsOpen) {
+    if (settingsOpen || nativeBrowserOverlayOpen) {
       window.electronAPI.browserTabHide({ id }).catch((error) => {
-        console.error('[业务浏览器] 设置打开时隐藏页面失败:', error)
+        console.error('[业务浏览器] 浮层打开时隐藏页面失败:', error)
       })
       return
     }
@@ -97,9 +99,9 @@ export function BrowserPageView({
       console.error('[业务浏览器] 恢复页面位置失败:', error)
     })
     window.electronAPI.browserTabShow({ id }).catch((error) => {
-      console.error('[业务浏览器] 设置关闭后显示页面失败:', error)
+      console.error('[业务浏览器] 浮层关闭后显示页面失败:', error)
     })
-  }, [getBounds, id, settingsOpen])
+  }, [getBounds, id, nativeBrowserOverlayOpen, settingsOpen])
 
   const handleReload = React.useCallback(() => {
     window.electronAPI.browserTabReload({ id }).catch((error) => {

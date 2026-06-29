@@ -60,6 +60,13 @@ export interface PersistedTabState {
   activeTabId: string | null
 }
 
+export interface NormalizePersistedTabStateOptions {
+  /** 仍然存在的 Agent 会话 ID；传入时会过滤已删除会话。 */
+  validAgentSessionIds?: ReadonlySet<string>
+  /** 旧版分屏结构里的焦点标签，作为 activeTabId 失效时的兜底。 */
+  legacyActiveTabId?: string | null
+}
+
 /** 会话上次停留的视图：会话对话 vs 文件预览 */
 export type SessionView = 'session' | 'preview'
 
@@ -231,6 +238,73 @@ function placePreviewAfterOwner(sessionTabs: TabItem[], ownerTab: TabItem, previ
 
 function getPersistentTabs(tabs: TabItem[]): TabItem[] {
   return tabs.filter((tab) => tab.id !== SCRATCH_PAD_ID && tab.id !== TUTORIAL_TAB_ID && !isPreviewTab(tab))
+}
+
+function isTabType(value: unknown): value is TabType {
+  return value === 'chat'
+    || value === 'agent'
+    || value === 'scratch'
+    || value === 'preview'
+    || value === 'tutorial'
+    || value === 'work-orders'
+    || value === 'web'
+}
+
+function isTabItem(value: unknown): value is TabItem {
+  if (!value || typeof value !== 'object') return false
+  const item = value as Partial<TabItem>
+  return typeof item.id === 'string'
+    && isTabType(item.type)
+    && typeof item.sessionId === 'string'
+    && typeof item.title === 'string'
+}
+
+function isRestorableTab(
+  tab: TabItem,
+  options: NormalizePersistedTabStateOptions,
+): boolean {
+  if (tab.type === 'agent') {
+    return options.validAgentSessionIds?.has(tab.sessionId) ?? true
+  }
+
+  if (tab.type === 'work-orders') {
+    return tab.id === WORK_ORDERS_TAB_ID && tab.sessionId === WORK_ORDERS_TAB_ID
+  }
+
+  if (tab.type === 'web') {
+    return tab.id === createWebTabId(tab.sessionId)
+  }
+
+  return false
+}
+
+export function normalizePersistedTabState(
+  tabState: unknown,
+  options: NormalizePersistedTabStateOptions = {},
+): PersistedTabState {
+  if (!tabState || typeof tabState !== 'object') {
+    return { tabs: [], activeTabId: null }
+  }
+
+  const state = tabState as Partial<PersistedTabState>
+  const tabs = Array.isArray(state.tabs)
+    ? state.tabs.filter(isTabItem).filter((tab) => isRestorableTab(tab, options))
+    : []
+
+  if (tabs.length === 0) {
+    return { tabs, activeTabId: null }
+  }
+
+  const validTabIds = new Set(tabs.map((tab) => tab.id))
+  const activeCandidates = [
+    typeof state.activeTabId === 'string' ? state.activeTabId : null,
+    options.legacyActiveTabId ?? null,
+  ]
+  const activeTabId = activeCandidates.find((id) => id !== null && validTabIds.has(id))
+    ?? tabs[0]?.id
+    ?? null
+
+  return { tabs, activeTabId }
 }
 
 export function getPersistableTabState(

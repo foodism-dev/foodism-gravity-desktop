@@ -62,8 +62,12 @@ describe("工单状态", () => {
     expect(isApprovalStatePassed("审批中")).toBe(false);
     expect(matchTicketBusinessStatusByApprovalState("通过", TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING))
       .toBe(TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING);
-    expect(matchTicketBusinessStatusByApprovalState("审批中", TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING))
-      .toBe(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING);
+    expect(matchTicketBusinessStatusByApprovalState("审批中", TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING))
+      .toBe(TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING);
+    expect(matchTicketBusinessStatusByApprovalState("审核中", TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING))
+      .toBe(TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING);
+    expect(matchTicketBusinessStatusByApprovalState("2", TICKET_BUSINESS_STATUS.INFO_COMPLETION_PENDING))
+      .toBe(TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING);
   });
 
   test("Given Rebuild product is rejected, When matching business status, Then ticket returns to completion", () => {
@@ -121,6 +125,16 @@ describe("工单状态", () => {
     })).toEqual({
       status: TICKET_STATUS.DONE,
       businessStatus: TICKET_BUSINESS_STATUS.ONLINE,
+    });
+  });
+
+  test("Given product operation rating is saved, When deriving next state, Then workflow status does not move forward", () => {
+    expect(getNextTicketFlowStateByAction("product_operation_rating_saved", {
+      status: TICKET_STATUS.TODO,
+      businessStatus: TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING,
+    })).toEqual({
+      status: TICKET_STATUS.TODO,
+      businessStatus: TICKET_BUSINESS_STATUS.ACCESS_REVIEW_PENDING,
     });
   });
 });

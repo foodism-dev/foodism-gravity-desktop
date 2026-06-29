@@ -60,6 +60,7 @@ import { inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
+import { mergeAgentSessionListsByFreshness } from '@/lib/agent-session-list'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -387,7 +388,7 @@ export function useGlobalAgentListeners(): void {
         // 只更新驱动左侧边栏列表与状态指示条所需的状态，让用户自行决定是否切过去。
         // 若该会话恰好是用户当前正在查看的会话，这里不动 Tab/激活，流式内容会通过
         // agentStreamingStatesAtom 自然刷新，用户视角无任何跳动。
-        store.set(agentSessionsAtom, sessions)
+        store.set(agentSessionsAtom, (prev) => mergeAgentSessionListsByFreshness(prev, sessions))
         const activationModelId = activation.modelId
         if (activationModelId) {
           store.set(agentSessionModelMapAtom, (prev) => {
@@ -591,7 +592,9 @@ export function useGlobalAgentListeners(): void {
         const knownSessions = store.get(agentSessionsAtom)
         if (!knownSessions.some((s) => s.id === sessionId)) {
           window.electronAPI.listAgentSessions()
-            .then((sessions) => store.set(agentSessionsAtom, sessions))
+            .then((sessions) => {
+              store.set(agentSessionsAtom, (prev) => mergeAgentSessionListsByFreshness(prev, sessions))
+            })
             .catch(console.error)
         }
 
@@ -1052,7 +1055,7 @@ export function useGlobalAgentListeners(): void {
           window.electronAPI
             .listAgentSessions()
             .then((sessions) => {
-              store.set(agentSessionsAtom, sessions)
+              store.set(agentSessionsAtom, (prev) => mergeAgentSessionListsByFreshness(prev, sessions))
               // 从持久化 meta 对齐 stoppedByUser 状态
               store.set(stoppedByUserSessionsAtom, new Set<string>(
                 sessions.filter((s) => s.stoppedByUser).map((s) => s.id)
@@ -1110,7 +1113,7 @@ export function useGlobalAgentListeners(): void {
       window.electronAPI
         .listAgentSessions()
         .then((sessions) => {
-          store.set(agentSessionsAtom, sessions)
+          store.set(agentSessionsAtom, (prev) => mergeAgentSessionListsByFreshness(prev, sessions))
         })
         .catch(console.error)
     })

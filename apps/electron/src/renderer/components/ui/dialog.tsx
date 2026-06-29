@@ -5,8 +5,24 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useNativeBrowserOverlayTracker } from "@/lib/native-browser-overlay"
 
-const Dialog = DialogPrimitive.Root
+const Dialog = ({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>) => {
+  const handleOpenChange = useNativeBrowserOverlayTracker(open ?? defaultOpen, onOpenChange)
+  return (
+    <DialogPrimitive.Root
+      open={open}
+      defaultOpen={defaultOpen}
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  )
+}
 
 const DialogTrigger = DialogPrimitive.Trigger
 

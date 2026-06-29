@@ -34,11 +34,20 @@ interface ManagedBrowserTabView {
   url: string
   ownerWindow: BrowserWindow
   view: WebContentsView
+  visible: boolean
 }
 
 const managedViews = new Map<string, ManagedBrowserTabView>()
 const webContentsToTabId = new Map<number, string>()
 let ipcRegistered = false
+
+export type BrowserTabCommand =
+  | 'reload'
+  | 'force-reload'
+  | 'toggle-devtools'
+  | 'reset-zoom'
+  | 'zoom-in'
+  | 'zoom-out'
 
 function isValidBrowserTabUrl(value: string): boolean {
   try {
@@ -101,7 +110,7 @@ function createManagedView(id: string, url: string, ownerWindow: BrowserWindow):
       nodeIntegration: false,
     },
   })
-  const managed: ManagedBrowserTabView = { id, url, ownerWindow, view }
+  const managed: ManagedBrowserTabView = { id, url, ownerWindow, view, visible: false }
   managedViews.set(id, managed)
   webContentsToTabId.set(view.webContents.id, id)
   ownerWindow.contentView.addChildView(view)
@@ -129,6 +138,73 @@ function createManagedView(id: string, url: string, ownerWindow: BrowserWindow):
 
   void view.webContents.loadURL(url)
   return managed
+}
+
+function shouldShowBrowserTab(bounds: BrowserTabBounds): boolean {
+  return bounds.width > 0 && bounds.height > 0
+}
+
+function showManagedView(managed: ManagedBrowserTabView, bounds?: BrowserTabBounds): void {
+  if (managed.ownerWindow.isDestroyed()) return
+  managed.ownerWindow.contentView.addChildView(managed.view)
+  if (bounds) {
+    managed.view.setBounds(bounds)
+  }
+  managed.visible = true
+  managed.view.setVisible(true)
+  managed.view.webContents.focus()
+}
+
+function hideManagedView(managed: ManagedBrowserTabView): void {
+  managed.visible = false
+  managed.view.setVisible(false)
+}
+
+function getVisibleBrowserTabForWindow(ownerWindow: BrowserWindow | null | undefined): ManagedBrowserTabView | null {
+  if (!ownerWindow || ownerWindow.isDestroyed()) return null
+
+  for (const managed of managedViews.values()) {
+    if (managed.ownerWindow === ownerWindow && managed.visible && !managed.view.webContents.isDestroyed()) {
+      return managed
+    }
+  }
+
+  return null
+}
+
+function setWebContentsZoom(managed: ManagedBrowserTabView, delta: number): void {
+  const currentZoomLevel = managed.view.webContents.getZoomLevel()
+  const nextZoomLevel = Math.max(-8, Math.min(currentZoomLevel + delta, 9))
+  managed.view.webContents.setZoomLevel(nextZoomLevel)
+}
+
+export function dispatchBrowserTabCommandForWindow(
+  ownerWindow: BrowserWindow | null | undefined,
+  command: BrowserTabCommand,
+): boolean {
+  const managed = getVisibleBrowserTabForWindow(ownerWindow)
+  if (!managed) return false
+
+  if (command === 'reload') {
+    managed.view.webContents.reload()
+  } else if (command === 'force-reload') {
+    managed.view.webContents.reloadIgnoringCache()
+  } else if (command === 'toggle-devtools') {
+    if (managed.view.webContents.isDevToolsOpened()) {
+      managed.view.webContents.closeDevTools()
+    } else {
+      managed.view.webContents.openDevTools({ mode: 'detach' })
+    }
+  } else if (command === 'reset-zoom') {
+    managed.view.webContents.setZoomLevel(0)
+  } else if (command === 'zoom-in') {
+    setWebContentsZoom(managed, 0.5)
+  } else {
+    setWebContentsZoom(managed, -0.5)
+  }
+
+  managed.view.webContents.focus()
+  return true
 }
 
 function getOwnerWindow(event: IpcMainInvokeEvent): BrowserWindow | null {
@@ -170,9 +246,12 @@ async function ensureBrowserTabView(event: IpcMainInvokeEvent, input: unknown): 
     managed.url = input.url
     void managed.view.webContents.loadURL(input.url)
   }
-  ownerWindow.contentView.addChildView(managed.view)
-  managed.view.setBounds(bounds)
-  managed.view.setVisible(bounds.width > 0 && bounds.height > 0)
+  if (shouldShowBrowserTab(bounds)) {
+    showManagedView(managed, bounds)
+  } else {
+    managed.view.setBounds(bounds)
+    hideManagedView(managed)
+  }
 }
 
 function setBrowserTabBounds(input: unknown): void {
@@ -181,16 +260,22 @@ function setBrowserTabBounds(input: unknown): void {
   if (!managed) return
   const bounds = normalizeBounds(input.bounds)
   managed.view.setBounds(bounds)
-  managed.view.setVisible(bounds.width > 0 && bounds.height > 0)
+  if (shouldShowBrowserTab(bounds)) {
+    managed.visible = true
+    managed.view.setVisible(true)
+  } else {
+    hideManagedView(managed)
+  }
 }
 
 function setBrowserTabVisible(input: unknown, visible: boolean): void {
   if (!isIdInput(input)) return
   const managed = managedViews.get(input.id.trim())
   if (!managed) return
-  managed.view.setVisible(visible)
-  if (visible && !managed.ownerWindow.isDestroyed()) {
-    managed.ownerWindow.contentView.addChildView(managed.view)
+  if (visible) {
+    showManagedView(managed)
+  } else {
+    hideManagedView(managed)
   }
 }
 

@@ -1,6 +1,25 @@
-import { Menu, shell, BrowserWindow } from 'electron'
+import { Menu, shell, BrowserWindow, type BaseWindow } from 'electron'
+import { dispatchBrowserTabCommandForWindow, type BrowserTabCommand } from './lib/browser-tab-view-manager'
 
 const APP_DISPLAY_NAME = 'foodism-gravity'
+
+function toBrowserWindow(win: BaseWindow | undefined): BrowserWindow | null {
+  if (!win || win.isDestroyed()) return null
+  if (win instanceof BrowserWindow) return win
+  const focusedWindow = BrowserWindow.getFocusedWindow()
+  return focusedWindow && !focusedWindow.isDestroyed() ? focusedWindow : null
+}
+
+function runBrowserTabCommandOrFallback(
+  win: BaseWindow | undefined,
+  command: BrowserTabCommand,
+  fallback: (target: BrowserWindow) => void,
+): void {
+  const browserWindow = toBrowserWindow(win)
+  if (!browserWindow) return
+  if (dispatchBrowserTabCommandForWindow(browserWindow, command)) return
+  fallback(browserWindow)
+}
 
 export function createApplicationMenu(): Menu {
   const isMac = process.platform === 'darwin'
@@ -77,13 +96,51 @@ export function createApplicationMenu(): Menu {
     {
       label: '视图',
       submenu: [
-        { role: 'reload' as const, label: '重新加载' },
-        { role: 'forceReload' as const, label: '强制重新加载' },
-        { role: 'toggleDevTools' as const, label: '切换开发者工具' },
+        {
+          label: '重新加载',
+          accelerator: 'CmdOrCtrl+R',
+          click: (_, win) => runBrowserTabCommandOrFallback(win, 'reload', (target) => {
+            target.webContents.reload()
+          }),
+        },
+        {
+          label: '强制重新加载',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: (_, win) => runBrowserTabCommandOrFallback(win, 'force-reload', (target) => {
+            target.webContents.reloadIgnoringCache()
+          }),
+        },
+        {
+          label: '切换开发者工具',
+          accelerator: isMac ? 'Alt+Command+I' : 'Ctrl+Shift+I',
+          click: (_, win) => runBrowserTabCommandOrFallback(win, 'toggle-devtools', (target) => {
+            target.webContents.toggleDevTools()
+          }),
+        },
         { type: 'separator' as const },
-        { role: 'resetZoom' as const, label: '重置缩放' },
-        { role: 'zoomIn' as const, label: '放大' },
-        { role: 'zoomOut' as const, label: '缩小' },
+        {
+          label: '重置缩放',
+          accelerator: 'CmdOrCtrl+0',
+          click: (_, win) => runBrowserTabCommandOrFallback(win, 'reset-zoom', (target) => {
+            target.webContents.setZoomLevel(0)
+          }),
+        },
+        {
+          label: '放大',
+          accelerator: 'CmdOrCtrl+Plus',
+          click: (_, win) => runBrowserTabCommandOrFallback(win, 'zoom-in', (target) => {
+            const currentZoomLevel = target.webContents.getZoomLevel()
+            target.webContents.setZoomLevel(Math.min(currentZoomLevel + 0.5, 9))
+          }),
+        },
+        {
+          label: '缩小',
+          accelerator: 'CmdOrCtrl+-',
+          click: (_, win) => runBrowserTabCommandOrFallback(win, 'zoom-out', (target) => {
+            const currentZoomLevel = target.webContents.getZoomLevel()
+            target.webContents.setZoomLevel(Math.max(currentZoomLevel - 0.5, -8))
+          }),
+        },
         { type: 'separator' as const },
         { role: 'togglefullscreen' as const, label: '切换全屏' },
       ],

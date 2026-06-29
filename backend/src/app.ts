@@ -519,10 +519,6 @@ export function createServerApp(options: ServerAppOptions = {}) {
   });
   const listSupplyGoodsFields = createCachedRebuildFieldLoader(rebuildFieldMetadataRepository, "SupplyGoods");
   const listSupplyCompanyFields = createCachedRebuildFieldLoader(rebuildFieldMetadataRepository, "SupplyCompany");
-  const ensureSupplyCompanyFields = createCachedSupplyCompanyFieldSyncer({
-    metadataClient: rebuildMetadataClient,
-    repository: rebuildFieldMetadataRepository,
-  });
   const rebuildAssetUploader = options.rebuildAssetUploader ?? getDefaultRebuildAssetUploader();
   const ticketRepository = options.ticketRepository ?? getDefaultTicketRepository();
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -747,11 +743,6 @@ export function createServerApp(options: ServerAppOptions = {}) {
         repository: supplyGoodsRecordRepository,
         assetUploader: rebuildAssetUploader,
         listFields: listSupplyGoodsFields,
-        listSupplyCompanyFields,
-        onSupplyCompanyDiscovered: async () => {
-          await ensureSupplyCompanyFields();
-          listSupplyCompanyFields.clearCache();
-        },
       });
       console.log(`[REBUILD] SupplyGoods 已同步: ${result.supplyGoodsId}`);
       return context.json({
@@ -922,7 +913,6 @@ export function createServerApp(options: ServerAppOptions = {}) {
         repository: rebuildFieldMetadataRepository!,
       }),
       afterSuccess: () => {
-        ensureSupplyCompanyFields.clearCache();
         listSupplyCompanyFields.clearCache();
       },
     });
@@ -1174,7 +1164,6 @@ interface CachedRebuildFieldLoader {
 }
 
 const SUPPLY_GOODS_FIELD_CACHE_TTL_MS = 5 * 60 * 1000;
-const SUPPLY_COMPANY_FIELD_SYNC_CACHE_TTL_MS = 5 * 60 * 1000;
 
 function createCachedRebuildFieldLoader(
   repository: RebuildFieldMetadataRepository | null,
@@ -1199,39 +1188,6 @@ function createCachedRebuildFieldLoader(
     cache = null;
   };
   return loader;
-}
-
-interface CachedSupplyCompanyFieldSyncer {
-  (): Promise<void>;
-  clearCache: () => void;
-}
-
-function createCachedSupplyCompanyFieldSyncer(input: {
-  metadataClient: RebuildMetadataClient;
-  repository: RebuildFieldMetadataRepository | null;
-}): CachedSupplyCompanyFieldSyncer {
-  let expiresAt = 0;
-
-  const syncer = async () => {
-    if (!input.repository) return;
-    const now = Date.now();
-    if (expiresAt > now) return;
-
-    try {
-      await syncSupplyCompanyFieldMetadata({
-        metadataClient: input.metadataClient,
-        repository: input.repository,
-      });
-      expiresAt = now + SUPPLY_COMPANY_FIELD_SYNC_CACHE_TTL_MS;
-    } catch (error) {
-      console.warn(`[REBUILD] SupplyCompany 字段元数据自动同步跳过: ${getErrorMessage(error)}`);
-    }
-  };
-
-  syncer.clearCache = () => {
-    expiresAt = 0;
-  };
-  return syncer;
 }
 
 async function buildTicketFieldOptionsMap(
