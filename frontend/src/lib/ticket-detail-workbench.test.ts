@@ -59,7 +59,7 @@ describe("工单详情工作台模型", () => {
       "待准入审核",
       "待信息优化确认",
       "待货架上线确认",
-      "待佣金设置",
+      "待费用设置",
       "待商品上线",
       "商品上线",
     ]);
@@ -196,6 +196,86 @@ describe("工单详情工作台模型", () => {
     ]);
 
     expect(model.activityItems[0]?.operatorText).toBe("李四");
+  });
+
+  test("Given commission setup flow, When fee setup state changes, Then action buttons follow Lin-Ke sync state", () => {
+    expect(buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "commission_setup_pending",
+        payload: { linkeGoodsId: "linke-goods-1" },
+      },
+      records,
+    ).actionButtons.map((button) => button.label)).toEqual(["确认同步"]);
+
+    expect(buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "commission_setup_pending",
+        payload: {
+          linkeGoodsId: "linke-goods-1",
+          linkeFeeSetupState: "queued",
+        },
+      },
+      records,
+    ).actionButtons.map((button) => button.label)).toEqual(["同步中"]);
+
+    expect(buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "commission_setup_pending",
+        payload: {
+          linkeGoodsId: "linke-goods-1",
+          linkeFeeSetupState: "completed",
+          linkeFeeSettingUrl: "https://www.life-partner.cn/vmok/op-merchant-list/workbench",
+        },
+      },
+      records,
+    ).actionButtons.map((button) => button.label)).toEqual(["确认同步"]);
+
+    expect(buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "commission_setup_pending",
+        payload: {
+          linkeGoodsId: "linke-goods-1",
+          linkeFeeSetupState: "completed",
+          linkeFeeSettingUrl: "https://www.life-partner.cn/vmok/op-merchant-list/workbench",
+        },
+      },
+      records,
+      { isLinKeFeeSetupCurrent: true },
+    ).actionButtons.map((button) => button.label)).toEqual(["确认核对无误"]);
+  });
+
+  test("Given product online pending flow, When tracking is active or failed, Then sidebar shows tracking actions", () => {
+    const trackingModel = buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "product_online_pending",
+        payload: { linkeProductTrackingState: "waiting" },
+      },
+      records,
+    );
+    expect(trackingModel.operationSectionTitle).toBe("自动追踪");
+    expect(trackingModel.actionButtons.map((button) => button.label)).toEqual(["自动追踪中"]);
+
+    expect(buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "product_online_pending",
+        payload: { linkeProductTrackingState: "failed" },
+      },
+      records,
+    ).actionButtons.map((button) => button.label)).toEqual(["重试追踪", "人工确认上线"]);
+
+    expect(buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "commission_setup_pending",
+      },
+      records,
+    ).operationSectionTitle).toBe("人工操作");
   });
 
   test("Given rejected ticket needs completion, When building workbench model, Then it shows returned status and Rebuild action", () => {

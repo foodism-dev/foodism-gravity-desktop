@@ -41,15 +41,20 @@ export interface TicketWorkbenchModel {
   metaItems: WorkbenchMetaItem[];
   progressSteps: WorkbenchProgressStep[];
   currentFlow: TicketFlowKey;
+  operationSectionTitle: "人工操作" | "自动追踪";
   actionButtons: WorkbenchActionButton[];
   activityItems: WorkbenchActivityItem[];
+}
+
+export interface TicketWorkbenchModelOptions {
+  isLinKeFeeSetupCurrent?: boolean;
 }
 
 const FLOW_STEPS: Array<{ key: TicketFlowKey; label: string }> = [
   { key: "access_review", label: "待准入审核" },
   { key: "info_optimization", label: "待信息优化确认" },
   { key: "shelf_confirm", label: "待货架上线确认" },
-  { key: "commission_setup", label: "待佣金设置" },
+  { key: "commission_setup", label: "待费用设置" },
   { key: "product_online_pending", label: "待商品上线" },
   { key: "product_online", label: "商品上线" },
 ];
@@ -69,12 +74,16 @@ const BUSINESS_STATUS_LABEL_MAP: Record<TicketBusinessStatus, string> = {
   access_review_pending: "待准入审核",
   info_optimization_pending: "待信息优化确认",
   shelf_confirm_pending: "待货架上线确认",
-  commission_setup_pending: "待佣金设置",
+  commission_setup_pending: "待费用设置",
   product_online_pending: "待商品上线",
   online: "商品上线",
 };
 
-export function buildTicketWorkbenchModel(ticket: TicketRecord, records: TicketActionRecord[]): TicketWorkbenchModel {
+export function buildTicketWorkbenchModel(
+  ticket: TicketRecord,
+  records: TicketActionRecord[],
+  options: TicketWorkbenchModelOptions = {},
+): TicketWorkbenchModel {
   const currentPayload = buildCurrentPayload(ticket);
   const currentFlow = deriveTicketFlow(ticket, records);
   const currentStepIndex = FLOW_STEPS.findIndex((step) => step.key === currentFlow);
@@ -91,7 +100,8 @@ export function buildTicketWorkbenchModel(ticket: TicketRecord, records: TicketA
       state: index < currentStepIndex ? "done" : index === currentStepIndex ? "active" : "pending",
     })),
     currentFlow,
-    actionButtons: buildActionButtons(currentFlow, records),
+    operationSectionTitle: currentFlow === "product_online_pending" ? "自动追踪" : "人工操作",
+    actionButtons: buildActionButtons(currentFlow, records, currentPayload, options),
     activityItems: records.slice(0, 4).map((record) => ({
       title: formatActionTitle(record),
       description: record.remark || `${formatActionTitle(record)} 已记录 ${Object.keys(record.current).length} 个字段`,
@@ -126,7 +136,12 @@ export function buildTicketHeaderBadges(ticket: TicketRecord): TicketHeaderBadge
   ];
 }
 
-function buildActionButtons(flow: TicketFlowKey, records: TicketActionRecord[]): WorkbenchActionButton[] {
+function buildActionButtons(
+  flow: TicketFlowKey,
+  records: TicketActionRecord[],
+  payload: Record<string, unknown>,
+  options: TicketWorkbenchModelOptions,
+): WorkbenchActionButton[] {
   if (flow === "info_completion" || flow === "access_review") {
     return [{ label: "跳转 Rebuild 审核", tone: "primary" }];
   }
@@ -142,13 +157,24 @@ function buildActionButtons(flow: TicketFlowKey, records: TicketActionRecord[]):
     return [{ label: "确认已上架", tone: "primary" }];
   }
   if (flow === "commission_setup") {
-    return [
-      { label: "同步佣金设置", tone: "primary" },
-      { label: "手动修改", tone: "secondary" },
-    ];
+    const feeSetupState = readPayloadText(payload, "linkeFeeSetupState");
+    const feeSettingUrl = readPayloadText(payload, "linkeFeeSettingUrl");
+    if (feeSetupState === "queued") {
+      return [{ label: "同步中", tone: "ghost" }];
+    }
+    if (feeSetupState === "completed" && feeSettingUrl && options.isLinKeFeeSetupCurrent) {
+      return [{ label: "确认核对无误", tone: "primary" }];
+    }
+    return [{ label: "确认同步", tone: "primary" }];
   }
   if (flow === "product_online_pending") {
-    return [{ label: "确认商品上线", tone: "primary" }];
+    if (readPayloadText(payload, "linkeProductTrackingState") === "failed") {
+      return [
+        { label: "重试追踪", tone: "primary" },
+        { label: "人工确认上线", tone: "secondary" },
+      ];
+    }
+    return [{ label: "自动追踪中", tone: "ghost" }];
   }
   return [{ label: "查看上线任务", tone: "ghost" }];
 }
@@ -177,7 +203,13 @@ function formatActionTitle(record: TicketActionRecord): string {
   if (record.action === "info_optimized") return "信息优化";
   if (record.action === "lin_ke_draft_failed") return "林客草稿失败";
   if (record.action === "shelf_online_confirmed") return "货架上线确认";
-  if (record.action === "commission_configured") return "佣金设置";
+  if (record.action === "lin_ke_fee_setup_started") return "费用设置同步";
+  if (record.action === "lin_ke_fee_setup_completed") return "费用设置完成";
+  if (record.action === "lin_ke_fee_setup_failed") return "费用设置失败";
+  if (record.action === "commission_configured") return "费用同步确认";
+  if (record.action === "lin_ke_product_tracking_started") return "商品状态追踪";
+  if (record.action === "lin_ke_product_tracking_checked") return "商品状态追踪";
+  if (record.action === "lin_ke_product_tracking_failed") return "商品状态追踪失败";
   if (record.action === "product_online_confirmed") return "商品上线";
   if (record.action === "commission_manual_revision") return "佣金人工修改";
   if (record.action === "product_operation_rating_saved") return "商品运营评级";

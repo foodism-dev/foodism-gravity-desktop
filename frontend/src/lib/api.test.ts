@@ -1,15 +1,19 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  confirmLinKeFeeSetup,
   confirmTicketInfoOptimization,
   createTicketActionRecord,
   generateTicketInfoOptimization,
+  getLinKeFeeSetupJobStatus,
   getLinKeDraftJobStatus,
   getTicket,
   getTicketActionRecords,
   getTicketMetadata,
   listAllTickets,
   listTickets,
+  retryLinKeProductTracking,
+  startLinKeFeeSetupJob,
 } from "./api.ts";
 import { storeSession } from "./auth.ts";
 
@@ -254,6 +258,110 @@ describe("前端 API", () => {
 
     expect(result.state).toBe("completed");
     expect(result.returnValue?.draftUrl).toBe("https://www.life-partner.cn/draft");
+  });
+
+  test("Given fee setup input, When starting Lin-Ke fee setup, Then it posts stable fee rate keys", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      ticket: {
+        id: 1,
+        supply_goods_id: "944-detail",
+        status: "processing",
+        business_status: "commission_setup_pending",
+        payload: { linkeFeeSetupState: "queued" },
+        source_payload: {},
+        created_at: "2026-06-24T10:00:00.000Z",
+        updated_at: "2026-06-24T11:00:00.000Z",
+      },
+      record: {
+        id: 4,
+        ticket_id: 1,
+        action: "lin_ke_fee_setup_started",
+        origin: {},
+        current: { linkeFeeSetupState: "queued" },
+        operator: {},
+        remark: null,
+        created_at: "2026-06-24T11:00:00.000Z",
+      },
+      jobId: "fee-job-1",
+    }));
+
+    const result = await startLinKeFeeSetupJob("944-detail", {
+      merchantId: "merchant-from-package",
+      linkeGoodsId: "linke-goods-1",
+      rates: {
+        onlineOperation: 4,
+        professionalAccount: 4,
+        growthBooster: 4,
+        acquisitionCard: 4,
+        offlineQrScan: 4,
+      },
+    });
+
+    expect(result.jobId).toBe("fee-job-1");
+    expect(calls[0]?.url).toBe("http://localhost:8787/api/tickets/944-detail/lin-ke-fee-setup/jobs");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({
+      merchantId: "merchant-from-package",
+      linkeGoodsId: "linke-goods-1",
+      rates: {
+        onlineOperation: 4,
+        professionalAccount: 4,
+        growthBooster: 4,
+        acquisitionCard: 4,
+        offlineQrScan: 4,
+      },
+    }));
+  });
+
+  test("Given fee setup job response, When reading job status, Then it returns BullMQ state", async () => {
+    installSessionStorage();
+    installFetchMock(() => ({
+      jobId: "fee-job-1",
+      state: "completed",
+      failedReason: "",
+      returnValue: { feeSettingUrl: "https://www.life-partner.cn/vmok/op-merchant-list/workbench" },
+    }));
+
+    const result = await getLinKeFeeSetupJobStatus("944-detail", "fee-job-1");
+
+    expect(result.state).toBe("completed");
+    expect(result.returnValue?.feeSettingUrl).toBe("https://www.life-partner.cn/vmok/op-merchant-list/workbench");
+  });
+
+  test("Given fee setup has been checked, When confirming sync or retrying tracking, Then it calls product tracking APIs", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      ticket: {
+        id: 1,
+        supply_goods_id: "944-detail",
+        status: "processing",
+        business_status: "product_online_pending",
+        payload: { linkeProductTrackingState: "queued" },
+        source_payload: {},
+        created_at: "2026-06-24T10:00:00.000Z",
+        updated_at: "2026-06-24T11:00:00.000Z",
+      },
+      record: {
+        id: 5,
+        ticket_id: 1,
+        action: "commission_configured",
+        origin: {},
+        current: { linkeProductTrackingState: "queued" },
+        operator: {},
+        remark: null,
+        created_at: "2026-06-24T11:00:00.000Z",
+      },
+      jobId: "tracking-job-1",
+    }));
+
+    await confirmLinKeFeeSetup("944-detail");
+    await retryLinKeProductTracking("944-detail");
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://localhost:8787/api/tickets/944-detail/lin-ke-fee-setup/confirm",
+      "http://localhost:8787/api/tickets/944-detail/lin-ke-product-tracking/retry",
+    ]);
+    expect(calls.map((call) => call.init?.method)).toEqual(["POST", "POST"]);
   });
 
   test("Given ticket status filter, When listing tickets, Then it sends status query instead of business status", async () => {

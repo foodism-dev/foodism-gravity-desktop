@@ -38,11 +38,16 @@ import {
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import {
   createTicketActionRecord,
+  confirmLinKeFeeSetup,
   confirmTicketInfoOptimization,
+  getLinKeFeeSetupJobStatus,
   getLinKeDraftJobStatus,
   getTicket,
   getTicketActionRecords,
   retryLinKeDraftJob,
+  retryLinKeProductTracking,
+  startLinKeFeeSetupJob,
+  type LinKeFeeRates,
   type TicketActionRecord,
   type TicketMetadata,
   type TicketRecord,
@@ -106,6 +111,7 @@ interface DetailSection {
 }
 
 interface CommissionRateField {
+  key: keyof LinKeFeeRates;
   label: string;
   max: number;
 }
@@ -113,12 +119,14 @@ interface CommissionRateField {
 type CommissionRateValues = Record<string, string>;
 
 const COMMISSION_RATE_FIELDS: CommissionRateField[] = [
-  { label: "线上经营", max: 80 },
-  { label: "职人账号", max: 20 },
-  { label: "增量宝", max: 80 },
-  { label: "获客卡", max: 80 },
-  { label: "线下扫码", max: 80 },
+  { key: "onlineOperation", label: "线上经营", max: 80 },
+  { key: "professionalAccount", label: "职人账号", max: 20 },
+  { key: "growthBooster", label: "增量宝", max: 80 },
+  { key: "acquisitionCard", label: "获客卡", max: 80 },
+  { key: "offlineQrScan", label: "线下扫码", max: 80 },
 ];
+
+const LIN_KE_FEE_SETUP_SAVE_VERSION = "product_commission_save_v1";
 
 const BASIC_SECTIONS: DetailSection[] = [
   {
@@ -329,7 +337,6 @@ function LoadedTicketDetail({
   );
   const title = displayPayloadText(currentPayload, metadata, "goodsName", "goodsNameInput") || "未命名商品";
   const merchant = displayPayloadText(currentPayload, metadata, "hostNameInput", "rbhost.hostName", "rbhost") || "未提供商户";
-  const workbenchModel = useMemo(() => buildTicketWorkbenchModel(ticket, records), [ticket, records]);
   const headerBadges = useMemo(() => buildTicketHeaderBadges(ticket), [ticket]);
   const productOperationRating = useMemo(
     () => readProductOperationRating(readRecordValue(ticket.payload, PRODUCT_OPERATION_RATING_PAYLOAD_KEY)),
@@ -348,9 +355,20 @@ function LoadedTicketDetail({
   const [isDraftJobPolling, setIsDraftJobPolling] = useState(false);
   const [linkeGoodsId, setLinkeGoodsId] = useState("");
   const [linkeCommission, setLinkeCommission] = useState<CommissionRateValues>(() => buildInitialLinkeCommission(ticket.payload));
+  const [feeSetupJobId, setFeeSetupJobId] = useState("");
+  const [isFeeSetupJobPolling, setIsFeeSetupJobPolling] = useState(false);
   const [isActionSubmitting, setIsActionSubmitting] = useState(false);
   const [actionErrorMessage, setActionErrorMessage] = useState("");
   const canConfirmOptimization = Boolean(editedOptimizedPackages && hasPackageContent(editedOptimizedPackages));
+  const isLinKeFeeSetupCurrent = useMemo(
+    () => isCurrentLinKeFeeSetup(ticket.payload, linkeCommission),
+    [ticket.payload, linkeCommission],
+  );
+  const canOpenFeeSettingUrl = isLinKeFeeSetupCurrent;
+  const workbenchModel = useMemo(
+    () => buildTicketWorkbenchModel(ticket, records, { isLinKeFeeSetupCurrent }),
+    [ticket, records, isLinKeFeeSetupCurrent],
+  );
 
   useEffect(() => {
     setOptimizationResult(null);
@@ -359,6 +377,8 @@ function LoadedTicketDetail({
     setOptimizationErrorMessage("");
     setDraftJobId("");
     setIsDraftJobPolling(false);
+    setFeeSetupJobId("");
+    setIsFeeSetupJobPolling(false);
   }, [ticket.supplyGoodsId, workbenchModel.currentFlow]);
 
   useEffect(() => {
@@ -401,7 +421,54 @@ function LoadedTicketDetail({
   }, [draftJobId, ticket.supplyGoodsId]);
 
   useEffect(() => {
+    if (!feeSetupJobId) return;
+    let isCancelled = false;
+    let timeoutId: number | undefined;
+
+    async function pollFeeSetupJob() {
+      setIsFeeSetupJobPolling(true);
+      try {
+        const status = await getLinKeFeeSetupJobStatus(ticket.supplyGoodsId, feeSetupJobId);
+        if (isCancelled) return;
+        if (status.state === "completed") {
+          setFeeSetupJobId("");
+          setIsFeeSetupJobPolling(false);
+          await refreshTicketAndRecords();
+          return;
+        }
+        if (status.state === "failed") {
+          setFeeSetupJobId("");
+          setIsFeeSetupJobPolling(false);
+          setActionErrorMessage(status.failedReason || "林客费用设置失败");
+          await refreshTicketAndRecords();
+          return;
+        }
+        timeoutId = window.setTimeout(() => void pollFeeSetupJob(), 2000);
+      } catch (error) {
+        if (isCancelled) return;
+        setFeeSetupJobId("");
+        setIsFeeSetupJobPolling(false);
+        setActionErrorMessage(error instanceof Error ? error.message : "林客费用设置任务查询失败");
+      }
+    }
+
+    void pollFeeSetupJob();
+    return () => {
+      isCancelled = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [feeSetupJobId, ticket.supplyGoodsId]);
+
+  useEffect(() => {
     setLinkeCommission(buildInitialLinkeCommission(ticket.payload));
+  }, [ticket.supplyGoodsId, ticket.payload]);
+
+  useEffect(() => {
+    setLinkeGoodsId(readPayloadText(ticket.payload, "linkeGoodsId"));
+    const queuedJobId = readPayloadText(ticket.payload, "linkeFeeSetupJobId");
+    if (readPayloadText(ticket.payload, "linkeFeeSetupState") === "queued" && queuedJobId) {
+      setFeeSetupJobId(queuedJobId);
+    }
   }, [ticket.supplyGoodsId, ticket.payload]);
 
   async function runInfoOptimization(generation: number) {
@@ -488,38 +555,67 @@ function LoadedTicketDetail({
     });
   }
 
-  async function confirmCommission() {
+  async function syncLinKeFeeSetup() {
     const validationMessage = validateLinkeCommission(linkeCommission);
     if (validationMessage) {
       setActionErrorMessage(validationMessage);
       return;
     }
+    const goodsId = linkeGoodsId.trim() || readPayloadText(ticket.payload, "linkeGoodsId");
+    if (!goodsId) {
+      setActionErrorMessage("请先填写林客商品ID");
+      return;
+    }
+    const merchantId = resolveLinKeMerchantId(ticket.payload, ticket.sourcePayload);
+    if (!merchantId) {
+      setActionErrorMessage("未找到林客商户ID，请检查套餐中的 company.guestId");
+      return;
+    }
 
-    const confirmedAt = new Date().toISOString();
-    const normalizedLinkeCommission = normalizeLinkeCommission(linkeCommission);
-    await submitTicketAction({
-      action: "commission_configured",
-      origin: {
-        linkeCommission: readRecordValue(ticket.payload, "linkeCommission"),
-        commissionConfigured: readRecordValue(ticket.payload, "commissionConfigured"),
-        commissionConfiguredAt: readRecordValue(ticket.payload, "commissionConfiguredAt"),
-      },
-      current: {
-        linkeCommission: normalizedLinkeCommission,
-        commissionConfigured: true,
-        commissionConfiguredAt: confirmedAt,
-      },
-      remark: "确认佣金设置完成",
-    });
+    setIsActionSubmitting(true);
+    setActionErrorMessage("");
+    try {
+      const result = await startLinKeFeeSetupJob(ticket.supplyGoodsId, {
+        merchantId,
+        linkeGoodsId: goodsId,
+        rates: normalizeLinkeCommission(linkeCommission),
+      });
+      onTicketUpdated(result.ticket);
+      setRecords((currentRecords) => [result.record, ...currentRecords]);
+      setFeeSetupJobId(result.jobId);
+    } catch (error) {
+      setActionErrorMessage(error instanceof Error ? error.message : "同步林客费用设置失败");
+    } finally {
+      setIsActionSubmitting(false);
+    }
   }
 
-  async function manualModifyCommission() {
-    await submitTicketAction({
-      action: "commission_manual_revision",
-      origin: {},
-      current: {},
-      remark: "进入佣金字段人工修改",
-    });
+  async function confirmFeeSetupSync() {
+    setIsActionSubmitting(true);
+    setActionErrorMessage("");
+    try {
+      const result = await confirmLinKeFeeSetup(ticket.supplyGoodsId);
+      onTicketUpdated(result.ticket);
+      setRecords((currentRecords) => [result.record, ...currentRecords]);
+    } catch (error) {
+      setActionErrorMessage(error instanceof Error ? error.message : "确认林客费用同步失败");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  }
+
+  async function retryProductTrackingAction() {
+    setIsActionSubmitting(true);
+    setActionErrorMessage("");
+    try {
+      const result = await retryLinKeProductTracking(ticket.supplyGoodsId);
+      onTicketUpdated(result.ticket);
+      setRecords((currentRecords) => [result.record, ...currentRecords]);
+    } catch (error) {
+      setActionErrorMessage(error instanceof Error ? error.message : "重试商品状态追踪失败");
+    } finally {
+      setIsActionSubmitting(false);
+    }
   }
 
   async function confirmProductOnline() {
@@ -534,7 +630,7 @@ function LoadedTicketDetail({
         productOnlineConfirmed: true,
         productOnlineConfirmedAt: confirmedAt,
       },
-      remark: "确认商品上线完成",
+      remark: "人工确认商品上线完成",
     });
   }
 
@@ -622,7 +718,8 @@ function LoadedTicketDetail({
             {workbenchModel.currentFlow === "commission_setup" ? (
               <CommissionSetupPanel
                 values={linkeCommission}
-                linkeDraftUrl={readPayloadText(ticket.payload, "linkeDraftUrl")}
+                feeSettingUrl={readPayloadText(ticket.payload, "linkeFeeSettingUrl")}
+                canOpenFeeSettingUrl={canOpenFeeSettingUrl}
                 onChange={(label, value) => setLinkeCommission((current) => ({ ...current, [label]: value }))}
               />
             ) : null}
@@ -636,19 +733,23 @@ function LoadedTicketDetail({
           isLoadingRecords={isLoadingRecords}
           recordErrorMessage={actionErrorMessage || recordErrorMessage}
           isOptimizing={isOptimizing}
-          isActionSubmitting={isActionSubmitting || isDraftJobPolling}
+          isActionSubmitting={isActionSubmitting || isDraftJobPolling || isFeeSetupJobPolling}
           isDraftJobPolling={isDraftJobPolling}
+          isFeeSetupJobPolling={isFeeSetupJobPolling}
           canConfirmOptimization={canConfirmOptimization}
           canRetryDraftCreation={hasPackageContent(readPackagesFromPayload(ticket.payload))}
           linkeGoodsId={linkeGoodsId}
           linkeDraftUrl={readPayloadText(ticket.payload, "linkeDraftUrl")}
+          feeSettingUrl={readPayloadText(ticket.payload, "linkeFeeSettingUrl")}
+          canOpenFeeSettingUrl={canOpenFeeSettingUrl}
           onLinkeGoodsIdChange={setLinkeGoodsId}
           onConfirmOptimization={() => void confirmInfoOptimization()}
           onRetryDraftCreation={() => void retryDraftCreation()}
           onConfirmShelfOnline={() => void confirmShelfOnline()}
-          onConfirmCommission={() => void confirmCommission()}
+          onSyncLinKeFeeSetup={() => void syncLinKeFeeSetup()}
+          onConfirmFeeSetupSync={() => void confirmFeeSetupSync()}
+          onRetryProductTracking={() => void retryProductTrackingAction()}
           onConfirmProductOnline={() => void confirmProductOnline()}
-          onManualModifyCommission={() => void manualModifyCommission()}
         />
       </div>
     </div>
@@ -684,8 +785,24 @@ function readPayloadText(payload: Record<string, unknown>, ...fields: string[]):
   for (const field of fields) {
     const value = readPayloadPath(payload, field);
     if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
   return "";
+}
+
+function resolveLinKeMerchantId(
+  payload: Record<string, unknown>,
+  sourcePayload: Record<string, unknown> = {},
+): string {
+  return readMerchantIdFromPayload(payload) || readMerchantIdFromPayload(sourcePayload);
+}
+
+function readMerchantIdFromPayload(payload: Record<string, unknown>): string {
+  return readPayloadText(payload, "company.guestId")
+    || readPayloadText(payload, "package.company.guestId")
+    || readPayloadText(payload, "packages.company.guestId")
+    || readPayloadText(displayPackagesValue(readRecordValue(payload, "package")), "company.guestId")
+    || readPayloadText(displayPackagesValue(readRecordValue(payload, "packages")), "company.guestId");
 }
 
 function readPayloadPath(payload: Record<string, unknown>, field: string): unknown {
@@ -1099,11 +1216,13 @@ function isDisplayRecord(value: unknown): value is Record<string, unknown> {
 
 function CommissionSetupPanel({
   values,
-  linkeDraftUrl,
+  feeSettingUrl,
+  canOpenFeeSettingUrl,
   onChange,
 }: {
   values: CommissionRateValues;
-  linkeDraftUrl: string;
+  feeSettingUrl: string;
+  canOpenFeeSettingUrl: boolean;
   onChange: (label: string, value: string) => void;
 }) {
   return (
@@ -1112,14 +1231,14 @@ function CommissionSetupPanel({
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <CardTitle className="text-lg">费用比例填写</CardTitle>
-            <p className="mt-2 text-sm text-slate-500">填写后点击右侧「同步佣金设置」，同步到林客费用设置。</p>
+            <p className="mt-2 text-sm text-slate-500">填写后点击右侧「确认同步」，系统会同步到林客费用设置。</p>
           </div>
           <Button
             type="button"
             variant="outline"
             className="bg-blue-50 text-blue-700 hover:bg-blue-100"
-            disabled={!looksLikeUrl(linkeDraftUrl)}
-            onClick={() => openLinKeDraftUrl(linkeDraftUrl)}
+            disabled={!canOpenFeeSettingUrl}
+            onClick={() => openLinKeDraftUrl(feeSettingUrl)}
           >
             <ExternalLink className="h-4 w-4" />
             打开林客核对
@@ -1138,7 +1257,7 @@ function CommissionSetupPanel({
           ))}
         </div>
         <div className="rounded-md bg-blue-50 px-4 py-3 text-sm font-medium leading-6 text-blue-700 ring-1 ring-blue-100">
-          同步成功后，请通过上方链接进入林客确认费用比例已正确落库。确认无误后工单进入「自动追踪中」。
+          同步成功后，上方链接会启用。请进入林客确认费用比例已正确落库，确认无误后点击右侧「确认核对无误」，工单进入「自动追踪中」。
         </div>
       </CardContent>
     </Card>
@@ -1178,18 +1297,47 @@ function CommissionRateInput({
 }
 
 function buildInitialLinkeCommission(payload: Record<string, unknown>): CommissionRateValues {
-  const storedRates = readRecordValue(payload, "linkeCommission") ?? readRecordValue(payload, "commissionRates");
+  const storedRates = readStoredLinkeCommissionSource(payload);
   return Object.fromEntries(
     COMMISSION_RATE_FIELDS.map((field) => [
       field.label,
-      formatCommissionRateInput(readStoredCommissionRate(storedRates, field.label) ?? 4),
+      formatCommissionRateInput(readStoredCommissionRate(storedRates, field) ?? 4),
     ]),
   );
 }
 
-function readStoredCommissionRate(value: unknown, label: string): number | undefined {
+function isCurrentLinKeFeeSetup(payload: Record<string, unknown>, values: CommissionRateValues): boolean {
+  const feeSetupState = readPayloadText(payload, "linkeFeeSetupState");
+  const feeSettingUrl = readPayloadText(payload, "linkeFeeSettingUrl");
+  const saveSubmitted = readRecordValue(payload, "linkeFeeSetupSaveSubmitted") === true;
+  const saveVersion = readPayloadText(payload, "linkeFeeSetupSaveVersion");
+  return feeSetupState === "completed"
+    && looksLikeUrl(feeSettingUrl)
+    && saveSubmitted
+    && saveVersion === LIN_KE_FEE_SETUP_SAVE_VERSION
+    && valuesMatchStoredLinkeCommission(payload, values);
+}
+
+function readStoredLinkeCommissionSource(payload: Record<string, unknown>): unknown {
+  return readRecordValue(payload, "linkeFeeRates")
+    ?? readRecordValue(payload, "linkeCommission")
+    ?? readRecordValue(payload, "commissionRates");
+}
+
+function valuesMatchStoredLinkeCommission(payload: Record<string, unknown>, values: CommissionRateValues): boolean {
+  const storedRates = readStoredLinkeCommissionSource(payload);
+  for (const field of COMMISSION_RATE_FIELDS) {
+    const storedRate = readStoredCommissionRate(storedRates, field);
+    const currentRate = Number(values[field.label]);
+    if (storedRate === undefined || !Number.isFinite(currentRate)) return false;
+    if (formatCommissionRateInput(storedRate) !== formatCommissionRateInput(currentRate)) return false;
+  }
+  return true;
+}
+
+function readStoredCommissionRate(value: unknown, field: CommissionRateField): number | undefined {
   if (!isRecord(value)) return undefined;
-  const rate = value[label];
+  const rate = value[field.key] ?? value[field.label];
   if (typeof rate === "number" && Number.isFinite(rate)) return rate;
   if (typeof rate === "string" && rate.trim()) {
     const parsed = Number(rate.replace("%", ""));
@@ -1220,13 +1368,13 @@ function validateLinkeCommission(values: CommissionRateValues): string {
   return "";
 }
 
-function normalizeLinkeCommission(values: CommissionRateValues): Record<string, string> {
-  return Object.fromEntries(
-    COMMISSION_RATE_FIELDS.map((field) => {
-      const numberValue = Number(values[field.label]);
-      return [field.label, formatCommissionRateInput(Number.isFinite(numberValue) ? numberValue : 0)];
-    }),
-  );
+function normalizeLinkeCommission(values: CommissionRateValues): LinKeFeeRates {
+  const rates: Partial<LinKeFeeRates> = {};
+  for (const field of COMMISSION_RATE_FIELDS) {
+    const numberValue = Number(values[field.label]);
+    rates[field.key] = Number(formatCommissionRateInput(Number.isFinite(numberValue) ? numberValue : 0));
+  }
+  return rates as LinKeFeeRates;
 }
 
 function TicketActionSidebar({
@@ -1237,17 +1385,21 @@ function TicketActionSidebar({
   isOptimizing,
   isActionSubmitting,
   isDraftJobPolling,
+  isFeeSetupJobPolling,
   canConfirmOptimization,
   canRetryDraftCreation,
   linkeGoodsId,
   linkeDraftUrl,
+  feeSettingUrl,
+  canOpenFeeSettingUrl,
   onLinkeGoodsIdChange,
   onConfirmOptimization,
   onRetryDraftCreation,
   onConfirmShelfOnline,
-  onConfirmCommission,
+  onSyncLinKeFeeSetup,
+  onConfirmFeeSetupSync,
+  onRetryProductTracking,
   onConfirmProductOnline,
-  onManualModifyCommission,
 }: {
   model: TicketWorkbenchModel;
   ticket: TicketRecord;
@@ -1256,19 +1408,27 @@ function TicketActionSidebar({
   isOptimizing: boolean;
   isActionSubmitting: boolean;
   isDraftJobPolling: boolean;
+  isFeeSetupJobPolling: boolean;
   canConfirmOptimization: boolean;
   canRetryDraftCreation: boolean;
   linkeGoodsId: string;
   linkeDraftUrl: string;
+  feeSettingUrl: string;
+  canOpenFeeSettingUrl: boolean;
   onLinkeGoodsIdChange: (value: string) => void;
   onConfirmOptimization: () => void;
   onRetryDraftCreation: () => void;
   onConfirmShelfOnline: () => void;
-  onConfirmCommission: () => void;
+  onSyncLinKeFeeSetup: () => void;
+  onConfirmFeeSetupSync: () => void;
+  onRetryProductTracking: () => void;
   onConfirmProductOnline: () => void;
-  onManualModifyCommission: () => void;
 }) {
   const isBusy = isOptimizing || isActionSubmitting;
+  const isProductTrackingFlow = model.currentFlow === "product_online_pending";
+  const visibleActionButtons = isProductTrackingFlow
+    ? model.actionButtons.filter((actionButton) => actionButton.label !== "自动追踪中")
+    : model.actionButtons;
   return (
     <aside className="space-y-6 lg:sticky lg:top-4 lg:self-start">
       <SidebarSection title="工单属性">
@@ -1347,11 +1507,16 @@ function TicketActionSidebar({
         )}
       </SidebarSection>
 
-      <SidebarSection title="人工操作">
+      <SidebarSection title={model.operationSectionTitle}>
         <div className="space-y-2">
           {isDraftJobPolling ? (
             <div className="rounded-md bg-emerald-50 p-3 text-xs font-medium leading-5 text-emerald-700 ring-1 ring-emerald-100">
               林客草稿创建中，请稍候...
+            </div>
+          ) : null}
+          {isFeeSetupJobPolling ? (
+            <div className="rounded-md bg-emerald-50 p-3 text-xs font-medium leading-5 text-emerald-700 ring-1 ring-emerald-100">
+              林客费用设置同步中，请稍候...
             </div>
           ) : null}
           {model.currentFlow === "shelf_confirm" ? (
@@ -1375,7 +1540,22 @@ function TicketActionSidebar({
               />
             </>
           ) : null}
-          {model.actionButtons.map((actionButton) => (
+          {model.currentFlow === "commission_setup" && looksLikeUrl(feeSettingUrl) ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full bg-blue-50 text-blue-700 hover:bg-blue-100"
+              disabled={!canOpenFeeSettingUrl}
+              onClick={() => openLinKeDraftUrl(feeSettingUrl)}
+            >
+              <ExternalLink className="h-4 w-4" />
+              打开林客核对
+            </Button>
+          ) : null}
+          {isProductTrackingFlow ? (
+            <ProductTrackingPanel ticket={ticket} />
+          ) : null}
+          {visibleActionButtons.map((actionButton) => (
             <SidebarActionButton
               key={actionButton.label}
               actionButton={actionButton}
@@ -1390,9 +1570,10 @@ function TicketActionSidebar({
                 onConfirmOptimization,
                 onRetryDraftCreation,
                 onConfirmShelfOnline,
-                onConfirmCommission,
+                onSyncLinKeFeeSetup,
+                onConfirmFeeSetupSync,
+                onRetryProductTracking,
                 onConfirmProductOnline,
-                onManualModifyCommission,
               })}
             />
           ))}
@@ -1403,6 +1584,88 @@ function TicketActionSidebar({
   );
 }
 
+const MAX_PRODUCT_TRACKING_CHECKS = 72;
+
+function ProductTrackingPanel({ ticket }: { ticket: TicketRecord }) {
+  const trackingState = readPayloadText(ticket.payload, "linkeProductTrackingState");
+  const feeStatus = readPayloadText(ticket.payload, "linkeFeeStatus") || "待检查";
+  const productStatus = readPayloadText(ticket.payload, "linkeProductStatus") || "待检查";
+  const lastCheckCount = readPayloadNumber(ticket.payload, "linkeProductTrackingLastCheckCount") ?? 0;
+  const nextCheckCount = readPayloadNumber(ticket.payload, "linkeProductTrackingNextCheckCount") ?? (lastCheckCount > 0 ? lastCheckCount + 1 : 1);
+  const isStopped = trackingState === "completed" || trackingState === "failed";
+
+  return (
+    <div className="rounded-md bg-slate-50 p-3 text-xs text-slate-600 ring-1 ring-slate-100">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="font-semibold text-slate-800">当前状态</span>
+        <Badge variant="muted" className={cn(
+          "shrink-0",
+          trackingState === "failed" && "bg-red-50 text-red-600",
+          trackingState === "completed" && "bg-emerald-50 text-emerald-700",
+        )}>
+          {formatProductTrackingState(trackingState)}
+        </Badge>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <TrackingStatusCell label="费用状态" value={feeStatus} />
+        <TrackingStatusCell label="商品状态" value={productStatus} />
+      </div>
+      <TrackingMetric
+        label="检查次数"
+        value={formatTrackingCheckCount({ lastCheckCount, nextCheckCount, isStopped })}
+      />
+    </div>
+  );
+}
+
+function TrackingStatusCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-white px-2.5 py-2 ring-1 ring-slate-100">
+      <div className="text-[11px] font-medium text-slate-400">{label}</div>
+      <div className="mt-1 truncate font-semibold text-slate-800">{value}</div>
+    </div>
+  );
+}
+
+function TrackingMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+      <span className="text-slate-400">{label}</span>
+      <span className="min-w-0 truncate text-right font-medium text-slate-800">{value}</span>
+    </div>
+  );
+}
+
+function readPayloadNumber(payload: Record<string, unknown>, key: string): number | null {
+  const value = readRecordValue(payload, key);
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatProductTrackingState(value: string): string {
+  if (value === "queued") return "等待检查";
+  if (value === "waiting") return "自动追踪中";
+  if (value === "failed") return "追踪失败";
+  if (value === "completed") return "已完成";
+  return "自动追踪中";
+}
+
+function formatTrackingCheckCount(input: {
+  lastCheckCount: number;
+  nextCheckCount: number;
+  isStopped: boolean;
+}): string {
+  if (input.isStopped && input.lastCheckCount > 0) {
+    return `${input.lastCheckCount} / ${MAX_PRODUCT_TRACKING_CHECKS}`;
+  }
+  return `${Math.max(input.nextCheckCount, 1)} / ${MAX_PRODUCT_TRACKING_CHECKS}`;
+}
+
 function isActionDisabled(
   label: string,
   state: { canConfirmOptimization: boolean; canRetryDraftCreation: boolean; isBusy: boolean; linkeGoodsId: string },
@@ -1411,6 +1674,9 @@ function isActionDisabled(
   if (label === "确认采用优化") return !state.canConfirmOptimization;
   if (label === "重试创建草稿") return !state.canRetryDraftCreation;
   if (label === "确认已上架") return state.linkeGoodsId.trim().length === 0;
+  if (label === "确认同步") return state.linkeGoodsId.trim().length === 0;
+  if (label === "同步中") return true;
+  if (label === "自动追踪中") return true;
   if (label === "查看上线任务") return true;
   return false;
 }
@@ -1421,17 +1687,19 @@ function getActionButtonHandler(
     onConfirmOptimization: () => void;
     onRetryDraftCreation: () => void;
     onConfirmShelfOnline: () => void;
-    onConfirmCommission: () => void;
+    onSyncLinKeFeeSetup: () => void;
+    onConfirmFeeSetupSync: () => void;
+    onRetryProductTracking: () => void;
     onConfirmProductOnline: () => void;
-    onManualModifyCommission: () => void;
   },
 ): (() => void) | undefined {
   if (label === "确认采用优化") return handlers.onConfirmOptimization;
   if (label === "重试创建草稿") return handlers.onRetryDraftCreation;
   if (label === "确认已上架") return handlers.onConfirmShelfOnline;
-  if (label === "同步佣金设置") return handlers.onConfirmCommission;
-  if (label === "确认商品上线") return handlers.onConfirmProductOnline;
-  if (label === "手动修改") return handlers.onManualModifyCommission;
+  if (label === "确认同步") return handlers.onSyncLinKeFeeSetup;
+  if (label === "确认核对无误") return handlers.onConfirmFeeSetupSync;
+  if (label === "重试追踪") return handlers.onRetryProductTracking;
+  if (label === "人工确认上线") return handlers.onConfirmProductOnline;
   return undefined;
 }
 
@@ -1492,9 +1760,9 @@ function getActionHint(flow: TicketWorkbenchModel["currentFlow"]): string {
   if (flow === "info_completion") return "资料被驳回，请回到 Rebuild 完善信息后重新审核。";
   if (flow === "access_review") return "准入未完成时，请先回到 Rebuild 完成审核。";
   if (flow === "info_optimization") return "确认后会先创建林客草稿，草稿成功才进入货架上线确认。";
-  if (flow === "shelf_confirm") return "需要填写林客商品ID，确认后进入佣金设置。";
+  if (flow === "shelf_confirm") return "需要填写林客商品ID，确认后进入费用设置。";
   if (flow === "commission_setup") return "先在左侧填写费用比例，再同步到林客费用设置。";
-  if (flow === "product_online_pending") return "确认商品已经完成上线后，工单会进入已完成状态。";
+  if (flow === "product_online_pending") return "系统每小时自动追踪林客费用状态和商品状态。";
   return "商品已进入上线任务，后续可查看执行结果。";
 }
 

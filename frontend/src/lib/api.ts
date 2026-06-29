@@ -150,6 +150,22 @@ export interface LinKeDraftJobStatus {
   returnValue: Record<string, unknown> | null;
 }
 
+export interface LinKeFeeRates {
+  onlineOperation: number;
+  professionalAccount: number;
+  growthBooster: number;
+  acquisitionCard: number;
+  offlineQrScan: number;
+}
+
+export type LinKeJobStatus = LinKeDraftJobStatus;
+
+interface TicketJobActionResponse {
+  ticket: TicketApiRecord;
+  record: TicketActionRecordApiRecord;
+  jobId: string;
+}
+
 interface TicketMetadataResponse {
   field_options?: TicketFieldOptionsApiMap;
   field_metadata?: TicketFieldMetadataApiMap;
@@ -429,11 +445,18 @@ export async function confirmTicketInfoOptimization(
   };
 }
 
-export async function retryLinKeDraftJob(supplyGoodsId: string): Promise<{ jobId: string }> {
-  return await apiFetch<{ jobId: string }>(
+export async function retryLinKeDraftJob(
+  supplyGoodsId: string,
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  const response = await apiFetch<TicketJobActionResponse>(
     `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-draft/retry`,
     { method: "POST", body: JSON.stringify({}) },
   );
+  return {
+    ticket: normalizeTicket(response.ticket),
+    record: normalizeTicketActionRecord(response.record),
+    jobId: response.jobId,
+  };
 }
 
 export async function getLinKeDraftJobStatus(
@@ -443,6 +466,61 @@ export async function getLinKeDraftJobStatus(
   return await apiFetch<LinKeDraftJobStatus>(
     `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-draft-jobs/${encodeURIComponent(jobId)}`,
   );
+}
+
+export async function startLinKeFeeSetupJob(
+  supplyGoodsId: string,
+  input: { merchantId: string; linkeGoodsId: string; rates: LinKeFeeRates },
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  const response = await apiFetch<TicketJobActionResponse>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-fee-setup/jobs`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return {
+    ticket: normalizeTicket(response.ticket),
+    record: normalizeTicketActionRecord(response.record),
+    jobId: response.jobId,
+  };
+}
+
+export async function getLinKeFeeSetupJobStatus(
+  supplyGoodsId: string,
+  jobId: string,
+): Promise<LinKeJobStatus> {
+  return await apiFetch<LinKeJobStatus>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-fee-setup/jobs/${encodeURIComponent(jobId)}`,
+  );
+}
+
+export async function confirmLinKeFeeSetup(
+  supplyGoodsId: string,
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  const response = await apiFetch<TicketJobActionResponse>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-fee-setup/confirm`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return {
+    ticket: normalizeTicket(response.ticket),
+    record: normalizeTicketActionRecord(response.record),
+    jobId: response.jobId,
+  };
+}
+
+export async function retryLinKeProductTracking(
+  supplyGoodsId: string,
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  const response = await apiFetch<TicketJobActionResponse>(
+    `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-product-tracking/retry`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return {
+    ticket: normalizeTicket(response.ticket),
+    record: normalizeTicketActionRecord(response.record),
+    jobId: response.jobId,
+  };
 }
 
 export async function getTicketMetadata(): Promise<TicketMetadata> {
