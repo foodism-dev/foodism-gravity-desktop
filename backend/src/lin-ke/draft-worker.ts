@@ -22,17 +22,22 @@ async function recordDraftFailure(input: {
   jobId: string;
   error: unknown;
 }): Promise<void> {
+  const errorMessage = conciseError(input.error);
   await input.ticketRepository.createActionRecord({
     supplyGoodsId: input.supplyGoodsId,
     action: "lin_ke_draft_failed",
     origin: {},
-    current: {},
+    current: {
+      linkeDraftState: "failed",
+      linkeDraftError: errorMessage,
+      linkeDraftFailedAt: new Date().toISOString(),
+    },
     operator: {
       source: "lin_ke_draft_worker",
       jobId: input.jobId,
-      error: conciseError(input.error),
+      error: errorMessage,
     },
-    remark: `林客草稿创建失败：${conciseError(input.error)}`,
+    remark: `林客草稿创建失败：${errorMessage}`,
   });
 }
 
@@ -71,9 +76,14 @@ export async function processLinKeDraftJob(input: {
       action: "info_optimized",
       origin: {
         linkeDraftUrl: readPayloadValue(payload, "linkeDraftUrl"),
+        linkeDraftState: readPayloadValue(payload, "linkeDraftState"),
+        linkeDraftError: readPayloadValue(payload, "linkeDraftError"),
       },
       current: {
         linkeDraftUrl: draftUrl,
+        linkeDraftState: "completed",
+        linkeDraftError: "",
+        linkeDraftCompletedAt: new Date().toISOString(),
       },
       operator: {
         source: "lin_ke_draft_worker",

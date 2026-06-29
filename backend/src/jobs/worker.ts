@@ -2,6 +2,7 @@ import { Worker, type Job } from "bullmq";
 import { installConsoleTimestamp } from "../logger.ts";
 import { getLinKeSettings, type LinKeSettings } from "../lin-ke/config.ts";
 import { processLinKeDraftJob } from "../lin-ke/draft-worker.ts";
+import { createLinKeFeeSetupWorker } from "../lin-ke/fee-setup-worker.ts";
 import { getDefaultLinKeRepository, type LinKeRepository } from "../lin-ke/repository.ts";
 import { saveSupplyGoodsDraft } from "../lin-ke/service.ts";
 import { conciseError } from "../lin-ke/utils.ts";
@@ -185,6 +186,8 @@ async function main() {
   console.log(`[JOBS] Gravity jobs 定时任务已注册: jobs=${scheduledJobIds.join(",")}`);
 
   const worker = createGravityJobsWorker();
+  const feeSetupWorker = createLinKeFeeSetupWorker();
+
   worker.on("completed", (job, result) => {
     if (job.name === REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME) {
       const importResult = result as Awaited<ReturnType<typeof processImportFromSupplyGoodsJob>>;
@@ -205,11 +208,23 @@ async function main() {
     console.warn(`[JOBS] 任务失败: name=${job?.name ?? "<unknown>"} job=${job?.id ?? "<unknown>"} error=${conciseError(error)}`);
   });
 
+  feeSetupWorker.on("completed", (job) => {
+    console.log(`[JOBS] 林客费用设置/商品追踪任务完成: job=${job.id}`);
+  });
+
+  feeSetupWorker.on("failed", (job, error) => {
+    console.warn(`[JOBS] 林客费用设置/商品追踪任务失败: job=${job?.id ?? "<unknown>"} error=${conciseError(error)}`);
+  });
+
   console.log(`[JOBS] Gravity jobs worker 已启动: queue=${GRAVITY_JOBS_QUEUE_NAME}`);
+  console.log("[JOBS] 林客费用设置/商品追踪 worker 已启动");
 
   async function shutdown() {
-    await worker.close();
-    await jobsQueue.close?.();
+    await Promise.all([
+      worker.close(),
+      feeSetupWorker.close(),
+      jobsQueue.close?.(),
+    ]);
     process.exit(0);
   }
 

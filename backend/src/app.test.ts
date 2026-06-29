@@ -40,6 +40,13 @@ import {
 } from "./ticket-status.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
 import type { LinKeDraftJobStatus, LinKeDraftQueueClient } from "./lin-ke/draft-queue.ts";
+import type {
+  CreateLinKeFeeSetupJobData,
+  CreateLinKeProductTrackingJobData,
+  LinKeFeeSetupQueueClient,
+  LinKeJobStatus,
+} from "./lin-ke/fee-setup-queue.ts";
+import { LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS } from "./lin-ke/fee-setup-queue.ts";
 
 process.env.DATABASE_URL = "";
 process.env.PROMA_SERVER_JWT_SECRET = "";
@@ -437,6 +444,53 @@ function createMemoryLinKeDraftQueue(): LinKeDraftQueueClient & { jobs: string[]
       return jobId;
     },
     async getCreateDraftJobStatus(jobId: string) {
+      return statuses.get(jobId) ?? null;
+    },
+  };
+}
+
+function createMemoryLinKeFeeSetupQueue(): LinKeFeeSetupQueueClient & {
+  feeJobs: CreateLinKeFeeSetupJobData[];
+  trackingJobs: CreateLinKeProductTrackingJobData[];
+  trackingDelays: number[];
+  statuses: Map<string, LinKeJobStatus>;
+} {
+  const feeJobs: CreateLinKeFeeSetupJobData[] = [];
+  const trackingJobs: CreateLinKeProductTrackingJobData[] = [];
+  const trackingDelays: number[] = [];
+  const statuses = new Map<string, LinKeJobStatus>();
+  return {
+    feeJobs,
+    trackingJobs,
+    trackingDelays,
+    statuses,
+    async addFeeSetupJob(input: CreateLinKeFeeSetupJobData) {
+      feeJobs.push(input);
+      const jobId = `fee-job-${feeJobs.length}`;
+      statuses.set(jobId, {
+        jobId,
+        state: "waiting",
+        failedReason: "",
+        returnValue: null,
+      });
+      return jobId;
+    },
+    async addProductTrackingJob(input: CreateLinKeProductTrackingJobData, delayMs = 0) {
+      trackingJobs.push(input);
+      trackingDelays.push(delayMs);
+      const jobId = `tracking-job-${trackingJobs.length}`;
+      statuses.set(jobId, {
+        jobId,
+        state: "waiting",
+        failedReason: "",
+        returnValue: null,
+      });
+      return jobId;
+    },
+    async getFeeSetupJobStatus(jobId: string) {
+      return statuses.get(jobId) ?? null;
+    },
+    async getProductTrackingJobStatus(jobId: string) {
       return statuses.get(jobId) ?? null;
     },
   };
@@ -2144,6 +2198,170 @@ describe("server app", () => {
     expect(body.ticket.status).toBe(TICKET_STATUS.PROCESSING);
     expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING);
     expect(body.ticket.payload.commissionConfigured).toBe(true);
+  });
+
+  test("Given fee rates and merchant id, When starting Lin-Ke fee setup, Then it enqueues an independent fee setup job", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository, actionRecords } = createMemoryTicketRepository([
+      {
+        id: 12,
+        supplyGoodsId: "944-fee-setup",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING,
+        payload: {
+          linkeGoodsId: "linke-goods-1",
+          linkeFeeSetupSaveSubmitted: true,
+          linkeFeeSetupSaveVersion: "legacy-save",
+          packages: {
+            company: {
+              guestId: "merchant-from-package",
+            },
+          },
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const feeSetupQueue = createMemoryLinKeFeeSetupQueue();
+    const app = createServerApp({
+      ticketRepository: repository,
+      linKeFeeSetupQueue: feeSetupQueue,
+    });
+
+    const response = await app.request("/api/tickets/944-fee-setup/lin-ke-fee-setup/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+      body: JSON.stringify({
+        merchantId: "merchant-from-package",
+        linkeGoodsId: "linke-goods-1",
+        rates: {
+          onlineOperation: 4,
+          professionalAccount: 4,
+          growthBooster: 4,
+          acquisitionCard: 4,
+          offlineQrScan: 4,
+        },
+      }),
+    });
+    const body = await response.json() as TicketActionRecordResponse & { jobId: string };
+
+    expect(response.status).toBe(200);
+    expect(body.jobId).toBe("fee-job-1");
+    expect(feeSetupQueue.feeJobs).toEqual([
+      {
+        supplyGoodsId: "944-fee-setup",
+        merchantId: "merchant-from-package",
+        linkeGoodsId: "linke-goods-1",
+        rates: {
+          onlineOperation: 4,
+          professionalAccount: 4,
+          growthBooster: 4,
+          acquisitionCard: 4,
+          offlineQrScan: 4,
+        },
+      },
+    ]);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING);
+    expect(body.ticket.payload.linkeMerchantId).toBe("merchant-from-package");
+    expect(body.ticket.payload.linkeFeeSetupState).toBe("queued");
+    expect(body.ticket.payload.linkeFeeSetupSaveSubmitted).toBe(false);
+    expect(body.ticket.payload.linkeFeeSetupSaveVersion).toBe("");
+    expect(actionRecords[0]?.action).toBe("lin_ke_fee_setup_started");
+  });
+
+  test("Given legacy Lin-Ke fee setup completed without save marker, When confirming sync, Then it rejects tracking", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository } = createMemoryTicketRepository([
+      {
+        id: 14,
+        supplyGoodsId: "944-fee-confirm-legacy",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING,
+        payload: {
+          linkeGoodsId: "linke-goods-legacy",
+          company: {
+            guestId: "merchant-legacy",
+          },
+          linkeFeeSetupState: "completed",
+          linkeFeeSettingUrl: "https://www.life-partner.cn/vmok/op-merchant-list/workbench",
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const feeSetupQueue = createMemoryLinKeFeeSetupQueue();
+    const app = createServerApp({
+      ticketRepository: repository,
+      linKeFeeSetupQueue: feeSetupQueue,
+    });
+
+    const response = await app.request("/api/tickets/944-fee-confirm-legacy/lin-ke-fee-setup/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+      body: JSON.stringify({}),
+    });
+    const body = await response.json() as ErrorResponse;
+
+    expect(response.status).toBe(400);
+    expect(body.message).toBe("请先点击确认同步完成林客费用设置后再核对确认");
+    expect(feeSetupQueue.trackingJobs).toEqual([]);
+  });
+
+  test("Given Lin-Ke fee setup completed, When confirming sync, Then it starts product status tracking", async () => {
+    const now = new Date("2026-06-24T10:00:00.000Z");
+    const { repository, actionRecords } = createMemoryTicketRepository([
+      {
+        id: 13,
+        supplyGoodsId: "944-fee-confirm",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING,
+        payload: {
+          linkeGoodsId: "linke-goods-2",
+          company: {
+            guestId: "merchant-2",
+          },
+          linkeFeeSetupState: "completed",
+          linkeFeeSettingUrl: "https://www.life-partner.cn/vmok/op-merchant-list/workbench",
+          linkeFeeSetupSaveSubmitted: true,
+          linkeFeeSetupSaveVersion: "product_commission_save_v1",
+        },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const feeSetupQueue = createMemoryLinKeFeeSetupQueue();
+    const app = createServerApp({
+      ticketRepository: repository,
+      linKeFeeSetupQueue: feeSetupQueue,
+    });
+
+    const response = await app.request("/api/tickets/944-fee-confirm/lin-ke-fee-setup/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+      body: JSON.stringify({}),
+    });
+    const body = await response.json() as TicketActionRecordResponse & { jobId: string };
+
+    expect(response.status).toBe(200);
+    expect(body.jobId).toBe("tracking-job-1");
+    expect(feeSetupQueue.trackingJobs[0]?.supplyGoodsId).toBe("944-fee-confirm");
+    expect(feeSetupQueue.trackingJobs[0]?.checkCount).toBe(1);
+    expect(feeSetupQueue.trackingDelays).toEqual([0]);
+    expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING);
+    expect(body.ticket.payload.commissionConfigured).toBe(true);
+    expect(body.ticket.payload.linkeProductTrackingState).toBe("queued");
+    expect(body.ticket.payload.linkeProductTrackingStartedAt).toBe(feeSetupQueue.trackingJobs[0]?.startedAt);
+    expect(body.ticket.payload.linkeProductTrackingNextCheckAt).toBe(feeSetupQueue.trackingJobs[0]?.startedAt);
+    expect(body.ticket.payload.linkeProductTrackingLastCheckedAt).toBe("");
+    expect(body.ticket.payload.linkeProductTrackingLastCheckCount).toBe(0);
+    expect(body.ticket.payload.linkeProductTrackingNextCheckCount).toBe(1);
+    expect(body.ticket.payload.linkeFeeStatus).toBe("");
+    expect(body.ticket.payload.linkeProductStatus).toBe("");
+    expect(
+      new Date(String(body.ticket.payload.linkeProductTrackingTimeoutAt)).getTime()
+        - new Date(String(body.ticket.payload.linkeProductTrackingStartedAt)).getTime(),
+    ).toBe(LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS);
+    expect(actionRecords[0]?.action).toBe("commission_configured");
   });
 
   test("Given product online action record, When creating it, Then the ticket is done and online", async () => {

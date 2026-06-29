@@ -60,6 +60,17 @@ import {
   getDefaultLinKeDraftQueue,
   type LinKeDraftQueueClient,
 } from "./lin-ke/draft-queue.ts";
+import {
+  getDefaultLinKeFeeSetupQueue,
+  LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS,
+  type LinKeFeeSetupQueueClient,
+} from "./lin-ke/fee-setup-queue.ts";
+import {
+  LIN_KE_FEE_SETUP_SAVE_VERSION,
+  normalizeLinKeFeeRates,
+  resolveLinKeMerchantId,
+  validateLinKeFeeRates,
+} from "./lin-ke/fee-setup.ts";
 
 interface ServerStatus {
   name: string;
@@ -89,6 +100,7 @@ interface ServerAppOptions {
   fetchImpl?: FetchLike;
   linKeRoutesOptions?: LinKeRoutesOptions;
   linKeDraftQueue?: LinKeDraftQueueClient | null;
+  linKeFeeSetupQueue?: LinKeFeeSetupQueueClient | null;
 }
 
 const DEFAULT_GRAVITY_SSO_ISSUER = "https://fawos.online";
@@ -161,6 +173,13 @@ function getErrorMessage(error: unknown): string {
   return `${message}\nCause: ${getErrorMessage(cause)}`;
 }
 
+function getBriefErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const cause = getErrorCause(error);
+  if (cause === undefined) return message;
+  return `${message}; Cause: ${getBriefErrorMessage(cause)}`;
+}
+
 function getRecordKeys(value: unknown): string {
   return isRecord(value) ? Object.keys(value).join(", ") || "<empty>" : "<非对象>";
 }
@@ -176,6 +195,21 @@ function getNestedRecord(value: unknown, path: string[]): unknown {
 
 function readRecordValue(payload: Record<string, unknown>, key: string): unknown {
   return Object.hasOwn(payload, key) ? payload[key] : null;
+}
+
+function buildInitialProductTrackingPayload(startedAt: string): Record<string, unknown> {
+  const startedAtMs = new Date(startedAt).getTime();
+  const safeStartedAtMs = Number.isFinite(startedAtMs) ? startedAtMs : Date.now();
+  return {
+    linkeProductTrackingStartedAt: new Date(safeStartedAtMs).toISOString(),
+    linkeProductTrackingTimeoutAt: new Date(safeStartedAtMs + LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS).toISOString(),
+    linkeProductTrackingNextCheckAt: new Date(safeStartedAtMs).toISOString(),
+    linkeProductTrackingLastCheckedAt: "",
+    linkeProductTrackingLastCheckCount: 0,
+    linkeProductTrackingNextCheckCount: 1,
+    linkeFeeStatus: "",
+    linkeProductStatus: "",
+  };
 }
 
 function logSsoPayload(body: unknown, authAction: "create_user" | "sso_login"): void {
@@ -541,6 +575,10 @@ export function createServerApp(options: ServerAppOptions = {}) {
   const configuredLinKeDraftQueue = options.linKeDraftQueue;
   const resolveLinKeDraftQueue = () => (
     configuredLinKeDraftQueue !== undefined ? configuredLinKeDraftQueue : getDefaultLinKeDraftQueue()
+  );
+  const configuredLinKeFeeSetupQueue = options.linKeFeeSetupQueue;
+  const resolveLinKeFeeSetupQueue = () => (
+    configuredLinKeFeeSetupQueue !== undefined ? configuredLinKeFeeSetupQueue : getDefaultLinKeFeeSetupQueue()
   );
 
   app.use("/api/*", cors());
@@ -968,13 +1006,64 @@ export function createServerApp(options: ServerAppOptions = {}) {
     const sourcePayload = readRecordValue(ticketSourcePayload, "packages") ? ticketSourcePayload : ticketPayload;
     const originPackagesValue = readRecordValue(sourcePayload, "packages");
 
+    const startedAt = new Date().toISOString();
+    await ticketRepository.createActionRecord({
+      supplyGoodsId,
+      action: "info_optimization_started",
+      origin: {
+        infoOptimizationState: readRecordValue(ticket.payload, "infoOptimizationState"),
+        infoOptimizationError: readRecordValue(ticket.payload, "infoOptimizationError"),
+      },
+      current: {
+        infoOptimizationState: "running",
+        infoOptimizationError: "",
+        infoOptimizationStartedAt: startedAt,
+      },
+      operator: createTicketOperatorSnapshot(context.get("apiUser")),
+      remark: "AI 优化开始，正在生成套餐名称建议",
+    });
+
     try {
       const result = await optimizeLinKePayload(linKeSettings, sourcePayload);
+      await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "info_optimization_preview_generated",
+        origin: {
+          infoOptimizationState: "running",
+          infoOptimizationError: readRecordValue(ticket.payload, "infoOptimizationError"),
+        },
+        current: {
+          infoOptimizationState: "completed",
+          infoOptimizationError: "",
+          infoOptimizationCompletedAt: new Date().toISOString(),
+          infoOptimizationChangeCount: result.changes.length,
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `AI 优化完成，生成 ${result.changes.length} 处建议，等待确认采用`,
+      });
       return context.json({
         originPackages: displaySupplyGoodsPackages(originPackagesValue),
         optimizedPackages: displaySupplyGoodsPackages(readRecordValue(result.payload, "packages")),
       });
     } catch (error) {
+      const briefError = getBriefErrorMessage(error);
+      await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "info_optimization_failed",
+        origin: {
+          infoOptimizationState: "running",
+          infoOptimizationError: readRecordValue(ticket.payload, "infoOptimizationError"),
+        },
+        current: {
+          infoOptimizationState: "failed",
+          infoOptimizationError: briefError,
+          infoOptimizationFailedAt: new Date().toISOString(),
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `AI 优化失败：${briefError}`,
+      }).catch((recordError) => {
+        console.warn(`[工单] 写入 AI 优化失败日志失败: ${getBriefErrorMessage(recordError)}`);
+      });
       return context.json({ error: "Bad Gateway", message: getErrorMessage(error) }, 502);
     }
   });
@@ -1024,12 +1113,51 @@ export function createServerApp(options: ServerAppOptions = {}) {
 
     try {
       const jobId = await linKeDraftQueue.addCreateDraftJob(supplyGoodsId);
+      const startedActionResult = await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_draft_started",
+        origin: {
+          linkeDraftState: readRecordValue(actionResult.ticket.payload, "linkeDraftState"),
+          linkeDraftJobId: readRecordValue(actionResult.ticket.payload, "linkeDraftJobId"),
+          linkeDraftError: readRecordValue(actionResult.ticket.payload, "linkeDraftError"),
+        },
+        current: {
+          linkeDraftState: "queued",
+          linkeDraftJobId: jobId,
+          linkeDraftError: "",
+          linkeDraftStartedAt: new Date().toISOString(),
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `林客草稿创建任务已提交（任务 ${jobId}），等待后台执行`,
+      });
+      if (!startedActionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
       return context.json({
-        ticket: serializeTicket(actionResult.ticket),
-        record: serializeTicketActionRecord(actionResult.record),
+        ticket: serializeTicket(startedActionResult.ticket),
+        record: serializeTicketActionRecord(startedActionResult.record),
         jobId,
       });
     } catch (error) {
+      const briefError = getBriefErrorMessage(error);
+      await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_draft_failed",
+        origin: {
+          linkeDraftState: readRecordValue(actionResult.ticket.payload, "linkeDraftState"),
+          linkeDraftJobId: readRecordValue(actionResult.ticket.payload, "linkeDraftJobId"),
+          linkeDraftError: readRecordValue(actionResult.ticket.payload, "linkeDraftError"),
+        },
+        current: {
+          linkeDraftState: "failed",
+          linkeDraftError: briefError,
+          linkeDraftFailedAt: new Date().toISOString(),
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `林客草稿任务入队失败：${briefError}`,
+      }).catch((recordError) => {
+        console.warn(`[Lin-Ke] 写入草稿入队失败日志失败: ${getBriefErrorMessage(recordError)}`);
+      });
       return context.json({ error: "Bad Gateway", message: `林客草稿任务入队失败：${getErrorMessage(error)}` }, 502);
     }
   });
@@ -1067,9 +1195,346 @@ export function createServerApp(options: ServerAppOptions = {}) {
     }
 
     try {
-      return context.json({ jobId: await linKeDraftQueue.addCreateDraftJob(supplyGoodsId) });
+      const jobId = await linKeDraftQueue.addCreateDraftJob(supplyGoodsId);
+      const actionResult = await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_draft_started",
+        origin: {
+          linkeDraftState: readRecordValue(ticket.payload, "linkeDraftState"),
+          linkeDraftJobId: readRecordValue(ticket.payload, "linkeDraftJobId"),
+          linkeDraftError: readRecordValue(ticket.payload, "linkeDraftError"),
+        },
+        current: {
+          linkeDraftState: "queued",
+          linkeDraftJobId: jobId,
+          linkeDraftError: "",
+          linkeDraftStartedAt: new Date().toISOString(),
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `已重新提交林客草稿创建任务（任务 ${jobId}）`,
+      });
+      if (!actionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
+      return context.json({
+        ticket: serializeTicket(actionResult.ticket),
+        record: serializeTicketActionRecord(actionResult.record),
+        jobId,
+      });
     } catch (error) {
+      const briefError = getBriefErrorMessage(error);
+      await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_draft_failed",
+        origin: {
+          linkeDraftState: readRecordValue(ticket.payload, "linkeDraftState"),
+          linkeDraftJobId: readRecordValue(ticket.payload, "linkeDraftJobId"),
+          linkeDraftError: readRecordValue(ticket.payload, "linkeDraftError"),
+        },
+        current: {
+          linkeDraftState: "failed",
+          linkeDraftError: briefError,
+          linkeDraftFailedAt: new Date().toISOString(),
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `林客草稿任务入队失败：${briefError}`,
+      }).catch((recordError) => {
+        console.warn(`[Lin-Ke] 写入草稿重试失败日志失败: ${getBriefErrorMessage(recordError)}`);
+      });
       return context.json({ error: "Bad Gateway", message: `林客草稿任务入队失败：${getErrorMessage(error)}` }, 502);
+    }
+  });
+
+  app.post("/api/tickets/:supplyGoodsId/lin-ke-fee-setup/jobs", async (context) => {
+    if (!ticketRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+    const linKeFeeSetupQueue = resolveLinKeFeeSetupQueue();
+    if (!linKeFeeSetupQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
+    }
+
+    const body = (await context.req.json().catch(() => null)) as unknown;
+    if (!isRecord(body)) {
+      return context.json({ error: "Bad Request", message: "请求体必须是 JSON 对象" }, 400);
+    }
+    const validationMessage = validateLinKeFeeRates(body.rates);
+    if (validationMessage) {
+      return context.json({ error: "Bad Request", message: validationMessage }, 400);
+    }
+    const rates = normalizeLinKeFeeRates(body.rates);
+    if (!rates) {
+      return context.json({ error: "Bad Request", message: "费用比例格式无效" }, 400);
+    }
+
+    const supplyGoodsId = context.req.param("supplyGoodsId").trim();
+    const ticket = await ticketRepository.getTicket(supplyGoodsId);
+    if (!ticket) {
+      return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+    }
+
+    const linkeGoodsId = typeof body.linkeGoodsId === "string" && body.linkeGoodsId.trim()
+      ? body.linkeGoodsId.trim()
+      : String(readRecordValue(ticket.payload, "linkeGoodsId") ?? "").trim();
+    if (!linkeGoodsId) {
+      return context.json({ error: "Bad Request", message: "linkeGoodsId 不能为空" }, 400);
+    }
+    const merchantId = resolveLinKeMerchantId(ticket.payload, ticket.sourcePayload ?? {});
+    if (!merchantId) {
+      return context.json({ error: "Bad Request", message: "company.guestId 不能为空" }, 400);
+    }
+    const requestMerchantId = typeof body.merchantId === "string" ? body.merchantId.trim() : "";
+    if (!requestMerchantId) {
+      return context.json({ error: "Bad Request", message: "merchantId 不能为空" }, 400);
+    }
+    if (requestMerchantId !== merchantId) {
+      return context.json({ error: "Bad Request", message: "merchantId 与 company.guestId 不一致" }, 400);
+    }
+
+    try {
+      const jobId = await linKeFeeSetupQueue.addFeeSetupJob({
+        supplyGoodsId,
+        merchantId,
+        linkeGoodsId,
+        rates,
+      });
+      const actionResult = await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_fee_setup_started",
+        origin: {
+          linkeGoodsId: readRecordValue(ticket.payload, "linkeGoodsId"),
+          linkeFeeRates: readRecordValue(ticket.payload, "linkeFeeRates"),
+          linkeFeeSetupState: readRecordValue(ticket.payload, "linkeFeeSetupState"),
+          linkeFeeSetupJobId: readRecordValue(ticket.payload, "linkeFeeSetupJobId"),
+          linkeFeeSetupSaveSubmitted: readRecordValue(ticket.payload, "linkeFeeSetupSaveSubmitted"),
+          linkeFeeSetupSaveVersion: readRecordValue(ticket.payload, "linkeFeeSetupSaveVersion"),
+        },
+        current: {
+          linkeGoodsId,
+          linkeMerchantId: merchantId,
+          linkeFeeRates: rates,
+          linkeFeeSetupState: "queued",
+          linkeFeeSetupJobId: jobId,
+          linkeFeeSetupError: "",
+          linkeFeeSetupSaveSubmitted: false,
+          linkeFeeSetupSaveVersion: "",
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `已提交林客费用设置任务（任务 ${jobId}）`,
+      });
+      if (!actionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
+      return context.json({
+        ticket: serializeTicket(actionResult.ticket),
+        record: serializeTicketActionRecord(actionResult.record),
+        jobId,
+      });
+    } catch (error) {
+      const briefError = getBriefErrorMessage(error);
+      await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_fee_setup_failed",
+        origin: {
+          linkeGoodsId: readRecordValue(ticket.payload, "linkeGoodsId"),
+          linkeFeeSetupState: readRecordValue(ticket.payload, "linkeFeeSetupState"),
+          linkeFeeSetupError: readRecordValue(ticket.payload, "linkeFeeSetupError"),
+        },
+        current: {
+          linkeGoodsId,
+          linkeMerchantId: merchantId,
+          linkeFeeRates: rates,
+          linkeFeeSetupState: "failed",
+          linkeFeeSetupError: briefError,
+          linkeFeeSetupFailedAt: new Date().toISOString(),
+          linkeFeeSetupSaveSubmitted: false,
+          linkeFeeSetupSaveVersion: "",
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `林客费用设置任务入队失败：${briefError}`,
+      }).catch((recordError) => {
+        console.warn(`[Lin-Ke] 写入费用设置入队失败日志失败: ${getBriefErrorMessage(recordError)}`);
+      });
+      return context.json({ error: "Bad Gateway", message: `林客费用设置任务入队失败：${getErrorMessage(error)}` }, 502);
+    }
+  });
+
+  app.get("/api/tickets/:supplyGoodsId/lin-ke-fee-setup/jobs/:jobId", async (context) => {
+    const linKeFeeSetupQueue = resolveLinKeFeeSetupQueue();
+    if (!linKeFeeSetupQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
+    }
+
+    const jobId = context.req.param("jobId").trim();
+    const status = await linKeFeeSetupQueue.getFeeSetupJobStatus(jobId);
+    if (!status) {
+      return context.json({ error: "Not Found", message: "林客费用设置任务不存在" }, 404);
+    }
+    return context.json(status);
+  });
+
+  app.post("/api/tickets/:supplyGoodsId/lin-ke-fee-setup/confirm", async (context) => {
+    if (!ticketRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+    const linKeFeeSetupQueue = resolveLinKeFeeSetupQueue();
+    if (!linKeFeeSetupQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
+    }
+
+    const supplyGoodsId = context.req.param("supplyGoodsId").trim();
+    const ticket = await ticketRepository.getTicket(supplyGoodsId);
+    if (!ticket) {
+      return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+    }
+    const feeSetupState = String(readRecordValue(ticket.payload, "linkeFeeSetupState") ?? "").trim();
+    const feeSettingUrl = String(readRecordValue(ticket.payload, "linkeFeeSettingUrl") ?? "").trim();
+    const saveSubmitted = readRecordValue(ticket.payload, "linkeFeeSetupSaveSubmitted") === true;
+    const saveVersion = String(readRecordValue(ticket.payload, "linkeFeeSetupSaveVersion") ?? "").trim();
+    if (
+      feeSetupState !== "completed"
+      || !feeSettingUrl
+      || !saveSubmitted
+      || saveVersion !== LIN_KE_FEE_SETUP_SAVE_VERSION
+    ) {
+      return context.json({ error: "Bad Request", message: "请先点击确认同步完成林客费用设置后再核对确认" }, 400);
+    }
+
+    try {
+      const now = new Date().toISOString();
+      const trackingPayload = buildInitialProductTrackingPayload(now);
+      const jobId = await linKeFeeSetupQueue.addProductTrackingJob({
+        supplyGoodsId,
+        startedAt: now,
+        checkCount: 1,
+      });
+      const actionResult = await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "commission_configured",
+        origin: {
+          commissionConfigured: readRecordValue(ticket.payload, "commissionConfigured"),
+          linkeProductTrackingState: readRecordValue(ticket.payload, "linkeProductTrackingState"),
+          linkeProductTrackingJobId: readRecordValue(ticket.payload, "linkeProductTrackingJobId"),
+        },
+        current: {
+          commissionConfigured: true,
+          commissionConfiguredAt: now,
+          linkeFeeSetupConfirmedAt: now,
+          linkeProductTrackingState: "queued",
+          linkeProductTrackingJobId: jobId,
+          linkeProductTrackingError: "",
+          ...trackingPayload,
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `已确认林客费用同步，开始自动追踪商品状态（任务 ${jobId}）`,
+      });
+      if (!actionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
+      return context.json({
+        ticket: serializeTicket(actionResult.ticket),
+        record: serializeTicketActionRecord(actionResult.record),
+        jobId,
+      });
+    } catch (error) {
+      const briefError = getBriefErrorMessage(error);
+      await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_product_tracking_failed",
+        origin: {
+          linkeProductTrackingState: readRecordValue(ticket.payload, "linkeProductTrackingState"),
+          linkeProductTrackingJobId: readRecordValue(ticket.payload, "linkeProductTrackingJobId"),
+          linkeProductTrackingError: readRecordValue(ticket.payload, "linkeProductTrackingError"),
+        },
+        current: {
+          linkeProductTrackingState: "failed",
+          linkeProductTrackingError: briefError,
+          linkeProductTrackingFailedAt: new Date().toISOString(),
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `林客商品状态追踪任务入队失败：${briefError}`,
+      }).catch((recordError) => {
+        console.warn(`[Lin-Ke] 写入商品状态追踪入队失败日志失败: ${getBriefErrorMessage(recordError)}`);
+      });
+      return context.json({ error: "Bad Gateway", message: `林客商品状态追踪任务入队失败：${getErrorMessage(error)}` }, 502);
+    }
+  });
+
+  app.post("/api/tickets/:supplyGoodsId/lin-ke-product-tracking/retry", async (context) => {
+    if (!ticketRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+    const linKeFeeSetupQueue = resolveLinKeFeeSetupQueue();
+    if (!linKeFeeSetupQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
+    }
+
+    const supplyGoodsId = context.req.param("supplyGoodsId").trim();
+    const ticket = await ticketRepository.getTicket(supplyGoodsId);
+    if (!ticket) {
+      return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+    }
+    if (!resolveLinKeMerchantId(ticket.payload, ticket.sourcePayload ?? {})) {
+      return context.json({ error: "Bad Request", message: "company.guestId 不能为空" }, 400);
+    }
+    if (!String(readRecordValue(ticket.payload, "linkeGoodsId") ?? "").trim()) {
+      return context.json({ error: "Bad Request", message: "linkeGoodsId 不能为空" }, 400);
+    }
+
+    try {
+      const now = new Date().toISOString();
+      const trackingPayload = buildInitialProductTrackingPayload(now);
+      const jobId = await linKeFeeSetupQueue.addProductTrackingJob({
+        supplyGoodsId,
+        startedAt: now,
+        checkCount: 1,
+      });
+      const actionResult = await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_product_tracking_started",
+        origin: {
+          linkeProductTrackingState: readRecordValue(ticket.payload, "linkeProductTrackingState"),
+          linkeProductTrackingJobId: readRecordValue(ticket.payload, "linkeProductTrackingJobId"),
+          linkeProductTrackingError: readRecordValue(ticket.payload, "linkeProductTrackingError"),
+        },
+        current: {
+          linkeProductTrackingState: "queued",
+          linkeProductTrackingJobId: jobId,
+          linkeProductTrackingError: "",
+          ...trackingPayload,
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `已重新提交林客商品状态追踪任务（任务 ${jobId}）`,
+      });
+      if (!actionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
+      return context.json({
+        ticket: serializeTicket(actionResult.ticket),
+        record: serializeTicketActionRecord(actionResult.record),
+        jobId,
+      });
+    } catch (error) {
+      const briefError = getBriefErrorMessage(error);
+      await ticketRepository.createActionRecord({
+        supplyGoodsId,
+        action: "lin_ke_product_tracking_failed",
+        origin: {
+          linkeProductTrackingState: readRecordValue(ticket.payload, "linkeProductTrackingState"),
+          linkeProductTrackingJobId: readRecordValue(ticket.payload, "linkeProductTrackingJobId"),
+          linkeProductTrackingError: readRecordValue(ticket.payload, "linkeProductTrackingError"),
+        },
+        current: {
+          linkeProductTrackingState: "failed",
+          linkeProductTrackingError: briefError,
+          linkeProductTrackingFailedAt: new Date().toISOString(),
+        },
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        remark: `林客商品状态追踪任务入队失败：${briefError}`,
+      }).catch((recordError) => {
+        console.warn(`[Lin-Ke] 写入商品状态追踪重试失败日志失败: ${getBriefErrorMessage(recordError)}`);
+      });
+      return context.json({ error: "Bad Gateway", message: `林客商品状态追踪任务入队失败：${getErrorMessage(error)}` }, 502);
     }
   });
 
