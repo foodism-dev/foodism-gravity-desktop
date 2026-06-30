@@ -3,11 +3,8 @@ import type { LinKeAccountConfig } from "./repository.ts";
 import { cleanString, conciseError, isRecord, type JsonRecord } from "./utils.ts";
 
 export interface LinKeFeeRates {
-  onlineOperation: number;
-  professionalAccount: number;
-  growthBooster: number;
-  acquisitionCard: number;
-  offlineQrScan: number;
+  values: Record<string, number>;
+  singleSettings: Record<string, boolean>;
 }
 
 export interface LinKeFeeSetupInput {
@@ -46,35 +43,125 @@ export interface LinKeFeeSetupClient {
 
 type LinKeFeeLookupInput = Pick<LinKeFeeSetupInput, "session" | "accountConfig" | "merchantId" | "linkeGoodsId">;
 
-export const LIN_KE_FEE_RATE_FIELDS: Array<{
-  key: keyof LinKeFeeRates;
+interface LinKeFeeTrafficChild {
+  source: string;
+  label: string;
+}
+
+interface LinKeFeeTrafficRow {
+  group: string;
+  source: string;
+  label: string;
+  closedMax: number;
+  singleSettingEnabled: boolean;
+  children: LinKeFeeTrafficChild[];
+}
+
+interface LinKeActiveFeeTrafficField {
+  source: string;
   label: string;
   max: number;
-}> = [
-  { key: "onlineOperation", label: "线上经营", max: 80 },
-  { key: "professionalAccount", label: "职人账号", max: 20 },
-  { key: "growthBooster", label: "增量宝", max: 80 },
-  { key: "acquisitionCard", label: "获客卡", max: 80 },
-  { key: "offlineQrScan", label: "线下扫码", max: 80 },
+  parentSource: string;
+  parentLabel: string;
+  isChild: boolean;
+}
+
+interface LinKeTrafficTopology {
+  availableSources: Set<string>;
+  childrenByParent: Map<string, string[]>;
+  labelsBySource: Map<string, string>;
+}
+
+export const LIN_KE_FEE_TRAFFIC_ROWS: LinKeFeeTrafficRow[] = [
+  {
+    group: "常规成交",
+    source: "1000",
+    label: "视频",
+    closedMax: 20,
+    singleSettingEnabled: true,
+    children: [
+      { source: "1001", label: "商家视频" },
+      { source: "1002", label: "达人视频" },
+      { source: "1003", label: "职人视频" },
+    ],
+  },
+  {
+    group: "常规成交",
+    source: "2000",
+    label: "直播",
+    closedMax: 20,
+    singleSettingEnabled: true,
+    children: [
+      { source: "2001", label: "商家直播" },
+      { source: "2002", label: "达人直播" },
+      { source: "2003", label: "职人直播" },
+    ],
+  },
+  {
+    group: "常规成交",
+    source: "3000",
+    label: "线下扫码",
+    closedMax: 20,
+    singleSettingEnabled: true,
+    children: [
+      { source: "3001", label: "直接下单" },
+      { source: "3002", label: "职人码" },
+    ],
+  },
+  {
+    group: "常规成交",
+    source: "4000",
+    label: "搜索/商城",
+    closedMax: 80,
+    singleSettingEnabled: false,
+    children: [],
+  },
+  {
+    group: "常规成交",
+    source: "5000",
+    label: "获客卡",
+    closedMax: 20,
+    singleSettingEnabled: true,
+    children: [
+      { source: "5001", label: "门店卡/到店卡" },
+      { source: "5002", label: "商品卡" },
+    ],
+  },
+  {
+    group: "增量宝",
+    source: "7000",
+    label: "内容成交",
+    closedMax: 20,
+    singleSettingEnabled: true,
+    children: [
+      { source: "7001", label: "商家内容" },
+      { source: "7002", label: "达人内容" },
+      { source: "7003", label: "职人内容" },
+    ],
+  },
+  {
+    group: "增量宝",
+    source: "7100",
+    label: "非内容成交",
+    closedMax: 80,
+    singleSettingEnabled: false,
+    children: [],
+  },
 ];
 
-export const LIN_KE_FEE_SETUP_SAVE_VERSION = "product_commission_save_v1";
+export const LIN_KE_FEE_SETUP_SAVE_VERSION = "product_commission_save_v3";
 
 const ORDER_LIST_PATH = "/life/partner/v2/order/list/";
 const ORDER_DETAIL_PATH = "/life/partner/v2/order/detail/";
 const PRODUCT_COMMISSION_LIST_PATH = "/life/partner/v2/commission/product-commission/list/";
-const COMMISSION_SAVE_INFO_PATH = "/life/partner/v2/commission/commission-save-info/mget";
+const COMMISSION_DISPLAY_COMPONENT_PATH = "/life/partner/v2/commission/commission-display-component/mget";
+const SAVE_WHITE_LIST_PATH = "/life/partner/v2/commission/save-white-list/get/";
+const ORDER_AGREEMENT_CONTENT_QUERY_PATH = "/life/partner/v2/order/agreement/content/query/";
 const PRODUCT_COMMISSION_SAVE_PATH = "/life/partner/v2/commission/product-commission/save/";
 const SUCCESS_FEE_STATUS = "已设置";
 const SUCCESS_PRODUCT_STATUS = "销售中";
 const NEGATIVE_STATUS_KEYWORDS = ["驳回", "不通过", "失败", "下架", "停售", "删除"];
-const FEE_TRAFFIC_SOURCE_BY_FIELD: Record<keyof LinKeFeeRates, string> = {
-  onlineOperation: "1",
-  professionalAccount: "50",
-  growthBooster: "60",
-  acquisitionCard: "70",
-  offlineQrScan: "100",
-};
+const CHILD_OPEN_MAX = 80;
 const FEE_STATUS_LABELS: Record<number, string> = {
   1: "未设置",
   2: SUCCESS_FEE_STATUS,
@@ -99,24 +186,44 @@ const PRODUCT_STATUS_LABELS: Record<number, string> = {
 
 export function normalizeLinKeFeeRates(value: unknown): LinKeFeeRates | null {
   if (!isRecord(value)) return null;
-  const entries = LIN_KE_FEE_RATE_FIELDS.map((field) => {
-    const direct = value[field.key];
-    const legacy = value[field.label];
-    const parsed = parseRateValue(direct ?? legacy);
-    if (parsed === null || parsed < 0 || parsed > field.max) return null;
-    return [field.key, parsed] as const;
-  });
-  if (entries.some((entry) => entry === null)) return null;
-  return Object.fromEntries(entries as Array<readonly [keyof LinKeFeeRates, number]>) as unknown as LinKeFeeRates;
+  const rawValues = isRecord(value.values) ? value.values : null;
+  const rawSingleSettings = isRecord(value.singleSettings) ? value.singleSettings : {};
+  if (!rawValues) return null;
+
+  const singleSettings = Object.fromEntries(
+    LIN_KE_FEE_TRAFFIC_ROWS
+      .filter((row) => row.singleSettingEnabled)
+      .map((row) => [row.source, rawSingleSettings[row.source] === true]),
+  );
+  const normalized: Record<string, number> = {};
+  const activeFields = getActiveTrafficFields({ singleSettings });
+
+  for (const field of activeFields) {
+    const parsed = parseRateValue(rawValues[field.source]);
+    if (!parsed.ok) return null;
+    if (parsed.value < 0 || parsed.value > field.max) return null;
+    normalized[field.source] = parsed.value;
+  }
+
+  return { values: normalized, singleSettings };
 }
 
 export function validateLinKeFeeRates(value: unknown): string {
   if (!isRecord(value)) return "费用比例必须是 JSON 对象";
-  for (const field of LIN_KE_FEE_RATE_FIELDS) {
-    const parsed = parseRateValue(value[field.key] ?? value[field.label]);
-    if (parsed === null) return `请填写${field.label}费用比例`;
-    if (parsed < 0) return `${field.label}费用比例不能小于 0`;
-    if (parsed > field.max) return `${field.label}费用比例不能超过 ${field.max.toFixed(2)}%`;
+  const rawValues = isRecord(value.values) ? value.values : null;
+  if (!rawValues) return "费用比例 values 必须是 JSON 对象";
+  const rawSingleSettings = isRecord(value.singleSettings) ? value.singleSettings : {};
+  const singleSettings = Object.fromEntries(
+    LIN_KE_FEE_TRAFFIC_ROWS
+      .filter((row) => row.singleSettingEnabled)
+      .map((row) => [row.source, rawSingleSettings[row.source] === true]),
+  );
+  for (const field of getActiveTrafficFields({ singleSettings })) {
+    const parsed = parseRateValue(rawValues[field.source]);
+    if (!parsed.ok && parsed.reason === "too_many_decimals") return `${field.label}费用比例最多支持两位小数`;
+    if (!parsed.ok) return `请填写${field.label}费用比例`;
+    if (parsed.value < 0) return `${field.label}费用比例不能小于 0`;
+    if (parsed.value > field.max) return `${field.label}费用比例不能超过 ${field.max.toFixed(2)}%`;
   }
   return "";
 }
@@ -161,7 +268,7 @@ export function createDefaultLinKeFeeSetupClient(): LinKeFeeSetupClient {
   return {
     async setupFee(input: LinKeFeeSetupInput): Promise<LinKeFeeSetupResult> {
       const context = await prepareFeeSetupContext(input);
-      const response = await submitFeeSetup(input, context.skuOrderId, context.product);
+      const response = await submitFeeSetup(input, context.skuOrderId, context.product, context.agreementSceneList, context.activeFields);
       return {
         feeSettingUrl: buildFeeSettingUrl({
           baseUrl: input.session.baseUrl,
@@ -278,19 +385,54 @@ async function prepareFeeSetupContext(input: LinKeFeeSetupInput): Promise<{
   partnerId: string;
   product: JsonRecord;
   saveInfoResponse: unknown;
+  agreementSceneList: unknown[];
+  activeFields: LinKeActiveFeeTrafficField[];
 }> {
   const { orderId, skuOrderId, partnerId, product } = await resolveCommissionProduct(input);
-  const saveInfoResponse = await postFeeSetupJson(input, "查询商品费用设置范围", COMMISSION_SAVE_INFO_PATH, {
+  const displayComponentResponse = await postFeeSetupJson(input, "查询商品费用设置范围", COMMISSION_DISPLAY_COMPONENT_PATH, {
     sku_order_id: skuOrderId,
     product_id_list: [input.linkeGoodsId],
-    need_tips_content: true,
+    need_setting_info: true,
   }, {
     ac_app: 10159,
     ...accountQuery(input),
   });
-  validateFeeRanges(saveInfoResponse, input.linkeGoodsId, input.rates);
+  const activeFields = resolveActiveTrafficFields(displayComponentResponse, input.linkeGoodsId, input.rates);
+  await logSaveWhiteListDiagnostics(input, orderId, activeFields);
+  validateFeeRanges(displayComponentResponse, input.linkeGoodsId, input.rates, activeFields);
+  const agreementContentResponse = await postFeeSetupJson(input, "查询费用协议内容", ORDER_AGREEMENT_CONTENT_QUERY_PATH, {
+    template_type: 2,
+    sku_order_id: skuOrderId,
+    save_cps_param: { contain_total_amount: false },
+    scene: 1,
+  }, {
+    ac_app: 10159,
+    ...accountQuery(input),
+  });
+  const agreementSceneList = validateAgreementContent(agreementContentResponse);
 
-  return { orderId, skuOrderId, partnerId, product, saveInfoResponse };
+  return { orderId, skuOrderId, partnerId, product, saveInfoResponse: displayComponentResponse, agreementSceneList, activeFields };
+}
+
+async function logSaveWhiteListDiagnostics(
+  input: LinKeFeeSetupInput,
+  orderId: string,
+  activeFields: LinKeActiveFeeTrafficField[],
+): Promise<void> {
+  const activeSourceKeys = getActiveTrafficSourceKeys(activeFields);
+  try {
+    const response = await getFeeSetupJson(input, "查询费用流量来源白名单", SAVE_WHITE_LIST_PATH, {
+      ac_app: 10159,
+      order_id: orderId,
+      scene: 2,
+      ...accountQuery(input),
+    });
+    const sources = extractConfigurableTrafficSources(response);
+    const sourceCount = sources ? String(sources.size) : "missing";
+    console.info(`[Lin-Ke][fee-setup] 费用流量来源白名单 diagnostic activeSources=${activeSourceKeys.join(",")} whitelistCount=${sourceCount}`);
+  } catch (error) {
+    console.warn(`[Lin-Ke][fee-setup] 费用流量来源白名单 diagnostic skipped activeSources=${activeSourceKeys.join(",")} error=${conciseError(error)}`);
+  }
 }
 
 async function findSignedOrder(input: LinKeFeeLookupInput): Promise<JsonRecord> {
@@ -330,25 +472,44 @@ async function findCommissionProduct(input: LinKeFeeLookupInput, skuOrderId: str
   return product;
 }
 
-async function submitFeeSetup(input: LinKeFeeSetupInput, skuOrderId: string, product: JsonRecord): Promise<unknown> {
-  return postFeeSetupJson(
-    input,
-    "提交商品费用设置",
-    PRODUCT_COMMISSION_SAVE_PATH,
-    buildFeeSavePayload(input, skuOrderId, product),
-    {
-      ac_app: 10159,
-      ...accountQuery(input),
-    },
-  );
+async function submitFeeSetup(
+  input: LinKeFeeSetupInput,
+  skuOrderId: string,
+  product: JsonRecord,
+  agreementSceneList: unknown[],
+  activeFields: LinKeActiveFeeTrafficField[],
+): Promise<unknown> {
+  const activeSourceKeys = getActiveTrafficSourceKeys(activeFields);
+  const switchSummary = formatSingleSettingSummary(input.rates);
+  console.info(`[Lin-Ke][fee-setup] 提交商品费用设置 switches=${switchSummary} activeSources=${activeSourceKeys.join(",")}`);
+  try {
+    return await postFeeSetupJson(
+      input,
+      "提交商品费用设置",
+      PRODUCT_COMMISSION_SAVE_PATH,
+      buildFeeSavePayload(input, skuOrderId, product, agreementSceneList, activeFields),
+      {
+        ac_app: 10159,
+        ...accountQuery(input),
+      },
+    );
+  } catch (error) {
+    throw new Error(`${conciseError(error)}；平台开关: ${switchSummary}；本次提交来源: ${activeSourceKeys.join("/")}`);
+  }
 }
 
-function buildFeeSavePayload(input: LinKeFeeSetupInput, skuOrderId: string, product: JsonRecord): JsonRecord {
+function buildFeeSavePayload(
+  input: LinKeFeeSetupInput,
+  skuOrderId: string,
+  product: JsonRecord,
+  agreementSceneList: unknown[],
+  activeFields: LinKeActiveFeeTrafficField[],
+): JsonRecord {
   const waitingAcceptCommissionConfig = Object.fromEntries(
-    LIN_KE_FEE_RATE_FIELDS.map((field) => [
-      FEE_TRAFFIC_SOURCE_BY_FIELD[field.key],
+    activeFields.map((field) => [
+      field.source,
       {
-        commission_ratio: toLinKeRatio(input.rates[field.key]),
+        commission_ratio: toLinKeRatio(input.rates.values[field.source] ?? 0),
         commission_mode: 0,
       },
     ]),
@@ -357,24 +518,91 @@ function buildFeeSavePayload(input: LinKeFeeSetupInput, skuOrderId: string, prod
     sku_order_id: skuOrderId,
     product_item_list: [{
       ...product,
-      waiting_accept_commission_ratio: toLinKeRatio(input.rates.onlineOperation),
+      commission_ratio: "",
+      waiting_accept_commission_ratio: "",
       waiting_accept_commission_mode: 0,
       waiting_accept_commission_config: waitingAcceptCommissionConfig,
-      waiting_accept_stepped_commission_config: [],
     }],
-    agreement_scene_list: [],
+    agreement_scene_list: agreementSceneList,
   };
 }
 
-function parseRateValue(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return roundRate(value);
-  if (typeof value !== "string") return null;
-  const parsed = Number(value.replace("%", "").trim());
-  return Number.isFinite(parsed) ? roundRate(parsed) : null;
+function getActiveTrafficSourceKeys(activeFields: LinKeActiveFeeTrafficField[]): string[] {
+  return activeFields.map((field) => field.source);
 }
 
-function roundRate(value: number): number {
-  return Number(value.toFixed(2));
+function getActiveTrafficFields(rates: Pick<LinKeFeeRates, "singleSettings">): LinKeActiveFeeTrafficField[] {
+  return LIN_KE_FEE_TRAFFIC_ROWS.flatMap((row) => {
+    if (row.singleSettingEnabled && rates.singleSettings[row.source] === true) {
+      const fields: LinKeActiveFeeTrafficField[] = row.children.map((child) => ({
+        source: child.source,
+        label: child.label,
+        max: CHILD_OPEN_MAX,
+        parentSource: row.source,
+        parentLabel: row.label,
+        isChild: true,
+      }));
+      return fields;
+    }
+    const fields: LinKeActiveFeeTrafficField[] = [{
+      source: row.source,
+      label: row.label,
+      max: row.closedMax,
+      parentSource: row.source,
+      parentLabel: row.label,
+      isChild: false,
+    }];
+    return fields;
+  });
+}
+
+function resolveActiveTrafficFields(response: unknown, linkeGoodsId: string, rates: LinKeFeeRates): LinKeActiveFeeTrafficField[] {
+  const topology = extractTrafficTopology(response);
+  const rangeMap = extractTrafficSourceRangeMap(response, linkeGoodsId);
+
+  return getActiveTrafficFields(rates).map((field) => {
+    const label = getTrafficSourceLabel(rangeMap, topology, field);
+    return { ...field, label };
+  });
+}
+
+function getTrafficSourceLabel(
+  rangeMap: JsonRecord | null,
+  topology: LinKeTrafficTopology | null,
+  field: LinKeActiveFeeTrafficField,
+): string {
+  const range = rangeMap?.[field.source];
+  if (isRecord(range)) {
+    const label = cleanString(range.label);
+    if (label) return label;
+  }
+  return topology?.labelsBySource.get(field.source) || field.label;
+}
+
+function formatSingleSettingSummary(rates: Pick<LinKeFeeRates, "singleSettings">): string {
+  return LIN_KE_FEE_TRAFFIC_ROWS
+    .filter((row) => row.singleSettingEnabled)
+    .map((row) => `${row.label}=${rates.singleSettings[row.source] === true ? "开" : "关"}`)
+    .join(", ");
+}
+
+function parseRateValue(value: unknown): { ok: true; value: number } | { ok: false; reason: "invalid" | "too_many_decimals" } {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return { ok: false, reason: "invalid" };
+    return hasAtMostTwoDecimals(String(value)) ? { ok: true, value } : { ok: false, reason: "too_many_decimals" };
+  }
+  if (typeof value !== "string") return { ok: false, reason: "invalid" };
+  const trimmed = value.replace("%", "").trim();
+  if (!trimmed) return { ok: false, reason: "invalid" };
+  if (!/^-?\d+(?:\.\d+)?$/.test(trimmed)) return { ok: false, reason: "invalid" };
+  if (!hasAtMostTwoDecimals(trimmed)) return { ok: false, reason: "too_many_decimals" };
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? { ok: true, value: parsed } : { ok: false, reason: "invalid" };
+}
+
+function hasAtMostTwoDecimals(value: string): boolean {
+  const decimal = value.split(".")[1];
+  return !decimal || decimal.length <= 2;
 }
 
 function toLinKeRatio(value: number): string {
@@ -501,33 +729,164 @@ function extractPartnerId(order: JsonRecord): string {
   return "";
 }
 
-function validateFeeRanges(response: unknown, linkeGoodsId: string, rates: LinKeFeeRates): void {
+function validateFeeRanges(
+  response: unknown,
+  linkeGoodsId: string,
+  rates: LinKeFeeRates,
+  activeFields: LinKeActiveFeeTrafficField[],
+): void {
   const rangeMap = extractTrafficSourceRangeMap(response, linkeGoodsId);
   if (!rangeMap) throw new Error(`林客未返回商品费用比例范围: ${linkeGoodsId}`);
 
-  for (const field of LIN_KE_FEE_RATE_FIELDS) {
-    const trafficSource = FEE_TRAFFIC_SOURCE_BY_FIELD[field.key];
-    const range = rangeMap[trafficSource];
-    if (!isRecord(range)) throw new Error(`林客未返回${field.label}费用比例范围`);
-    const min = parseRatioBoundary(range.min_commission_ratio ?? range.lower_boundary, 0);
-    const max = parseRatioBoundary(range.max_commission_ratio ?? range.upper_boundary, field.max * 100);
-    const value = Number(toLinKeRatio(rates[field.key]));
-    if (value < min || value > max) {
-      throw new Error(`${field.label}费用比例超出林客范围 ${formatLinKeRatio(min)}% ~ ${formatLinKeRatio(max)}%`);
+  for (const field of activeFields) {
+    const parsed = parseRateValue(rates.values[field.source]);
+    if (!parsed.ok && parsed.reason === "too_many_decimals") throw new Error(`${field.label}费用比例最多支持两位小数`);
+    if (!parsed.ok) throw new Error(`请填写${field.label}费用比例`);
+    const range = getTrafficSourceRange(rangeMap, field);
+    const value = Number(toLinKeRatio(parsed.value));
+    if (value < range.min || value > range.max) {
+      const rangeLabel = range.source === "linke" ? "林客范围" : "允许范围";
+      throw new Error(`${field.label}费用比例超出${rangeLabel} ${formatLinKeRatio(range.min)}% ~ ${formatLinKeRatio(range.max)}%`);
     }
   }
 }
 
-function extractTrafficSourceRangeMap(response: unknown, linkeGoodsId: string): JsonRecord | null {
-  if (!isRecord(response) || !isRecord(response.data) || !isRecord(response.data.commission_range_map)) return null;
-  const productRange = response.data.commission_range_map[linkeGoodsId];
-  if (!isRecord(productRange) || !isRecord(productRange.traffic_source_range_map)) return null;
-  return productRange.traffic_source_range_map;
+function extractConfigurableTrafficSources(response: unknown): Set<string> | null {
+  const roots = [response, isRecord(response) ? response.data : null].filter(isRecord);
+  for (const root of roots) {
+    const rawSources = root.configurable_commission_traffic_source ?? root.configurableCommissionTrafficSource;
+    if (!Array.isArray(rawSources)) continue;
+    return new Set(rawSources.map((source) => cleanString(source)).filter(Boolean));
+  }
+  return null;
 }
 
-function parseRatioBoundary(value: unknown, fallback: number): number {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
+function validateAgreementContent(response: unknown): unknown[] {
+  const agreementContentList = extractAgreementContentList(response);
+  if (agreementContentList.length > 0) {
+    throw new Error("林客返回待确认费用协议，请进入林客核对协议内容后重试");
+  }
+  return [];
+}
+
+function extractAgreementContentList(response: unknown): unknown[] {
+  const roots = [response, isRecord(response) ? response.data : null].filter(isRecord);
+  for (const root of roots) {
+    const contentList = root.agreement_content_list ?? root.agreementContentList;
+    if (Array.isArray(contentList)) return contentList;
+  }
+  return [];
+}
+
+function extractTrafficTopology(response: unknown): LinKeTrafficTopology | null {
+  if (!isRecord(response) || !isRecord(response.data)) return null;
+  const rawTree = response.data.commission_traffic_display_tree_list ?? response.data.commissionTrafficDisplayTreeList;
+  if (!Array.isArray(rawTree)) return null;
+
+  const availableSources = new Set<string>();
+  const childrenByParent = new Map<string, string[]>();
+  const labelsBySource = extractTrafficSourceLabels(response);
+
+  const visit = (node: unknown): void => {
+    if (!isRecord(node)) return;
+    const source = cleanString(node.traffic_source ?? node.trafficSource);
+    const children = Array.isArray(node.child_tree_list)
+      ? node.child_tree_list
+      : Array.isArray(node.childTreeList)
+        ? node.childTreeList
+        : [];
+    if (source) {
+      availableSources.add(source);
+      const childSources = children
+        .filter(isRecord)
+        .map((child) => cleanString(child.traffic_source ?? child.trafficSource))
+        .filter(Boolean);
+      if (childSources.length > 0) childrenByParent.set(source, childSources);
+    }
+    for (const child of children) visit(child);
+  };
+
+  for (const node of rawTree) visit(node);
+  return { availableSources, childrenByParent, labelsBySource };
+}
+
+function extractTrafficSourceLabels(response: unknown): Map<string, string> {
+  const labels = new Map<string, string>();
+  if (!isRecord(response) || !isRecord(response.data)) return labels;
+  const roots = [response.data];
+  const settingInfoMap = response.data.commission_setting_info_map;
+  if (isRecord(settingInfoMap)) {
+    for (const setting of Object.values(settingInfoMap)) {
+      if (isRecord(setting)) roots.push(setting);
+    }
+  }
+
+  for (const root of roots) {
+    const rangeMap = isRecord(root.traffic_source_range_map)
+      ? root.traffic_source_range_map
+      : isRecord(root.commission_traffic_source_desc_map)
+        ? root.commission_traffic_source_desc_map
+        : null;
+    if (rangeMap) {
+      for (const [source, value] of Object.entries(rangeMap)) {
+        if (!isRecord(value)) continue;
+        const label = cleanString(value.label);
+        if (label) labels.set(source, label);
+      }
+    }
+    const descList = root.commission_traffic_source_desc_list ?? root.commissionTrafficSourceDescList;
+    if (Array.isArray(descList)) {
+      for (const item of descList) {
+        if (!isRecord(item)) continue;
+        const source = cleanString(item.traffic_source ?? item.trafficSource);
+        const label = cleanString(item.label);
+        if (source && label) labels.set(source, label);
+      }
+    }
+  }
+
+  return labels;
+}
+
+function getTrafficSourceRange(
+  rangeMap: JsonRecord,
+  field: LinKeActiveFeeTrafficField,
+): { min: number; max: number; source: "linke" | "local" } {
+  const range = rangeMap[field.source];
+  if (isRecord(range)) {
+    const min = parseBoundary(range.lower_boundary ?? range.lowerBoundary ?? range.min ?? range.minimum);
+    const max = parseBoundary(range.upper_boundary ?? range.upperBoundary ?? range.max ?? range.maximum);
+    if (max !== null) return { min: min ?? 0, max, source: "linke" };
+  }
+  return { min: 0, max: field.max * 100, source: "local" };
+}
+
+function parseBoundary(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function extractTrafficSourceRangeMap(response: unknown, linkeGoodsId: string): JsonRecord | null {
+  if (!isRecord(response) || !isRecord(response.data)) return null;
+  const settingInfoMap = response.data.commission_setting_info_map;
+  if (isRecord(settingInfoMap)) {
+    const settingInfo = settingInfoMap[linkeGoodsId];
+    if (isRecord(settingInfo) && isRecord(settingInfo.traffic_source_range_map)) {
+      return settingInfo.traffic_source_range_map;
+    }
+  }
+  const legacyRangeMap = response.data.commission_range_map;
+  if (isRecord(legacyRangeMap)) {
+    const productRange = legacyRangeMap[linkeGoodsId];
+    if (isRecord(productRange) && isRecord(productRange.traffic_source_range_map)) {
+      return productRange.traffic_source_range_map;
+    }
+  }
+  return null;
 }
 
 function formatLinKeRatio(value: number): string {

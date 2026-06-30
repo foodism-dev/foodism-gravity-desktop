@@ -190,13 +190,7 @@ describe("Lin-Ke fee setup worker", () => {
         supplyGoodsId: "944-fee-worker",
         merchantId: "merchant-1",
         linkeGoodsId: "linke-goods-1",
-        rates: {
-          onlineOperation: 4,
-          professionalAccount: 4,
-          growthBooster: 4,
-          acquisitionCard: 4,
-          offlineQrScan: 4,
-        },
+        rates: feeRates({ values: { "1000": 4 } }),
         jobId: "fee-job-1",
         settings: createSettings(),
         linKeRepository: createLinKeRepository(accountConfig),
@@ -347,3 +341,42 @@ describe("Lin-Ke fee setup worker", () => {
     }
   });
 });
+
+function feeRates(patch: {
+  values?: Record<string, number>;
+  singleSettings?: Record<string, boolean>;
+} = {}) {
+  return {
+    values: {
+      "1000": 0,
+      "1001": 0,
+      "1002": 0,
+      "1003": 0,
+      "2000": 0,
+      "2001": 0,
+      "2002": 0,
+      "2003": 0,
+      "3000": 0,
+      "3001": 0,
+      "3002": 0,
+      "4000": 0,
+      "5000": 0,
+      "5001": 0,
+      "5002": 0,
+      "7000": 0,
+      "7001": 0,
+      "7002": 0,
+      "7003": 0,
+      "7100": 0,
+      ...patch.values,
+    },
+    singleSettings: {
+      "1000": false,
+      "2000": false,
+      "3000": false,
+      "5000": false,
+      "7000": false,
+      ...patch.singleSettings,
+    },
+  };
+}

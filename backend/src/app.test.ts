@@ -47,6 +47,7 @@ import {
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
 import type { LinKeDraftJobStatus, LinKeDraftQueueClient } from "./service/lin-ke/draft-queue.ts";
 import type { LinKeAccountConfig, LinKeRepository } from "./service/lin-ke/repository.ts";
+import { LIN_KE_FEE_SETUP_SAVE_VERSION } from "./service/lin-ke/fee-setup.ts";
 import type {
   CreateLinKeFeeSetupJobData,
   CreateLinKeProductTrackingJobData,
@@ -643,6 +644,71 @@ function restoreLinKeTestSkipEnv(value: string | undefined): void {
     return;
   }
   Bun.env.LIN_KE_TEST_SKIP_ENABLED = value;
+}
+
+function feeRates(patch: {
+  values?: Record<string, number>;
+  singleSettings?: Record<string, boolean>;
+} = {}) {
+  return {
+    values: {
+      "1000": 0,
+      "1001": 0,
+      "1002": 0,
+      "1003": 0,
+      "2000": 0,
+      "2001": 0,
+      "2002": 0,
+      "2003": 0,
+      "3000": 0,
+      "3001": 0,
+      "3002": 0,
+      "4000": 0,
+      "5000": 0,
+      "5001": 0,
+      "5002": 0,
+      "7000": 0,
+      "7001": 0,
+      "7002": 0,
+      "7003": 0,
+      "7100": 0,
+      ...patch.values,
+    },
+    singleSettings: {
+      "1000": false,
+      "2000": false,
+      "3000": false,
+      "5000": false,
+      "7000": false,
+      ...patch.singleSettings,
+    },
+  };
+}
+
+function activeFeeRates(patch: {
+  values?: Record<string, number>;
+  singleSettings?: Record<string, boolean>;
+} = {}) {
+  return {
+    values: {
+      "1000": 0,
+      "2000": 0,
+      "3000": 0,
+      "4000": 0,
+      "5000": 0,
+      "7000": 0,
+      "7100": 0,
+      ...patch.values,
+    },
+    singleSettings: {
+      "1000": false,
+      "2000": false,
+      "3000": false,
+      "5000": false,
+      "7000": false,
+      ...patch.singleSettings,
+    },
+  };
 }
 
 function createMemoryFieldRepository(initialOptions: RebuildFieldOptionMetadata[] = []): {
@@ -3194,6 +3260,7 @@ describe("server app", () => {
       ticketRepository: repository,
       linKeFeeSetupQueue: feeSetupQueue,
     });
+    const expectedRates = activeFeeRates({ values: { "1000": 4, "4000": 8 } });
 
     const response = await app.request("/api/tickets/944-fee-setup/lin-ke-fee-setup/jobs", {
       method: "POST",
@@ -3201,13 +3268,7 @@ describe("server app", () => {
       body: JSON.stringify({
         merchantId: "merchant-from-package",
         linkeGoodsId: "linke-goods-1",
-        rates: {
-          onlineOperation: 4,
-          professionalAccount: 4,
-          growthBooster: 4,
-          acquisitionCard: 4,
-          offlineQrScan: 4,
-        },
+        rates: feeRates({ values: { "1000": 4, "4000": 8 } }),
       }),
     });
     const body = await response.json() as TicketActionRecordResponse & { jobId: string };
@@ -3219,13 +3280,7 @@ describe("server app", () => {
         supplyGoodsId: "944-fee-setup",
         merchantId: "merchant-from-package",
         linkeGoodsId: "linke-goods-1",
-        rates: {
-          onlineOperation: 4,
-          professionalAccount: 4,
-          growthBooster: 4,
-          acquisitionCard: 4,
-          offlineQrScan: 4,
-        },
+        rates: expectedRates,
       },
     ]);
     expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING);
@@ -3268,13 +3323,7 @@ describe("server app", () => {
           merchantId: "merchant-skip",
           linkeGoodsId: "linke-goods-skip",
           skipLinKeExternal: true,
-          rates: {
-            onlineOperation: 4,
-            professionalAccount: 4,
-            growthBooster: 4,
-            acquisitionCard: 4,
-            offlineQrScan: 4,
-          },
+          rates: feeRates(),
         }),
       });
       const body = await response.json() as TicketActionRecordResponse & {
@@ -3349,7 +3398,7 @@ describe("server app", () => {
           linkeFeeSetupState: "completed",
           linkeFeeSettingUrl: "https://www.life-partner.cn/vmok/op-merchant-list/workbench",
           linkeFeeSetupSaveSubmitted: true,
-          linkeFeeSetupSaveVersion: "product_commission_save_v1",
+          linkeFeeSetupSaveVersion: LIN_KE_FEE_SETUP_SAVE_VERSION,
         },
         createdAt: now,
         updatedAt: now,
@@ -3407,7 +3456,7 @@ describe("server app", () => {
             linkeFeeSetupState: "completed",
             linkeFeeSettingUrl: "https://www.life-partner.cn/test/mock-fee-setting/944-tracking-skip",
             linkeFeeSetupSaveSubmitted: true,
-            linkeFeeSetupSaveVersion: "product_commission_save_v1",
+            linkeFeeSetupSaveVersion: LIN_KE_FEE_SETUP_SAVE_VERSION,
           },
           createdAt: now,
           updatedAt: now,
