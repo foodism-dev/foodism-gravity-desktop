@@ -841,6 +841,7 @@ function LoadedTicketDetail({
                     singleSettings: { ...current.singleSettings, [source]: enabled },
                   }))}
                 onDefaultChange={(value) => setLinkeCommission((current) => applyDefaultCommissionRate(current, value))}
+                onInteraction={() => setActionErrorMessage("")}
               />
             ) : null}
           </div>
@@ -861,7 +862,10 @@ function LoadedTicketDetail({
           linkeDraftUrl={readPayloadText(ticket.payload, "linkeDraftUrl")}
           feeSettingUrl={readPayloadText(ticket.payload, "linkeFeeSettingUrl")}
           canOpenFeeSettingUrl={canOpenFeeSettingUrl}
-          onLinkeGoodsIdChange={setLinkeGoodsId}
+          onLinkeGoodsIdChange={(value) => {
+            setActionErrorMessage("");
+            setLinkeGoodsId(value);
+          }}
           onConfirmOptimization={() => void confirmInfoOptimization()}
           onRetryDraftCreation={() => void retryDraftCreation()}
           onConfirmShelfOnline={() => void confirmShelfOnline()}
@@ -1582,6 +1586,7 @@ function CommissionSetupPanel({
   onChange,
   onSingleSettingChange,
   onDefaultChange,
+  onInteraction,
 }: {
   values: CommissionRateValues;
   feeSettingUrl: string;
@@ -1589,15 +1594,27 @@ function CommissionSetupPanel({
   onChange: (source: string, value: string) => void;
   onSingleSettingChange: (source: string, enabled: boolean) => void;
   onDefaultChange: (value: string) => void;
+  onInteraction: () => void;
 }) {
   const [defaultValue, setDefaultValue] = useState("");
 
   function handleDefaultValueChange(value: string) {
+    onInteraction();
     const sanitized = sanitizeCommissionRateInput(value);
     setDefaultValue(sanitized);
     if (sanitized.trim()) {
       onDefaultChange(sanitized);
     }
+  }
+
+  function handleRateChange(source: string, value: string) {
+    onInteraction();
+    onChange(source, value);
+  }
+
+  function handleSingleSettingChange(source: string, enabled: boolean) {
+    onInteraction();
+    onSingleSettingChange(source, enabled);
   }
 
   return (
@@ -1631,11 +1648,18 @@ function CommissionSetupPanel({
           />
         </div>
         <div className="overflow-hidden rounded-md ring-1 ring-slate-200">
-          <Table className="min-w-[820px]">
+          <Table className="min-w-[820px] table-fixed">
+            <colgroup>
+              <col className="w-28" />
+              <col className="w-40" />
+              <col className="w-[190px]" />
+              <col />
+            </colgroup>
             <TableHeader className="bg-slate-50">
               <TableRow className="hover:bg-slate-50">
-                <TableHead className="w-[280px] text-sm text-slate-900">费用渠道</TableHead>
-                <TableHead className="w-[190px] text-sm text-slate-900">是否单独设置费用</TableHead>
+                <TableHead aria-label="费用分组" className="w-28 border-r text-sm text-slate-900" />
+                <TableHead className="w-40 border-r text-sm text-slate-900">费用渠道</TableHead>
+                <TableHead className="w-[190px] border-r text-sm text-slate-900">是否单独设置费用</TableHead>
                 <TableHead className="text-sm text-slate-900">费用比例</TableHead>
               </TableRow>
             </TableHeader>
@@ -1671,7 +1695,7 @@ function CommissionSetupPanel({
                           !row.singleSettingEnabled && "cursor-not-allowed opacity-50",
                         )}
                         onClick={() => {
-                          if (row.singleSettingEnabled) onSingleSettingChange(row.source, !singleEnabled);
+                          if (row.singleSettingEnabled) handleSingleSettingChange(row.source, !singleEnabled);
                         }}
                       >
                         {singleEnabled ? "是" : "否"}
@@ -1686,7 +1710,7 @@ function CommissionSetupPanel({
                               label={child.label}
                               value={values.values[child.source] ?? "0.00"}
                               max={COMMISSION_CHILD_OPEN_MAX}
-                              onChange={(value) => onChange(child.source, value)}
+                              onChange={(value) => handleRateChange(child.source, value)}
                             />
                           ))}
                         </div>
@@ -1694,7 +1718,7 @@ function CommissionSetupPanel({
                         <CommissionRateInput
                           value={values.values[row.source] ?? "0.00"}
                           max={row.closedMax}
-                          onChange={(value) => onChange(row.source, value)}
+                          onChange={(value) => handleRateChange(row.source, value)}
                         />
                       )}
                     </TableCell>

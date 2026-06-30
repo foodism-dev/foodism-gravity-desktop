@@ -34,6 +34,34 @@ describe("工单详情页布局", () => {
     expect(pageGridClass).not.toContain("lg:px-3");
   });
 
+  test("Given commission setup table, When rendering headers, Then header columns align with the four physical body columns", async () => {
+    const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
+    const tableSource = source.slice(
+      source.indexOf('<Table className="min-w-[820px]'),
+      source.indexOf("<TableBody>", source.indexOf('<Table className="min-w-[820px]')),
+    );
+
+    expect(tableSource).toContain('<Table className="min-w-[820px] table-fixed">');
+    expect(tableSource).toContain("<colgroup>");
+    expect(tableSource).toContain('<col className="w-28" />');
+    expect(tableSource).toContain('<col className="w-40" />');
+    expect(tableSource).toContain('<col className="w-[190px]" />');
+    expect(tableSource).toContain('<col />');
+    expect(tableSource).toContain('<TableHead aria-label="费用分组" className="w-28 border-r text-sm text-slate-900" />');
+    expect(tableSource.indexOf("费用渠道")).toBeLessThan(tableSource.indexOf("是否单独设置费用"));
+    expect(tableSource.indexOf("是否单独设置费用")).toBeLessThan(tableSource.indexOf("费用比例"));
+  });
+
+  test("Given commission setup form has an action error, When user edits fee fields, Then stale action errors are cleared", async () => {
+    const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
+
+    expect(source).toContain('onInteraction={() => setActionErrorMessage("")}');
+    expect(source).toContain("function handleDefaultValueChange(value: string) {\n    onInteraction();");
+    expect(source).toContain("function handleRateChange(source: string, value: string) {\n    onInteraction();");
+    expect(source).toContain("function handleSingleSettingChange(source: string, enabled: boolean) {\n    onInteraction();");
+    expect(source).toContain("onLinkeGoodsIdChange={(value) => {\n            setActionErrorMessage(\"\");");
+  });
+
   test("Given access review page, When rendering detail content, Then product operation rating entry is present", async () => {
     const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
 
