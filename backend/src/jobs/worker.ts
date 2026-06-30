@@ -19,12 +19,19 @@ import {
   type RebuildSupplyGoodsClient,
   type SupplyGoodsRecordRepository,
 } from "../service/rebuild/supplygoods.ts";
+import {
+  getDefaultRebuildSupplierRecordRepository,
+  syncSupplyCompanyFromCallback,
+  syncSupplyHostFromCallback,
+  type RebuildSupplierRecordRepository,
+} from "../service/rebuild/suppliers.ts";
 import { getDefaultTicketRepository, type TicketRepository } from "../tickets.ts";
 import {
   getDefaultGravityJobsQueue,
   GRAVITY_JOBS_QUEUE_NAME,
   LIN_KE_DRAFT_JOB_NAME,
   REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME,
+  REBUILD_SUPPLIER_SYNC_JOB_NAME,
 } from "./queue.ts";
 import type {
   CreateLinKeDraftJobData,
@@ -32,11 +39,13 @@ import type {
   GravityJobName,
   GravityJobResult,
   ImportFromSupplyGoodsJobData,
+  RebuildSupplierSyncJobData,
 } from "./types.ts";
 
 export interface GravityJobProcessorOptions extends ImportFromSupplyGoodsWorkerOptions {
   rebuildClient?: RebuildSupplyGoodsClient;
   repository?: SupplyGoodsRecordRepository | null;
+  supplierRepository?: RebuildSupplierRecordRepository | null;
   fieldMetadataRepository?: RebuildFieldMetadataRepository | null;
   assetUploader?: RebuildAssetUploader | null;
   linKeSettings?: LinKeSettings;
@@ -80,6 +89,27 @@ function normalizeLinKeDraftJobData(data: unknown): CreateLinKeDraftJobData {
   };
 }
 
+function normalizeRebuildSupplierSyncJobData(data: unknown): RebuildSupplierSyncJobData {
+  if (!isRecord(data)) {
+    throw new Error("销售提报商户/公司同步任务 payload 无效");
+  }
+  const entityName = data.entityName;
+  const recordId = typeof data.recordId === "string" ? data.recordId.trim() : "";
+  const supplyGoodsId = typeof data.supplyGoodsId === "string" ? data.supplyGoodsId.trim() : "";
+  if (entityName !== "SupplyCompany" && entityName !== "SupplyHost") {
+    throw new Error("销售提报商户/公司同步任务 entityName 无效");
+  }
+  if (!recordId) {
+    throw new Error("销售提报商户/公司同步任务缺少 recordId");
+  }
+  return {
+    entityName,
+    recordId,
+    source: "supply_goods_callback",
+    supplyGoodsId,
+  };
+}
+
 function resolveImportFromSupplyGoodsDependencies(options: GravityJobProcessorOptions): {
   rebuildClient: RebuildSupplyGoodsClient;
   repository: SupplyGoodsRecordRepository;
@@ -104,6 +134,40 @@ function resolveImportFromSupplyGoodsDependencies(options: GravityJobProcessorOp
     fieldMetadataRepository,
     assetUploader,
   };
+}
+
+function resolveSupplierSyncDependencies(options: GravityJobProcessorOptions): {
+  rebuildClient: RebuildSupplyGoodsClient;
+  repository: RebuildSupplierRecordRepository;
+  fieldMetadataRepository: RebuildFieldMetadataRepository | null;
+  assetUploader?: RebuildAssetUploader | null;
+} {
+  const fieldMetadataRepository =
+    options.fieldMetadataRepository !== undefined ? options.fieldMetadataRepository : getDefaultRebuildFieldMetadataRepository();
+  const rebuildClient = options.rebuildClient ?? createRebuildSupplyGoodsClient({
+    fieldMetadataRepository,
+  });
+  const repository = options.supplierRepository !== undefined ? options.supplierRepository : getDefaultRebuildSupplierRecordRepository();
+  const assetUploader = options.assetUploader !== undefined ? options.assetUploader : getDefaultRebuildAssetUploader();
+
+  if (!repository) {
+    throw new Error("DATABASE_URL 未配置，销售提报商户/公司 repository 不可用");
+  }
+
+  return {
+    rebuildClient,
+    repository,
+    fieldMetadataRepository,
+    assetUploader,
+  };
+}
+
+function listSupplierFields(
+  repository: RebuildFieldMetadataRepository | null,
+  entityName: "SupplyCompany" | "SupplyHost",
+): (() => Promise<Awaited<ReturnType<RebuildFieldMetadataRepository["listFieldsByEntity"]>>>) | undefined {
+  if (!repository) return undefined;
+  return () => repository.listFieldsByEntity(entityName);
 }
 
 function resolveLinKeDraftDependencies(options: GravityJobProcessorOptions): {
@@ -152,6 +216,43 @@ export async function processGravityJob(input: {
       ...resolveLinKeDraftDependencies(input.options ?? {}),
     });
   }
+  if (input.name === REBUILD_SUPPLIER_SYNC_JOB_NAME) {
+    const jobData = normalizeRebuildSupplierSyncJobData(input.data);
+    const dependencies = resolveSupplierSyncDependencies(input.options ?? {});
+    const rawPayload = {
+      source: jobData.source,
+      supplyGoodsId: jobData.supplyGoodsId,
+    };
+    if (jobData.entityName === "SupplyCompany") {
+      const result = await syncSupplyCompanyFromCallback({
+        supplyCompanyId: jobData.recordId,
+        rawPayload,
+        rebuildClient: dependencies.rebuildClient,
+        repository: dependencies.repository,
+        assetUploader: dependencies.assetUploader,
+        listFields: listSupplierFields(dependencies.fieldMetadataRepository, "SupplyCompany"),
+      });
+      return {
+        ok: true,
+        entityName: result.entityName,
+        recordId: result.recordId,
+      };
+    }
+
+    const result = await syncSupplyHostFromCallback({
+      supplyHostId: jobData.recordId,
+      rawPayload,
+      rebuildClient: dependencies.rebuildClient,
+      repository: dependencies.repository,
+      assetUploader: dependencies.assetUploader,
+      listFields: listSupplierFields(dependencies.fieldMetadataRepository, "SupplyHost"),
+    });
+    return {
+      ok: true,
+      entityName: result.entityName,
+      recordId: result.recordId,
+    };
+  }
   throw new Error(`未注册的 Gravity job: ${input.name}`);
 }
 
@@ -199,6 +300,11 @@ async function main() {
     if (job.name === LIN_KE_DRAFT_JOB_NAME) {
       const draftResult = result as JsonRecord;
       console.log(`[JOBS] 林客草稿任务完成: job=${job.id} supplyGoodsId=${draftResult.supplyGoodsId ?? ""}`);
+      return;
+    }
+    if (job.name === REBUILD_SUPPLIER_SYNC_JOB_NAME) {
+      const supplierResult = result as JsonRecord;
+      console.log(`[JOBS] 销售提报商户/公司同步完成: job=${job.id} entity=${supplierResult.entityName ?? ""} recordId=${supplierResult.recordId ?? ""}`);
       return;
     }
     console.log(`[JOBS] 任务完成: name=${job.name} job=${job.id}`);

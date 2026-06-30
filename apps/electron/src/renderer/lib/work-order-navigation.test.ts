@@ -34,11 +34,11 @@ describe('我的工单导航', () => {
     )
   })
 
-  test('构建 RB 审核新标签参数', () => {
-    expect(buildRebuildApprovalTab('F00-838')).toEqual({
+  test('构建带商品名的 RB 审核新标签参数', () => {
+    expect(buildRebuildApprovalTab('F00-838', '招牌双人餐')).toEqual({
       type: 'web',
       sessionId: 'https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods/F00-838',
-      title: 'RB审核 · F00-838',
+      title: 'rb 审核-招牌双人餐',
     })
   })
 })

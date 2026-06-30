@@ -128,6 +128,34 @@ describe("工单素材预览", () => {
     ]);
   });
 
+  test("Given industry license WebComponent contains image source, When building preview items, Then it reads viewList image", () => {
+    const items = buildMediaPreviewItems({
+      payload: {
+        certification: JSON.stringify({
+          viewList: [
+            {
+              text: "食品经营许可证",
+              imgSrc: "https://fg.foodism.pro/supplyhost/946/certification/license.jpg",
+            },
+          ],
+        }),
+      },
+      assets: {},
+      fields: ["certification"],
+      kindHint: "image",
+    });
+
+    expect(items).toEqual([
+      {
+        source: "https://fg.foodism.pro/supplyhost/946/certification/license.jpg",
+        url: "https://fg.foodism.pro/supplyhost/946/certification/license.jpg",
+        fileName: "license.jpg",
+        kind: "image",
+        canPreview: true,
+      },
+    ]);
+  });
+
   test("Given encoded url, When reading file name, Then it decodes the display name", () => {
     expect(getPreviewFileName("https://fg.foodism.pro/files/%E5%90%88%E5%90%8C.pdf?token=demo")).toBe("合同.pdf");
   });

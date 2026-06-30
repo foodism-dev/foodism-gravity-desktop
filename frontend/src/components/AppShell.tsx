@@ -31,15 +31,26 @@ export function AppShell({ authState, children, onSignOut }: AppShellProps) {
         </header>
       )}
 
-      <main className={cn("mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8", shouldHideHeader ? "py-3" : "py-6")}>
+      <main className={getAppShellMainClassName(pathname)}>
         {children}
       </main>
     </div>
   );
 }
 
+export function getAppShellMainClassName(pathname: string): string {
+  if (isTicketDetailPath(pathname)) {
+    return "w-full max-w-none px-0 py-0";
+  }
+  return cn("mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8", shouldHideAppShellHeader(pathname) ? "py-3" : "py-6");
+}
+
 export function shouldHideAppShellHeader(pathname: string): boolean {
   return pathname === "/tickets" || pathname.startsWith("/tickets/");
+}
+
+function isTicketDetailPath(pathname: string): boolean {
+  return pathname.startsWith("/tickets/");
 }
 
 export function AppNavigation({ className }: { className?: string }) {

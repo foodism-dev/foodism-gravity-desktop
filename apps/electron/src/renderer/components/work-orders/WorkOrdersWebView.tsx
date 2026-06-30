@@ -5,13 +5,14 @@
  */
 
 import * as React from 'react'
-import { useAtomValue } from 'jotai'
+import { atom, useAtom, useAtomValue } from 'jotai'
 import { MonitorUp } from 'lucide-react'
 import { authSessionAtom } from '@/atoms/auth'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { WORK_ORDERS_TAB_ID } from '@/atoms/tab-atoms'
 import { BrowserPageView } from '@/components/tabs/BrowserPageView'
 import { buildBrowserTabTitle, isOpenBrowserTabMessage, isReloadWorkOrdersMessage } from '@/lib/browser-tab-host-message'
+import { buildRefreshTicketMessage } from '@/lib/work-order-refresh-message'
 import { buildRebuildApprovalTab, buildWorkOrderWebUrl } from '@/lib/work-order-navigation'
 
 interface StartSsoLoginMessage {
@@ -21,7 +22,10 @@ interface StartSsoLoginMessage {
 interface OpenRebuildApprovalMessage {
   type: 'proma:open-rebuild-approval'
   supplyGoodsId: string
+  productName?: string
 }
+
+const pendingTicketRefreshIdsAtom = atom<Set<string>>(new Set<string>())
 
 function isStartSsoLoginMessage(value: unknown): value is StartSsoLoginMessage {
   return typeof value === 'object'
@@ -38,10 +42,16 @@ function isOpenRebuildApprovalMessage(value: unknown): value is OpenRebuildAppro
     && 'supplyGoodsId' in value
     && typeof value.supplyGoodsId === 'string'
     && value.supplyGoodsId.trim().length > 0
+    && (
+      !('productName' in value)
+      || typeof value.productName === 'string'
+      || typeof value.productName === 'undefined'
+    )
 }
 
 export function WorkOrdersWebView(): React.ReactElement {
   const authSession = useAtomValue(authSessionAtom)
+  const [pendingTicketRefreshIds, setPendingTicketRefreshIds] = useAtom(pendingTicketRefreshIdsAtom)
   const openSession = useOpenSession()
   const workOrderWebUrl = React.useMemo(
     () => buildWorkOrderWebUrl(import.meta.env.VITE_PROMA_WORK_ORDERS_URL, {
@@ -68,9 +78,25 @@ export function WorkOrdersWebView(): React.ReactElement {
       })
       return
     }
-    const tab = buildRebuildApprovalTab(message.supplyGoodsId.trim())
+    const supplyGoodsId = message.supplyGoodsId.trim()
+    setPendingTicketRefreshIds((current) => new Set(current).add(supplyGoodsId))
+    const tab = buildRebuildApprovalTab(supplyGoodsId, message.productName)
     openSession(tab.type, tab.sessionId, tab.title)
-  }, [openSession])
+  }, [openSession, setPendingTicketRefreshIds])
+
+  React.useEffect(() => {
+    const refreshMessage = buildRefreshTicketMessage(pendingTicketRefreshIds)
+    if (!refreshMessage) return
+
+    window.electronAPI.browserTabPostMessage({
+      id: WORK_ORDERS_TAB_ID,
+      message: refreshMessage,
+    }).then(() => {
+      setPendingTicketRefreshIds(new Set<string>())
+    }).catch((error) => {
+      console.error('[我的工单] 通知详情页刷新失败:', error)
+    })
+  }, [pendingTicketRefreshIds, setPendingTicketRefreshIds])
 
   return (
     <BrowserPageView

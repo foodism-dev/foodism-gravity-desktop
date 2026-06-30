@@ -7,6 +7,8 @@ import {
   generateTicketInfoOptimization,
   getLinKeFeeSetupJobStatus,
   getLinKeDraftJobStatus,
+  getRebuildReferenceDetail,
+  getRebuildReferenceMetadata,
   getTicket,
   getTicketActionRecords,
   getTicketMetadata,
@@ -121,6 +123,56 @@ describe("前端 API", () => {
     expect(records[0]?.ticketId).toBe(2);
     expect(records[0]?.current.commissionRate).toBe(0.12);
     expect(records[0]?.operator.name).toBe("运营A");
+  });
+
+  test("Given Rebuild reference response, When loading reference detail, Then it returns stored payload only", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      entity: "SupplyCompany",
+      id: "945-company",
+      payload: {
+        companyName: "测试公司",
+        approvalState: { value: "approved", text: "approved" },
+      },
+    }));
+
+    const detail = await getRebuildReferenceDetail("SupplyCompany", "945-company");
+
+    expect(calls[0]?.url).toBe("http://localhost:8787/api/rebuild/references/SupplyCompany/945-company");
+    expect(detail.entity).toBe("SupplyCompany");
+    expect(detail.id).toBe("945-company");
+    expect(detail.payload.companyName).toBe("测试公司");
+    expect("fieldMetadata" in detail).toBe(false);
+  });
+
+  test("Given Rebuild reference metadata response, When loading reference metadata, Then it returns field labels and options", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      entity: "SupplyCompany",
+      field_metadata: {
+        auditStatus: {
+          label: "公司审核状态",
+          field_type: "PICKLIST",
+        },
+      },
+      field_options: {
+        auditStatus: [
+          {
+            value: "approved",
+            label: "审核通过",
+            sort_order: 1,
+            is_default: false,
+          },
+        ],
+      },
+    }));
+
+    const metadata = await getRebuildReferenceMetadata("SupplyCompany");
+
+    expect(calls[0]?.url).toBe("http://localhost:8787/api/rebuild/references/SupplyCompany/metadata");
+    expect(metadata.entity).toBe("SupplyCompany");
+    expect(metadata.fieldMetadata.auditStatus?.label).toBe("公司审核状态");
+    expect(metadata.fieldOptions.auditStatus?.[0]?.label).toBe("审核通过");
   });
 
   test("Given action record input, When creating record, Then it posts JSON and returns updated ticket", async () => {

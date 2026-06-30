@@ -3,6 +3,7 @@ import {
   GRAVITY_JOBS_QUEUE_NAME,
   LIN_KE_DRAFT_JOB_NAME,
   REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME,
+  REBUILD_SUPPLIER_SYNC_JOB_NAME,
   type GravityJobData,
   type GravityJobDataMap,
   type GravityJobName,
@@ -13,6 +14,7 @@ export {
   GRAVITY_JOBS_QUEUE_NAME,
   LIN_KE_DRAFT_JOB_NAME,
   REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME,
+  REBUILD_SUPPLIER_SYNC_JOB_NAME,
 } from "./types.ts";
 
 export interface ScheduledGravityJob<Name extends GravityJobName = GravityJobName> {
@@ -88,7 +90,10 @@ export function createBullMqGravityJobsQueue(connection = makeConnectionOptions(
     },
 
     async addJob<Name extends GravityJobName>(name: Name, data = {} as GravityJobDataMap[Name]): Promise<string> {
-      const job = await queue.add(name, data);
+      const job = await queue.add(name, data, name === REBUILD_SUPPLIER_SYNC_JOB_NAME ? {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 60 * 1000 },
+      } : undefined);
       return String(job.id);
     },
 

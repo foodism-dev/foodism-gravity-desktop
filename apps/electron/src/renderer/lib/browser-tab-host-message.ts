@@ -36,7 +36,7 @@ export function isReloadWorkOrdersMessage(value: unknown): value is ReloadWorkOr
 export function buildBrowserTabTitle(url: string): string {
   const matched = url.match(REBUILD_APPROVAL_URL_PATTERN)
   if (matched?.[1]) {
-    return `RB审核 · ${decodeURIComponent(matched[1])}`
+    return `rb 审核-${decodeURIComponent(matched[1])}`
   }
 
   try {

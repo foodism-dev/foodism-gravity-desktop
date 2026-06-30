@@ -1,7 +1,6 @@
 import { Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -14,10 +13,10 @@ import {
   type ProductOperationRatingResult,
   type ProductOperationRatingScores,
 } from "@/lib/product-operation-rating.ts";
-import { cn } from "@/lib/utils.ts";
 
 interface ProductOperationRatingPanelProps {
   value: ProductOperationRatingResult | null;
+  salesSelfRating: string;
   isSubmitting: boolean;
   isEditable: boolean;
   onSave: (rating: ProductOperationRatingResult) => void;
@@ -35,7 +34,7 @@ interface RatingScoreFieldProps {
   onChange: (value: number) => void;
 }
 
-export function ProductOperationRatingPanel({ value, isSubmitting, isEditable, onSave }: ProductOperationRatingPanelProps) {
+export function ProductOperationRatingPanel({ value, salesSelfRating, isSubmitting, isEditable, onSave }: ProductOperationRatingPanelProps) {
   const [scores, setScores] = useState<ProductOperationRatingScores>(() => buildInitialScores(value));
   const preview = useMemo(() => buildProductOperationRating(scores, value?.savedAt), [scores, value?.savedAt]);
 
@@ -64,64 +63,67 @@ export function ProductOperationRatingPanel({ value, isSubmitting, isEditable, o
   }
 
   return (
-    <Card className="border-0 bg-white shadow-sm">
-      <CardHeader className="pb-3">
+    <Card className="flex h-full max-h-full flex-col border-0 bg-white shadow-sm">
+      <CardHeader className="shrink-0 pb-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <CardTitle className="text-base">商品运营评级</CardTitle>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">
               {isEditable ? "填写商户评分与商品评分后，系统自动汇总总分和评级。" : "当前节点仅查看商品运营评级。"}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <RatingSummary label="总分" value={`${preview.totalScore.toFixed(1)} / 11`} />
-            <Badge variant="success" className={cn("rounded-full px-3 py-1 text-sm", preview.rating === "S" && "bg-amber-100 text-amber-800")}>
-              {preview.rating}
-            </Badge>
-          </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2">
-          <RatingGroup title="商户评分" maxScore="4.5">
-            {PRODUCT_OPERATION_RATING_FIELDS.merchant.map((field) => (
-              <RatingScoreField
-                key={field.key}
-                field={field}
-                value={scores.merchantScores[field.key]}
-                isEditable={isEditable}
-                onChange={(score) => updateMerchantScore(field.key, score)}
-              />
-            ))}
-          </RatingGroup>
-          <RatingGroup title="商品评分" maxScore="6.5">
-            {PRODUCT_OPERATION_RATING_FIELDS.product.map((field) => (
-              <RatingScoreField
-                key={field.key}
-                field={field}
-                value={scores.productScores[field.key]}
-                isEditable={isEditable}
-                onChange={(score) => updateProductScore(field.key, score)}
-              />
-            ))}
-          </RatingGroup>
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+        <div className="grid shrink-0 gap-2 sm:grid-cols-2">
+          <RatingMetricCard label="销售自评" value={salesSelfRating || "未保存"} helper="销售提报时选择" />
+          <RatingMetricCard label="建议总分" value="待配置" helper="模型建议暂未接入" />
+          <RatingMetricCard label="确认总分" value={preview.totalScore.toFixed(1)} helper="当前表单汇总" emphasis />
+          <RatingMetricCard label="最终评级" value={preview.rating} helper="按总分自动计算" tone={preview.rating === "S" ? "amber" : "emerald"} />
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 md:flex-row md:items-center md:justify-between">
-          <div className="text-xs leading-5 text-slate-500">
-            {value?.savedAt ? `上次保存：${formatSavedTime(value.savedAt)}` : "尚未保存评级结果"}
+        <div className="ticket-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          <div className="grid gap-3">
+            <RatingGroup title="商户评分" maxScore="4.5">
+              {PRODUCT_OPERATION_RATING_FIELDS.merchant.map((field) => (
+                <RatingScoreField
+                  key={field.key}
+                  field={field}
+                  value={scores.merchantScores[field.key]}
+                  isEditable={isEditable}
+                  onChange={(score) => updateMerchantScore(field.key, score)}
+                />
+              ))}
+            </RatingGroup>
+            <RatingGroup title="商品评分" maxScore="6.5">
+              {PRODUCT_OPERATION_RATING_FIELDS.product.map((field) => (
+                <RatingScoreField
+                  key={field.key}
+                  field={field}
+                  value={scores.productScores[field.key]}
+                  isEditable={isEditable}
+                  onChange={(score) => updateProductScore(field.key, score)}
+                />
+              ))}
+            </RatingGroup>
           </div>
-          {isEditable ? (
-            <Button
-              type="button"
-              onClick={() => onSave(buildProductOperationRating(scores))}
-              disabled={!isEditable || isSubmitting}
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
-            >
-              <Save className="h-4 w-4" />
-              {isSubmitting ? "保存中" : "保存评级结果"}
-            </Button>
-          ) : null}
+
+          <div className="flex flex-col gap-3 border-t border-slate-100 pt-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-xs leading-5 text-slate-500">
+              {value?.savedAt ? `上次保存：${formatSavedTime(value.savedAt)}` : "尚未保存评级结果"}
+            </div>
+            {isEditable ? (
+              <Button
+                type="button"
+                onClick={() => onSave(buildProductOperationRating(scores))}
+                disabled={!isEditable || isSubmitting}
+                className="bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                <Save className="h-4 w-4" />
+                {isSubmitting ? "保存中" : "保存评级结果"}
+              </Button>
+            ) : null}
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -136,12 +138,28 @@ function buildInitialScores(value: ProductOperationRatingResult | null): Product
   };
 }
 
-function RatingSummary({ label, value }: { label: string; value: string }) {
+function RatingMetricCard({
+  label,
+  value,
+  helper,
+  emphasis = false,
+  tone = "violet",
+}: {
+  label: string;
+  value: string;
+  helper: string;
+  emphasis?: boolean;
+  tone?: "amber" | "emerald" | "violet";
+}) {
+  const valueColor = tone === "amber" ? "text-amber-500" : tone === "emerald" ? "text-emerald-600" : "text-violet-600";
   return (
-    <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm">
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className="font-semibold text-slate-950">{value}</span>
-    </span>
+    <div className="rounded-md bg-white px-2.5 py-2 text-center shadow-sm ring-1 ring-slate-100">
+      <div className="text-[11px] font-medium text-slate-500">{label}</div>
+      <div className={`mt-1 text-xl font-semibold tracking-normal ${emphasis ? "text-emerald-600" : valueColor}`}>
+        {value}
+      </div>
+      <div className="mt-0.5 text-[10px] leading-4 text-slate-400">{helper}</div>
+    </div>
   );
 }
 

@@ -62,6 +62,20 @@ export interface TicketMetadata {
   fieldMetadata: TicketFieldMetadataMap;
 }
 
+export type RebuildReferenceEntity = "SupplyCompany" | "SupplyHost";
+
+export interface RebuildReferenceDetail {
+  entity: RebuildReferenceEntity;
+  id: string;
+  payload: Record<string, unknown>;
+}
+
+export interface RebuildReferenceMetadata {
+  entity: RebuildReferenceEntity;
+  fieldMetadata: TicketFieldMetadataMap;
+  fieldOptions: TicketFieldOptionsMap;
+}
+
 export interface TicketListQuery {
   status?: TicketStatus;
   businessStatus?: TicketBusinessStatus;
@@ -171,6 +185,18 @@ interface TicketJobActionResponse {
 interface TicketMetadataResponse {
   field_options?: TicketFieldOptionsApiMap;
   field_metadata?: TicketFieldMetadataApiMap;
+}
+
+interface RebuildReferenceDetailResponse {
+  entity: RebuildReferenceEntity;
+  id: string;
+  payload: Record<string, unknown>;
+}
+
+interface RebuildReferenceMetadataResponse {
+  entity: RebuildReferenceEntity;
+  field_metadata?: TicketFieldMetadataApiMap;
+  field_options?: TicketFieldOptionsApiMap;
 }
 
 interface ApiErrorResponse {
@@ -347,6 +373,22 @@ function normalizeTicketMetadata(response: TicketMetadataResponse): TicketMetada
   };
 }
 
+function normalizeRebuildReferenceDetail(response: RebuildReferenceDetailResponse): RebuildReferenceDetail {
+  return {
+    entity: response.entity,
+    id: response.id,
+    payload: response.payload,
+  };
+}
+
+function normalizeRebuildReferenceMetadata(response: RebuildReferenceMetadataResponse): RebuildReferenceMetadata {
+  return {
+    entity: response.entity,
+    fieldMetadata: normalizeFieldMetadata(response.field_metadata),
+    fieldOptions: normalizeFieldOptions(response.field_options),
+  };
+}
+
 export async function listTickets(query: TicketListQuery = {}): Promise<TicketListResult> {
   const params = new URLSearchParams();
   if (query.status) params.set("status", query.status);
@@ -403,6 +445,21 @@ export async function getTicketActionRecords(supplyGoodsId: string): Promise<Tic
     `/api/tickets/${encodeURIComponent(supplyGoodsId)}/action-records`,
   );
   return response.records.map((record) => normalizeTicketActionRecord(record));
+}
+
+export async function getRebuildReferenceDetail(
+  entity: RebuildReferenceEntity,
+  id: string,
+): Promise<RebuildReferenceDetail> {
+  return normalizeRebuildReferenceDetail(await apiFetch<RebuildReferenceDetailResponse>(
+    `/api/rebuild/references/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`,
+  ));
+}
+
+export async function getRebuildReferenceMetadata(entity: RebuildReferenceEntity): Promise<RebuildReferenceMetadata> {
+  return normalizeRebuildReferenceMetadata(await apiFetch<RebuildReferenceMetadataResponse>(
+    `/api/rebuild/references/${encodeURIComponent(entity)}/metadata`,
+  ));
 }
 
 export async function createTicketActionRecord(

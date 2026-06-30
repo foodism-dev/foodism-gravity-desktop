@@ -18,6 +18,8 @@ const fieldMetadata: TicketFieldMetadataMap = {
   saleBegin: { label: "售卖开始时间", fieldType: "DATE" },
   mainPic: { label: "商品主图", fieldType: "IMAGE" },
   packages: { label: "套餐内容", fieldType: "WEBCOMPONENT" },
+  certification: { label: "行业许可证", fieldType: "WEBCOMPONENT" },
+  certificationType: { label: "行业许可证类型", fieldType: "MULTISELECT" },
 };
 
 const fieldOptions: TicketFieldOptionsMap = {
@@ -121,7 +123,53 @@ describe("字段类型展示", () => {
     });
 
     expect(formatPayloadValue(packageJson, "packages", { fieldMetadata, fieldOptions })).toContain("主食");
-    expect(formatPayloadValue(packageJson, "packages", { fieldMetadata, fieldOptions })).toContain("米饭 x6");
+    expect(formatPayloadValue(packageJson, "packages", { fieldMetadata, fieldOptions })).toContain("米饭");
+    expect(formatPayloadValue(packageJson, "packages", { fieldMetadata, fieldOptions })).toContain("份数 6");
+  });
+
+  test("Given package json with item price fields, When formatting, Then it shows group, item, original price, quantity and unit price", () => {
+    const packageJson = JSON.stringify({
+      viewList: [
+        {
+          groupName: "双人套餐",
+          list: [
+            {
+              title: "牛肉拼盘",
+              originPrice: "88.00",
+              num: "2",
+              price: "39.00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const formatted = formatPayloadValue(packageJson, "packages", { fieldMetadata, fieldOptions });
+
+    expect(formatted).toContain("双人套餐");
+    expect(formatted).toContain("牛肉拼盘");
+    expect(formatted).toContain("原价 88.00");
+    expect(formatted).toContain("份数 2");
+    expect(formatted).toContain("单价 39.00");
+  });
+
+  test("Given industry license WebComponent, When certification type is empty, Then it displays license text", () => {
+    const certification = JSON.stringify({
+      viewList: [
+        {
+          text: "食品经营许可证",
+          imgSrc: "rb/20260629/food-license.jpg",
+        },
+      ],
+    });
+
+    expect(
+      getPayloadDisplayText(
+        { certificationType: null, certification },
+        ["certificationType", "certification"],
+        { fieldMetadata, fieldOptions },
+      ),
+    ).toBe("食品经营许可证");
   });
 
   test("Given media array, When reading media items, Then it preserves file paths", () => {

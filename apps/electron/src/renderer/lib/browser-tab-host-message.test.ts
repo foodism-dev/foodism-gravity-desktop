@@ -5,7 +5,7 @@ import { buildBrowserTabTitle, isOpenBrowserTabMessage, isReloadWorkOrdersMessag
 describe('业务浏览器 Host 消息', () => {
   test('Given RB approval url, When building browser tab title, Then it uses supply goods id', () => {
     expect(buildBrowserTabTitle('https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods/944-019efa94400a73d9'))
-      .toBe('RB审核 · 944-019efa94400a73d9')
+      .toBe('rb 审核-944-019efa94400a73d9')
   })
 
   test('Given Lin-Ke draft url, When building browser tab title, Then it uses draft context', () => {

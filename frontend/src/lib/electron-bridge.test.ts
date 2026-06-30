@@ -3,18 +3,21 @@ import { describe, expect, test } from "bun:test";
 import {
   buildOpenBrowserTabMessage,
   buildOpenRebuildApprovalMessage,
+  buildRefreshTicketMessage,
   buildReloadWorkOrdersMessage,
   isElectronEmbedded,
+  shouldRefreshTicketFromMessage,
   openBrowserTabInElectron,
   openRebuildApprovalInElectron,
   reloadWorkOrdersInElectron,
 } from "./electron-bridge.ts";
 
 describe("Electron 嵌入桥接消息", () => {
-  test("Given supply goods id, When building RB approval message, Then message is stable", () => {
-    expect(buildOpenRebuildApprovalMessage("F00-838")).toEqual({
+  test("Given supply goods id and product name, When building RB approval message, Then message is stable", () => {
+    expect(buildOpenRebuildApprovalMessage("F00-838", "招牌双人餐")).toEqual({
       type: "proma:open-rebuild-approval",
       supplyGoodsId: "F00-838",
+      productName: "招牌双人餐",
     });
   });
 
@@ -22,6 +25,21 @@ describe("Electron 嵌入桥接消息", () => {
     expect(buildReloadWorkOrdersMessage()).toEqual({
       type: "proma:reload-work-orders",
     });
+  });
+
+  test("Given ticket ids, When building refresh message, Then message contains unique ids", () => {
+    expect(buildRefreshTicketMessage([" 944-a ", "944-a", "944-b"])).toEqual({
+      type: "proma:refresh-ticket",
+      supplyGoodsIds: ["944-a", "944-b"],
+    });
+  });
+
+  test("Given refresh message, When checking current ticket, Then only matching ticket refreshes", () => {
+    const message = buildRefreshTicketMessage(["944-a", "944-b"]);
+
+    expect(shouldRefreshTicketFromMessage(message, "944-a")).toBe(true);
+    expect(shouldRefreshTicketFromMessage(message, "944-c")).toBe(false);
+    expect(shouldRefreshTicketFromMessage({ type: "proma:reload-work-orders" }, "944-a")).toBe(false);
   });
 
   test("Given http url, When building browser tab message, Then message is stable", () => {
@@ -40,7 +58,7 @@ describe("Electron 嵌入桥接消息", () => {
   });
 
   test("Given page is inside Electron webview, When opening RB approval, Then it asks host to open a desktop tab", () => {
-    const hostMessages: string[] = [];
+    const hostMessages: Array<{ supplyGoodsId: string; productName?: string }> = [];
     const parentMessages: unknown[] = [];
     const currentWindow = {
       parent: {
@@ -50,15 +68,15 @@ describe("Electron 嵌入桥接消息", () => {
       },
       location: { search: "?embedded=electron" },
       promaElectronWebview: {
-        openRebuildApproval(supplyGoodsId: string) {
-          hostMessages.push(supplyGoodsId);
+        openRebuildApproval(supplyGoodsId: string, productName?: string) {
+          hostMessages.push({ supplyGoodsId, productName });
         },
       },
     } as unknown as Window;
 
-    expect(openRebuildApprovalInElectron("944-019efa94400a73d9", { currentWindow })).toBe(true);
+    expect(openRebuildApprovalInElectron("944-019efa94400a73d9", "招牌双人餐", { currentWindow })).toBe(true);
 
-    expect(hostMessages).toEqual(["944-019efa94400a73d9"]);
+    expect(hostMessages).toEqual([{ supplyGoodsId: "944-019efa94400a73d9", productName: "招牌双人餐" }]);
     expect(parentMessages).toEqual([]);
   });
 

@@ -200,6 +200,8 @@ export interface ElectronAPI {
   browserTabHide: (input: BrowserTabIdInput) => Promise<void>
   /** 刷新业务浏览器 Tab */
   browserTabReload: (input: BrowserTabIdInput) => Promise<void>
+  /** 向业务浏览器 Tab 内页面发送消息 */
+  browserTabPostMessage: (input: BrowserTabPostMessageInput) => Promise<void>
   /** 销毁业务浏览器 Tab */
   browserTabDestroy: (input: BrowserTabIdInput) => Promise<void>
   /** 订阅业务页面发给桌面端的 Host 消息 */
@@ -1119,6 +1121,11 @@ interface BrowserTabIdInput {
   id: string
 }
 
+interface BrowserTabPostMessageInput {
+  id: string
+  message: unknown
+}
+
 interface BrowserTabHostMessagePayload {
   tabId: string
   message: unknown
@@ -1203,6 +1210,9 @@ const electronAPI: ElectronAPI = {
   },
   browserTabReload: (input: BrowserTabIdInput) => {
     return ipcRenderer.invoke('browser-tab:reload', input)
+  },
+  browserTabPostMessage: (input: BrowserTabPostMessageInput) => {
+    return ipcRenderer.invoke('browser-tab:post-message', input)
   },
   browserTabDestroy: (input: BrowserTabIdInput) => {
     return ipcRenderer.invoke('browser-tab:destroy', input)

@@ -49,10 +49,15 @@ export function buildRebuildApprovalUrl(supplyGoodsId: string): string {
   return `${REBUILD_SUPPLY_GOODS_APPROVAL_BASE_URL}/${encodeURIComponent(supplyGoodsId)}`
 }
 
-export function buildRebuildApprovalTab(supplyGoodsId: string): RebuildApprovalTab {
+function buildRebuildApprovalTitle(supplyGoodsId: string, productName?: string): string {
+  const titleTarget = productName?.trim() || supplyGoodsId
+  return `rb 审核-${titleTarget}`
+}
+
+export function buildRebuildApprovalTab(supplyGoodsId: string, productName?: string): RebuildApprovalTab {
   return {
     type: 'web',
     sessionId: buildRebuildApprovalUrl(supplyGoodsId),
-    title: `RB审核 · ${supplyGoodsId}`,
+    title: buildRebuildApprovalTitle(supplyGoodsId, productName),
   }
 }

@@ -28,7 +28,14 @@ interface PackageGroup {
 interface PackageItem {
   title?: unknown;
   num?: unknown;
+  count?: unknown;
+  quantity?: unknown;
   price?: unknown;
+  unitPrice?: unknown;
+  salePrice?: unknown;
+  originPrice?: unknown;
+  originalPrice?: unknown;
+  marketPrice?: unknown;
 }
 
 export function getPayloadValue(payload: Record<string, unknown>, field: string): unknown {
@@ -181,8 +188,11 @@ function formatWebComponent(value: string): string {
   if (!parsed) return value;
   if (Array.isArray(parsed.viewList)) {
     const lines = parsed.viewList.flatMap((group) => formatPackageGroup(group));
-    const totalPrice = parsed.totalPrice === undefined ? "" : `合计原价：${String(parsed.totalPrice)}`;
-    return [...lines, totalPrice].filter(Boolean).join("\n");
+    if (lines.length > 0) {
+      const totalPrice = parsed.totalPrice === undefined ? "" : `合计原价：${String(parsed.totalPrice)}`;
+      return [...lines, totalPrice].filter(Boolean).join("\n");
+    }
+    return parsed.viewList.map(formatSimpleWebComponentItem).filter(Boolean).join("、");
   }
   return value;
 }
@@ -214,11 +224,31 @@ function formatPackageGroup(group: unknown): string[] {
 function formatPackageItem(item: unknown): string {
   if (!isRecord(item)) return "";
   const packageItem = item as PackageItem;
-  const title = String(packageItem.title ?? "").trim();
+  const title = readFirstText(packageItem.title);
   if (!title) return "";
-  const num = packageItem.num === undefined ? "" : ` x${String(packageItem.num)}`;
-  const price = packageItem.price === undefined ? "" : ` (${String(packageItem.price)})`;
-  return `${title}${num}${price}`;
+  const quantity = readFirstText(packageItem.num, packageItem.count, packageItem.quantity);
+  const unitPrice = readFirstText(packageItem.unitPrice, packageItem.price, packageItem.salePrice);
+  const originPrice = readFirstText(packageItem.originPrice, packageItem.originalPrice, packageItem.marketPrice);
+  const details = [
+    originPrice ? `原价 ${originPrice}` : "",
+    quantity ? `份数 ${quantity}` : "",
+    unitPrice ? `单价 ${unitPrice}` : "",
+  ].filter(Boolean);
+  return [title, ...details].join(" · ");
+}
+
+function formatSimpleWebComponentItem(item: unknown): string {
+  if (!isRecord(item)) return "";
+  return readFirstText(item.text, item.title, item.name);
+}
+
+function readFirstText(...values: unknown[]): string {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 function toMediaItems(value: unknown): string[] {
@@ -226,11 +256,22 @@ function toMediaItems(value: unknown): string[] {
     return value.flatMap(toMediaItems);
   }
   if (isRecord(value)) {
-    const url = value.url ?? value.path ?? value.file ?? value.name;
-    return typeof url === "string" && url.trim() ? [url.trim()] : [];
+    return [
+      ...toMediaItems(value.url ?? value.path ?? value.file ?? value.name ?? value.imgSrc),
+      ...toMediaItems(value.viewList),
+    ];
   }
   if (typeof value === "string" && value.trim()) {
-    return [value.trim()];
+    const parsed = parseJsonValue(value.trim());
+    return parsed === null ? [value.trim()] : toMediaItems(parsed);
   }
   return [];
+}
+
+function parseJsonValue(value: string): unknown | null {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 }

@@ -42,6 +42,11 @@ interface RebuildR2AssetUploaderOptions {
   fetchImpl?: R2Fetch;
 }
 
+interface ReplacedValue {
+  value: unknown;
+  changed: boolean;
+}
+
 const ASSET_FIELD_TYPES = new Set(["IMAGE", "FILE", "ATTACHMENT"]);
 const NON_ASSET_FIELD_TYPES = [
   "TEXT",
@@ -66,9 +71,29 @@ const ASSET_FIELD_NAME_KEYWORDS = [
   "contract",
   "license",
   "certificate",
+  "certification",
 ];
 
 const DEFAULT_R2_ASSET_PREFIX = "";
+const ASSET_SOURCE_FILE_EXTENSIONS = [
+  "avif",
+  "bmp",
+  "csv",
+  "doc",
+  "docx",
+  "gif",
+  "heic",
+  "jpeg",
+  "jpg",
+  "pdf",
+  "png",
+  "rar",
+  "svg",
+  "webp",
+  "xls",
+  "xlsx",
+  "zip",
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -103,12 +128,34 @@ function collectSourcePaths(value: unknown): string[] {
     return value.flatMap(collectSourcePaths);
   }
   if (isRecord(value)) {
-    return collectSourcePaths(value.url ?? value.path ?? value.file ?? value.name ?? value.value);
+    return [
+      ...collectSourcePaths(value.url ?? value.path ?? value.file ?? value.name ?? value.value ?? value.imgSrc),
+      ...collectSourcePaths(value.viewList),
+    ];
   }
   if (typeof value === "string" && value.trim()) {
-    return [value.trim()];
+    const parsed = parseJsonValue(value.trim());
+    return parsed === null && isAssetSourceValue(value.trim()) ? [value.trim()] : collectSourcePaths(parsed);
   }
   return [];
+}
+
+function isAssetSourceValue(value: string): boolean {
+  const normalized = value.trim();
+  if (/^https?:\/\//i.test(normalized)) return true;
+  if (/^(rb|storage|supplygoods|supplyhost|supplycompany)\//i.test(normalized.replace(/^\/+/, ""))) return true;
+
+  const pathname = normalized.split(/[?#]/)[0] ?? normalized;
+  const extension = pathname.split(".").pop()?.toLowerCase() ?? "";
+  return ASSET_SOURCE_FILE_EXTENSIONS.includes(extension);
+}
+
+function parseJsonValue(value: string): unknown | null {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function uniqueValues(values: string[]): string[] {
@@ -326,10 +373,56 @@ export function replacePayloadAssetUrls(
   const nextPayload = { ...payload };
   for (const [fieldName, items] of Object.entries(assets)) {
     if (items.length > 0) {
-      nextPayload[fieldName] = items.map((item) => item.url);
+      const nestedValue = replaceJsonStringAssetSources(payload[fieldName], items);
+      nextPayload[fieldName] = nestedValue.changed ? nestedValue.value : items.map((item) => item.url);
     }
   }
   return nextPayload;
+}
+
+function replaceJsonStringAssetSources(value: unknown, assets: RebuildAssetItem[]): ReplacedValue {
+  if (typeof value !== "string" || !value.trim()) {
+    return { value, changed: false };
+  }
+  const parsed = parseJsonValue(value.trim());
+  if (parsed === null) {
+    return { value, changed: false };
+  }
+  const replaced = replaceAssetSources(parsed, assets);
+  return {
+    value: replaced.changed ? JSON.stringify(replaced.value) : value,
+    changed: replaced.changed,
+  };
+}
+
+function replaceAssetSources(value: unknown, assets: RebuildAssetItem[]): ReplacedValue {
+  if (typeof value === "string") {
+    const matchedAsset = assets.find((asset) => asset.source === value);
+    return matchedAsset ? { value: matchedAsset.url, changed: true } : { value, changed: false };
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const nextValue = value.map((item) => {
+      const replaced = replaceAssetSources(item, assets);
+      changed = changed || replaced.changed;
+      return replaced.value;
+    });
+    return { value: nextValue, changed };
+  }
+
+  if (isRecord(value)) {
+    let changed = false;
+    const nextValue: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      const replaced = replaceAssetSources(item, assets);
+      changed = changed || replaced.changed;
+      nextValue[key] = replaced.value;
+    }
+    return { value: nextValue, changed };
+  }
+
+  return { value, changed: false };
 }
 
 export function createRebuildR2AssetUploader(options: RebuildR2AssetUploaderOptions): RebuildAssetUploader {

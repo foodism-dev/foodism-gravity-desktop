@@ -42,18 +42,28 @@ import {
   confirmTicketInfoOptimization,
   getLinKeFeeSetupJobStatus,
   getLinKeDraftJobStatus,
+  getRebuildReferenceDetail,
+  getRebuildReferenceMetadata,
   getTicket,
   getTicketActionRecords,
   retryLinKeDraftJob,
   retryLinKeProductTracking,
   startLinKeFeeSetupJob,
   type LinKeFeeRates,
+  type RebuildReferenceDetail,
+  type RebuildReferenceEntity,
+  type RebuildReferenceMetadata,
   type TicketActionRecord,
   type TicketMetadata,
   type TicketRecord,
 } from "@/lib/api.ts";
 import { getPayloadDisplayText, type FieldDisplayContext } from "@/lib/field-display.ts";
-import { isElectronEmbedded, openBrowserTabInElectron, openRebuildApprovalInElectron } from "@/lib/electron-bridge.ts";
+import {
+  isElectronEmbedded,
+  openBrowserTabInElectron,
+  openRebuildApprovalInElectron,
+  shouldRefreshTicketFromMessage,
+} from "@/lib/electron-bridge.ts";
 import { buildMediaPreviewItems, type MediaPreviewItem, type MediaPreviewKind } from "@/lib/media-preview.ts";
 import {
   haveSameVisiblePackageNames,
@@ -97,7 +107,8 @@ interface DetailField {
   label: string;
   fields: string[];
   empty?: string;
-  kind?: "text" | "link" | "long";
+  kind?: "text" | "link" | "long" | "reference";
+  referenceEntity?: RebuildReferenceEntity;
 }
 
 interface MediaField {
@@ -108,7 +119,6 @@ interface MediaField {
 
 interface DetailSection {
   title: string;
-  description?: string;
   fields: DetailField[];
 }
 
@@ -119,6 +129,12 @@ interface CommissionRateField {
 }
 
 type CommissionRateValues = Record<string, string>;
+
+interface ReportReferenceField {
+  label: string;
+  fields: string[];
+  kindHint?: MediaPreviewKind;
+}
 
 const COMMISSION_RATE_FIELDS: CommissionRateField[] = [
   { key: "onlineOperation", label: "线上经营", max: 80 },
@@ -132,99 +148,71 @@ const LIN_KE_FEE_SETUP_SAVE_VERSION = "product_commission_save_v1";
 
 const BASIC_SECTIONS: DetailSection[] = [
   {
-    title: "提报基础信息",
+    title: "商品基础信息",
     fields: [
       { label: "商品名称", fields: ["goodsName", "goodsNameInput"], kind: "long" },
-      { label: "提报商户", fields: ["hostNameInput", "rbhost.hostName", "rbhost"] },
-      { label: "提报公司", fields: ["companyName", "company.companyName", "company"] },
-      { label: "不参与活动门店", fields: ["excludeHost"], empty: "无" },
-      { label: "是否使用TP权益", fields: ["isTpGoods"], empty: "否" },
-      { label: "商户绑定TP包", fields: ["hostTpRightsBind.curTpRightsOrderNo"], empty: "无" },
-      { label: "使用CPS类型", fields: ["supplyTpChannel.text", "supplyTpChannel"] },
+      { label: "提报商户", fields: ["rbhost", "rbhost.hostName", "hostNameInput"], kind: "reference", referenceEntity: "SupplyHost" },
+      { label: "提报公司", fields: ["company", "company.companyName", "companyName"], kind: "reference", referenceEntity: "SupplyCompany" },
       { label: "商品ID", fields: ["goodsId"] },
-      { label: "预览链接", fields: ["previewUrl"], kind: "link" },
-      { label: "入库商品", fields: ["targetGoods", "goodsNameInput"], kind: "link" },
-    ],
-  },
-  {
-    title: "类目与渠道",
-    fields: [
       { label: "套餐类型", fields: ["mealType.text", "mealType"] },
       { label: "签约城市", fields: ["signCity", "bdCity"] },
-      { label: "商品类目", fields: ["classification"], kind: "long" },
-      { label: "商品计划上线渠道", fields: ["showChannel.text", "onlineChannel", "showChannel"] },
+      { label: "商品类目", fields: ["classification"] },
     ],
   },
 ];
 
 const PACKAGE_SECTIONS: DetailSection[] = [
   {
-    title: "套餐内容",
-    description: "价格、套餐说明、购买须知与商品特色。",
+    title: "套餐与价格",
     fields: [
-      { label: "套餐组名", fields: ["goodsNameInput", "goodsName"] },
-      { label: "原价", fields: ["originPrice"] },
-      { label: "售价", fields: ["price"] },
-      { label: "结算价", fields: ["supplyPrice"] },
-      { label: "折扣", fields: ["discount"] },
+      { label: "适用门店数量", fields: ["hostNum"], empty: "1" },
+      { label: "建议使用人数", fields: ["eatPersonNum"], empty: "1" },
+      { label: "套餐限购", fields: ["singleUserPurchaseLimit", "limitation"], empty: "不限购" },
       { label: "套餐内容", fields: ["packages", "details"], kind: "long" },
+      { label: "售价", fields: ["price"] },
+      { label: "原价", fields: ["originPrice"] },
+      { label: "扣点", fields: ["commissionRate", "commissionRates", "deductionRate", "takeRate"] },
+      { label: "折扣", fields: ["discount"] },
       { label: "购买须知", fields: ["presentingRemindWords", "guideline", "reservationRule"], kind: "long" },
       { label: "商品特色", fields: ["goodsFeatures", "salePoint", "hotReason"], kind: "long" },
     ],
   },
   {
-    title: "规则与限制",
+    title: "规则与时间",
     fields: [
-      { label: "限购", fields: ["singleUserPurchaseLimit", "limitation"], empty: "否" },
-      { label: "投放渠道", fields: ["onlineChannel", "showChannel.text", "showChannel", "channelLimit"], empty: "不限制" },
       { label: "是否可以外带餐食", fields: ["isOutMeal"], empty: "否" },
-      { label: "是否可以打包", fields: ["isUseBox"], empty: "否" },
       { label: "是否可以使用包间", fields: ["isCoupoun"], empty: "否" },
-      { label: "是否可以享受店内其他优惠", fields: ["presentingRemindConfirm"], empty: "否" },
-      { label: "建议使用人数", fields: ["eatPersonNum"], empty: "1" },
-      { label: "最多使用人数", fields: ["maxEatPersonNum"], empty: "1" },
-      { label: "是否包含保险", fields: ["isInsurance"], empty: "否" },
-      { label: "节假日是否额外收费", fields: ["isFeeExceptHoliday"], empty: "否" },
-      { label: "是否需要取票", fields: ["isGetTicket"], empty: "否" },
-      { label: "适用人群", fields: ["acceptGroup.text", "acceptGroup"], empty: "通用人群" },
-      { label: "是否限制性别", fields: ["isLimitSexNew.text", "isLimitSex"], empty: "不限制" },
-      { label: "是否限制长短发", fields: ["isLimitHairNew.text", "isLimitHair"], empty: "不限制" },
-      { label: "商家原会员是否限制体验", fields: ["isLimitExperience"], empty: "否" },
+      { label: "是否额外收费", fields: ["isFeeExceptHoliday", "isExtraCharge", "extraCharge"], empty: "否" },
+      { label: "售卖开始时间", fields: ["saleBegin"] },
+      { label: "售卖结束时间", fields: ["saleUntil"] },
+      { label: "核销有效截止日期/核销使用天数", fields: ["validUntil", "validDays", "validDay", "useDays", "useDay"] },
+      { label: "预约规则", fields: ["reservationRule.text", "reservationRule"] },
+      { label: "营业时间", fields: ["businessHours", "openingHours", "useDate.text", "useDate", "useStartTime", "useEndTime"] },
     ],
   },
   {
-    title: "售卖与预约",
+    title: "结算与签约",
     fields: [
-      { label: "适用门店数量", fields: ["hostNum"], empty: "1" },
-      { label: "售卖开始时间", fields: ["saleBegin"] },
-      { label: "售卖结束时间", fields: ["saleUntil"] },
-      { label: "核销有效截止日期", fields: ["validUntil"] },
       { label: "签约份数", fields: ["signAmount"] },
       { label: "免结算份数", fields: ["freeSettleAmount"] },
-      { label: "免结算金额", fields: ["freeSettleNote"] },
+      { label: "免结算金额", fields: ["freeSettleNote", "freeSettleMoney", "freeSettlePrice"] },
       { label: "免结算抽佣比例", fields: ["freeSettleRatio"] },
-      { label: "预约规则", fields: ["reservationRule.text", "reservationRule"] },
-      { label: "提前预约时间", fields: ["advanceBookDate"] },
-      { label: "单位", fields: ["timeUnit.text", "timeUnit"] },
-      { label: "使用时间", fields: ["useDate.text", "useStartTime", "useEndTime"] },
     ],
   },
 ];
 
 const OPERATION_SECTIONS: DetailSection[] = [
   {
-    title: "商户与销售信息",
+    title: "商户经营与审批",
     fields: [
       { label: "大区评级", fields: ["selfRatingNew.text", "selfRating", "acnLevel"] },
-      { label: "是否规划爆品", fields: ["isHotPlanned"], empty: "否" },
       { label: "签约BD", fields: ["bdUser.fullName", "bdUser"] },
       { label: "签约BD小组", fields: ["bdGroup"] },
       { label: "签约BD城市", fields: ["bdCity"] },
       { label: "签约BD小区", fields: ["bdSubRegion"] },
       { label: "签约BD大区", fields: ["bdRegion"] },
-      { label: "商户PoiID匹配成功", fields: ["isHostPOIIDMatch"], empty: "否" },
       { label: "OA审批类型", fields: ["OAApprovalType"], empty: "无" },
-      { label: "OA审批编号", fields: ["OAApprovalNo"], empty: "无" },
+      { label: "OA审批编号", fields: ["OAApprovalNo"], empty: "未提供 OA 审批编号" },
     ],
   },
 ];
@@ -234,9 +222,43 @@ const MEDIA_FIELDS: MediaField[] = [
   { label: "商品轮播图", fields: ["rbimages"] },
   { label: "套餐详情页配图", fields: ["detailImages"] },
   { label: "商户近30天经营流水", fields: ["regionRatingCertificate"] },
+  { label: "城市品审截图", fields: ["cityQualityReviewScreenshot", "cityReviewScreenshot", "cityAuditScreenshot"] },
   { label: "套餐合同", fields: ["packageContract"], kindHint: "pdf" },
-  { label: "营业执照", fields: ["businessLicensePicture"] },
-  { label: "食品经营许可证", fields: ["foodLicense"] },
+];
+
+const SUPPLY_COMPANY_REPORT_FIELDS: ReportReferenceField[] = [
+  { label: "公司名称", fields: ["companyName", "name", "text"] },
+  { label: "公司ID", fields: ["SupplyCompanyId", "supplyCompanyId", "id", "value"] },
+  { label: "公司所在城市", fields: ["city", "bdCity", "companyCity"] },
+  { label: "公司是否重复提报", fields: ["isRepeatSubmit", "isDuplicateSubmit", "isRepeated"] },
+  { label: "公司详细地址", fields: ["address", "companyAddress"] },
+  { label: "公司审核状态", fields: ["auditStatus"] },
+  { label: "来客账户ID", fields: ["guestId"] },
+  { label: "公司合同", fields: ["coontractFile", "publicityContract", "companyContract"], kindHint: "pdf" },
+  { label: "公司资质", fields: ["qualification", "businessLicensePicture", "businessLicense", "foodLicense"] },
+  { label: "收款委托授权书", fields: ["authLetter", "authorizationLetter", "collectionAuthorizationLetter", "receiptAuthorizationLetter"], kindHint: "image" },
+  { label: "法人名称", fields: ["legalPerson", "legalPersonName"] },
+  { label: "法人手机号", fields: ["legalPersonMobile", "legalPersonPhone"] },
+  { label: "公司联系人手机号", fields: ["contactMobile", "contactPhone", "telephone"] },
+];
+
+const SUPPLY_HOST_REPORT_FIELDS: ReportReferenceField[] = [
+  { label: "主商户名称", fields: ["hostName", "name", "text"] },
+  { label: "来客门店ID", fields: ["guestId"] },
+  { label: "商户ID", fields: ["SupplyHostId", "supplyHostId", "hostId", "id", "value"] },
+  { label: "高德ID", fields: ["gaodeId", "amapId"] },
+  { label: "商户审核状态", fields: ["approvalState", "approvalState.text"] },
+  { label: "是否为重复提报商户", fields: ["isRepeatSubmit", "isDuplicateSubmit", "isRepeated"] },
+  { label: "城市", fields: ["city", "bdCity"] },
+  { label: "区域商圈", fields: ["district", "businessArea", "regionBusinessArea"] },
+  { label: "地址", fields: ["address"] },
+  { label: "联系电话", fields: ["telephone", "phone"] },
+  { label: "商户营业时间", fields: ["businessHours", "openingHours"] },
+  { label: "商户桌数", fields: ["tableCount", "tables"] },
+  { label: "商户头图", fields: ["hostPic", "headPic", "mainPic"], kindHint: "image" },
+  { label: "商家营业执照", fields: ["businessLicensePicture", "businessLicense"], kindHint: "image" },
+  { label: "行业许可证类型", fields: ["certificationType", "certification"] },
+  { label: "行业许可证", fields: ["certification"], kindHint: "image" },
 ];
 
 export function TicketDetailPage({ ticketId, isLinKeTestSkipVisible, skipLinKeExternal }: TicketDetailPageProps) {
@@ -343,6 +365,7 @@ function LoadedTicketDetail({
   const title = displayPayloadText(currentPayload, metadata, "goodsName", "goodsNameInput") || "未命名商品";
   const merchant = displayPayloadText(currentPayload, metadata, "hostNameInput", "rbhost.hostName", "rbhost") || "未提供商户";
   const headerBadges = useMemo(() => buildTicketHeaderBadges(ticket), [ticket]);
+  const salesSelfRating = displayPayloadText(currentPayload, metadata, "selfRatingNew.text", "selfRating", "acnLevel");
   const productOperationRating = useMemo(
     () => readProductOperationRating(readRecordValue(ticket.payload, PRODUCT_OPERATION_RATING_PAYLOAD_KEY)),
     [ticket.payload],
@@ -364,6 +387,8 @@ function LoadedTicketDetail({
   const [isFeeSetupJobPolling, setIsFeeSetupJobPolling] = useState(false);
   const [isActionSubmitting, setIsActionSubmitting] = useState(false);
   const [actionErrorMessage, setActionErrorMessage] = useState("");
+  const [isRatingComparisonOpen, setIsRatingComparisonOpen] = useState(false);
+  const [isActionSidebarCollapsed, setIsActionSidebarCollapsed] = useState(false);
   const canConfirmOptimization = Boolean(editedOptimizedPackages && hasPackageContent(editedOptimizedPackages));
   const isLinKeFeeSetupCurrent = useMemo(
     () => isCurrentLinKeFeeSetup(ticket.payload, linkeCommission),
@@ -374,6 +399,8 @@ function LoadedTicketDetail({
     () => buildTicketWorkbenchModel(ticket, records, { isLinKeFeeSetupCurrent, skipLinKeExternal }),
     [ticket, records, isLinKeFeeSetupCurrent, skipLinKeExternal],
   );
+  const canOpenRatingComparison = workbenchModel.currentFlow === "access_review";
+  const shouldShowRatingComparison = isRatingComparisonOpen && canOpenRatingComparison;
 
   useEffect(() => {
     setOptimizationResult(null);
@@ -384,6 +411,8 @@ function LoadedTicketDetail({
     setIsDraftJobPolling(false);
     setFeeSetupJobId("");
     setIsFeeSetupJobPolling(false);
+    setIsRatingComparisonOpen(false);
+    setIsActionSidebarCollapsed(false);
   }, [ticket.supplyGoodsId, workbenchModel.currentFlow]);
 
   useEffect(() => {
@@ -512,6 +541,16 @@ function LoadedTicketDetail({
     onTicketUpdated(nextTicket);
     setRecords(nextRecords);
   }
+
+  useEffect(() => {
+    function handleRefreshMessage(event: MessageEvent<unknown>) {
+      if (!shouldRefreshTicketFromMessage(event.data, ticket.supplyGoodsId)) return;
+      void refreshTicketAndRecords();
+    }
+
+    window.addEventListener("message", handleRefreshMessage);
+    return () => window.removeEventListener("message", handleRefreshMessage);
+  }, [ticket.supplyGoodsId]);
 
   async function confirmInfoOptimization() {
     if (!editedOptimizedPackages || !hasPackageContent(editedOptimizedPackages)) return;
@@ -690,10 +729,39 @@ function LoadedTicketDetail({
     }
   }
 
+  function openRatingComparison() {
+    setIsRatingComparisonOpen(true);
+    setIsActionSidebarCollapsed(true);
+  }
+
+  function closeRatingComparisonAndExpandActionSidebar() {
+    setIsRatingComparisonOpen(false);
+    setIsActionSidebarCollapsed(false);
+  }
+
+  const ratingPanel = (
+    <ProductOperationRatingPanel
+      value={productOperationRating}
+      salesSelfRating={salesSelfRating}
+      isSubmitting={isActionSubmitting}
+      isEditable={isProductOperationRatingEditable(workbenchModel.currentFlow)}
+      onSave={(rating) => void saveProductOperationRating(rating)}
+    />
+  );
+
   return (
-    <div className="ticket-scrollbar -mx-4 min-h-screen bg-white sm:-mx-6 lg:-mx-8">
-      <div className="grid gap-4 px-2 py-4 lg:grid-cols-[minmax(0,1fr)_260px] lg:px-3 xl:grid-cols-[minmax(0,1fr)_280px] xl:gap-5">
-        <div className="min-w-0 rounded-md bg-slate-100 px-5 py-6 lg:px-6 xl:px-8 xl:py-7">
+    <div className="ticket-scrollbar min-h-screen bg-slate-100">
+      <div
+        className={cn(
+          "grid gap-4 px-0 pb-4 pt-0 lg:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_280px] xl:gap-5",
+          shouldShowRatingComparison && "pb-0",
+          shouldShowRatingComparison && isActionSidebarCollapsed && "lg:grid-cols-[minmax(0,1fr)_56px] xl:grid-cols-[minmax(0,1fr)_56px]",
+        )}
+      >
+        <div className={cn(
+          "min-w-0 rounded-md bg-slate-100 px-5 py-6 lg:px-6 xl:px-8 xl:py-7",
+          shouldShowRatingComparison && "pb-0 xl:pb-0",
+        )}>
           <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
               <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -719,15 +787,24 @@ function LoadedTicketDetail({
             </Button>
           </div>
 
-          <div className="space-y-5">
-            <DetailSections sections={BASIC_SECTIONS} payload={currentPayload} displayContext={metadata} />
-            <ProductOperationRatingPanel
-              value={productOperationRating}
-              isSubmitting={isActionSubmitting}
-              isEditable={isProductOperationRatingEditable(workbenchModel.currentFlow)}
-              onSave={(rating) => void saveProductOperationRating(rating)}
-            />
-            <MediaSection ticket={ticket} metadata={metadata} />
+          <div
+            className={cn(
+              "space-y-5",
+              shouldShowRatingComparison && "lg:grid lg:h-[calc(100vh-156px)] lg:min-h-[560px] lg:overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.72fr)] lg:items-stretch lg:gap-5 lg:space-y-0",
+            )}
+          >
+            <div className={cn(shouldShowRatingComparison && "ticket-scrollbar h-full min-h-0 overflow-y-auto lg:pr-2")}>
+              <TicketInfoFrame
+                payload={currentPayload}
+                ticket={ticket}
+                metadata={metadata}
+              />
+            </div>
+            {shouldShowRatingComparison ? (
+              <div className="h-full min-h-0 overflow-hidden lg:pl-1">
+                {ratingPanel}
+              </div>
+            ) : canOpenRatingComparison ? null : ratingPanel}
             {workbenchModel.currentFlow === "info_optimization" ? (
               <InfoOptimizationDiff
                 result={optimizationResult}
@@ -749,8 +826,6 @@ function LoadedTicketDetail({
                 onChange={(label, value) => setLinkeCommission((current) => ({ ...current, [label]: value }))}
               />
             ) : null}
-            <DetailSections sections={PACKAGE_SECTIONS} payload={currentPayload} displayContext={metadata} />
-            <DetailSections sections={OPERATION_SECTIONS} payload={currentPayload} displayContext={metadata} />
           </div>
         </div>
         <TicketActionSidebar
@@ -777,6 +852,9 @@ function LoadedTicketDetail({
           onConfirmFeeSetupSync={() => void confirmFeeSetupSync()}
           onRetryProductTracking={() => void retryProductTrackingAction()}
           onConfirmProductOnline={() => void confirmProductOnline()}
+          isCollapsed={shouldShowRatingComparison && isActionSidebarCollapsed}
+          onExpand={closeRatingComparisonAndExpandActionSidebar}
+          onOpenRatingComparison={openRatingComparison}
         />
       </div>
     </div>
@@ -817,6 +895,31 @@ function readPayloadText(payload: Record<string, unknown>, ...fields: string[]):
   return "";
 }
 
+function extractRebuildReferenceIdFromPayload(
+  payload: Record<string, unknown>,
+  fields: string[],
+  entity: RebuildReferenceEntity,
+): string {
+  for (const field of fields) {
+    const referenceId = extractRebuildReferenceId(readPayloadPath(payload, field), entity);
+    if (referenceId) return referenceId;
+  }
+  return "";
+}
+
+function extractRebuildReferenceId(value: unknown, entity: RebuildReferenceEntity): string {
+  if (!isRecord(value)) return "";
+  if (value.entity !== undefined && value.entity !== entity) return "";
+  const candidates = entity === "SupplyCompany"
+    ? [value.id, value.SupplyCompanyId, value.supplyCompanyId, value.value]
+    : [value.id, value.SupplyHostId, value.supplyHostId, value.hostId, value.value];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return String(candidate);
+  }
+  return "";
+}
+
 function resolveLinKeMerchantId(
   payload: Record<string, unknown>,
   sourcePayload: Record<string, unknown> = {},
@@ -847,6 +950,23 @@ function displayPayloadText(payload: Record<string, unknown>, metadata: TicketMe
   });
 }
 
+function buildReferenceDisplayContext(
+  fallbackContext: FieldDisplayContext,
+  metadata: RebuildReferenceMetadata | null,
+): FieldDisplayContext {
+  if (!metadata) return fallbackContext;
+  return {
+    fieldMetadata: {
+      ...fallbackContext.fieldMetadata,
+      ...metadata.fieldMetadata,
+    },
+    fieldOptions: {
+      ...fallbackContext.fieldOptions,
+      ...metadata.fieldOptions,
+    },
+  };
+}
+
 function buildCurrentDisplayPayload(
   sourcePayload: Record<string, unknown>,
   currentPayload: Record<string, unknown>,
@@ -857,38 +977,63 @@ function buildCurrentDisplayPayload(
   };
 }
 
-function DetailSections({
-  sections,
+function TicketInfoFrame({
+  payload,
+  ticket,
+  metadata,
+}: {
+  payload: Record<string, unknown>;
+  ticket: TicketRecord;
+  metadata: TicketMetadata;
+}) {
+  return (
+    <Card className="border-0 bg-white shadow-sm">
+      <CardContent className="space-y-5 pt-4">
+        {BASIC_SECTIONS.map((section) => (
+          <DetailSectionGroup
+            key={section.title}
+            section={section}
+            payload={payload}
+            displayContext={metadata}
+          />
+        ))}
+        <MediaFieldsGroup ticket={ticket} metadata={metadata} />
+        {[...PACKAGE_SECTIONS, ...OPERATION_SECTIONS].map((section) => (
+          <DetailSectionGroup
+            key={section.title}
+            section={section}
+            payload={payload}
+            displayContext={metadata}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DetailSectionGroup({
+  section,
   payload,
   displayContext,
 }: {
-  sections: DetailSection[];
+  section: DetailSection;
   payload: Record<string, unknown>;
   displayContext: FieldDisplayContext;
 }) {
   return (
-    <>
-      {sections.map((section) => (
-        <Card key={section.title} className="shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{section.title}</CardTitle>
-            {section.description ? <p className="text-sm text-slate-500">{section.description}</p> : null}
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-x-12 gap-y-4 md:grid-cols-2">
-              {section.fields.map((field) => (
-                <DetailFieldView
-                  key={`${section.title}-${field.label}`}
-                  field={field}
-                  payload={payload}
-                  displayContext={displayContext}
-                />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </>
+    <section className="space-y-3 border-t border-slate-100 pt-5 first:border-t-0 first:pt-0">
+      <h2 className="text-[12px] font-semibold text-slate-950">{section.title}</h2>
+      <div className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        {section.fields.map((field) => (
+          <DetailFieldView
+            key={`${section.title}-${field.label}`}
+            field={field}
+            payload={payload}
+            displayContext={displayContext}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -903,11 +1048,22 @@ function DetailFieldView({
 }) {
   const value = getPayloadDisplayText(payload, field.fields, displayContext) || field.empty || "未提供";
   const isLong = field.kind === "long" || value.length > 60;
+  const referenceId = field.kind === "reference" && field.referenceEntity
+    ? extractRebuildReferenceIdFromPayload(payload, field.fields, field.referenceEntity)
+    : "";
 
   return (
-    <div className={cn("grid gap-2 text-sm", isLong && "md:col-span-2")}>
-      <div className="text-xs font-medium text-slate-500">{field.label}</div>
-      {field.kind === "link" && value !== "未提供" && looksLikeUrl(value) ? (
+    <div className={cn("grid gap-1.5 text-[12px]", isLong && "sm:col-span-2 lg:col-span-3 2xl:col-span-4")}>
+      <div className="text-[10px] font-medium text-slate-400">{field.label}</div>
+      {field.kind === "reference" && field.referenceEntity && referenceId ? (
+        <ReportReferenceDetailDialog
+          entity={field.referenceEntity}
+          referenceId={referenceId}
+          title={field.label}
+          triggerLabel={value}
+          displayContext={displayContext}
+        />
+      ) : field.kind === "link" && value !== "未提供" && looksLikeUrl(value) ? (
         <a
           href={value}
           target="_blank"
@@ -917,28 +1073,189 @@ function DetailFieldView({
           <span className="truncate">{value}</span>
           <ExternalLink className="h-3.5 w-3.5 shrink-0" />
         </a>
-      ) : isLong ? (
-        <div className="whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 leading-6 text-slate-800">{value}</div>
       ) : (
-        <div className="min-w-0 truncate font-medium text-slate-900">{value}</div>
+        <div className={cn("min-w-0", isLong ? "whitespace-pre-wrap leading-5 text-slate-900" : "truncate text-slate-900")}>{value}</div>
       )}
     </div>
   );
 }
 
-function MediaSection({ ticket, metadata }: { ticket: TicketRecord; metadata: TicketMetadata }) {
+function ReportReferenceDetailDialog({
+  entity,
+  referenceId,
+  title,
+  triggerLabel,
+  displayContext,
+}: {
+  entity: RebuildReferenceEntity;
+  referenceId: string;
+  title: string;
+  triggerLabel: string;
+  displayContext: FieldDisplayContext;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [detail, setDetail] = useState<RebuildReferenceDetail | null>(null);
+  const [metadata, setMetadata] = useState<RebuildReferenceMetadata | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const fields = entity === "SupplyCompany" ? SUPPLY_COMPANY_REPORT_FIELDS : SUPPLY_HOST_REPORT_FIELDS;
+  const detailDisplayContext = buildReferenceDisplayContext(displayContext, metadata);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let isCancelled = false;
+
+    setIsLoading(true);
+    setErrorMessage("");
+    Promise.all([
+      getRebuildReferenceDetail(entity, referenceId),
+      getRebuildReferenceMetadata(entity),
+    ])
+      .then(([nextDetail, nextMetadata]) => {
+        if (!isCancelled) {
+          setDetail(nextDetail);
+          setMetadata(nextMetadata);
+        }
+      })
+      .catch((error) => {
+        if (!isCancelled) {
+          setDetail(null);
+          setMetadata(null);
+          setErrorMessage(error instanceof Error ? error.message : "查询详情失败");
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) setIsLoading(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [entity, isOpen, referenceId]);
+
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">图片与附件</CardTitle>
-        <p className="text-sm text-slate-500">主图、轮播图、详情页配图、经营流水与合同等素材。</p>
-      </CardHeader>
-      <CardContent className="space-y-5">
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex min-w-0 items-center gap-1 text-left text-[12px] font-medium text-blue-600 hover:text-blue-700"
+        >
+          <span className="truncate">{triggerLabel}</span>
+        </button>
+      </DialogTrigger>
+      <DialogContent className="w-[min(94vw,860px)] p-5">
+        <DialogHeader className="pr-8">
+          <DialogTitle className="text-base">{title}</DialogTitle>
+          <DialogDescription>{referenceId}</DialogDescription>
+        </DialogHeader>
+        <div className="ticket-scrollbar mt-4 max-h-[68vh] overflow-auto pr-1">
+          {isLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          ) : errorMessage ? (
+            <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{errorMessage}</div>
+          ) : detail ? (
+            <div className="divide-y divide-slate-100">
+              {fields.map((field) => (
+                <ReportReferenceFieldView
+                  key={field.label}
+                  field={field}
+                  payload={detail.payload}
+                  displayContext={detailDisplayContext}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-500">暂无详情</div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReportReferenceFieldView({
+  field,
+  payload,
+  displayContext,
+}: {
+  field: ReportReferenceField;
+  payload: Record<string, unknown>;
+  displayContext: FieldDisplayContext;
+}) {
+  const label = resolveReportReferenceFieldLabel(field, displayContext);
+  const mediaItems = buildMediaPreviewItems({
+    payload,
+    assets: {},
+    fields: field.fields,
+    fieldMetadata: displayContext.fieldMetadata,
+    kindHint: field.kindHint,
+  });
+  const text = getPayloadDisplayText(payload, field.fields, displayContext) || "未提供";
+  const isLong = text.length > 44;
+
+  return (
+    <div className="grid gap-1 border-b border-slate-100 py-2.5 last:border-b-0 sm:grid-cols-[120px_minmax(0,1fr)] sm:gap-4">
+      <div className="text-[11px] font-medium leading-5 text-slate-400">{label}</div>
+      {mediaItems.some((item) => item.canPreview) ? (
+        <div className="flex min-w-0 flex-wrap gap-3">
+          {mediaItems.map((item) => (
+            <ReportReferencePreviewItem key={`${field.label}-${item.url}`} item={item} />
+          ))}
+        </div>
+      ) : (
+        <div className={cn("min-w-0 text-[13px] text-slate-900", isLong ? "whitespace-pre-wrap leading-5" : "truncate")}>{text}</div>
+      )}
+    </div>
+  );
+}
+
+function ReportReferencePreviewItem({ item }: { item: MediaPreviewItem }) {
+  if (!item.canPreview) return null;
+  if (item.kind === "image") {
+    return <ImagePreviewItem item={item} />;
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex max-w-full items-center text-[13px] font-medium text-blue-600 hover:text-blue-700"
+        >
+          预览
+        </button>
+      </DialogTrigger>
+      <FilePreviewDialog item={item} />
+    </Dialog>
+  );
+}
+
+function resolveReportReferenceFieldLabel(field: ReportReferenceField, displayContext: FieldDisplayContext): string {
+  for (const fieldName of field.fields) {
+    const label = displayContext.fieldMetadata[normalizeDisplayFieldName(fieldName)]?.label;
+    if (label) return label;
+  }
+  return field.label;
+}
+
+function normalizeDisplayFieldName(fieldName: string): string {
+  return fieldName.endsWith(".text") ? fieldName.slice(0, -5) : fieldName;
+}
+
+function MediaFieldsGroup({ ticket, metadata }: { ticket: TicketRecord; metadata: TicketMetadata }) {
+  return (
+    <section className="space-y-3 border-t border-slate-100 pt-5">
+      <h2 className="text-[12px] font-semibold text-slate-950">图片与附件</h2>
+      <div className="space-y-3">
         {MEDIA_FIELDS.map((field) => (
           <MediaFieldView key={field.label} field={field} ticket={ticket} metadata={metadata} />
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -960,16 +1277,16 @@ function MediaFieldView({
   });
   if (items.length === 0) {
     return (
-      <div className="grid gap-3 md:grid-cols-[128px_1fr]">
-        <div className="text-sm font-medium text-slate-500">{field.label}</div>
-        <div className="text-sm text-slate-400">未上传</div>
+      <div className="grid gap-2 md:grid-cols-[96px_1fr]">
+        <div className="text-[10px] font-medium text-slate-400">{field.label}</div>
+        <div className="text-[12px] text-slate-400">未上传</div>
       </div>
     );
   }
 
   return (
-    <div className="grid gap-3 md:grid-cols-[128px_1fr]">
-      <div className="text-sm font-medium text-slate-500">{field.label}</div>
+    <div className="grid gap-2 md:grid-cols-[96px_1fr]">
+      <div className="text-[10px] font-medium text-slate-400">{field.label}</div>
       <div className="flex flex-wrap gap-3">
         {items.map((item, index) => (
           <MediaItem key={`${field.label}-${index}-${item.source}-${item.url}`} item={item} />
@@ -991,24 +1308,24 @@ function MediaItem({ item }: { item: MediaPreviewItem }) {
           type="button"
           disabled={!item.canPreview}
           className={cn(
-            "flex h-20 w-[min(320px,calc(100vw-48px))] items-center gap-3 rounded-md bg-slate-50 px-3 text-left text-sm text-slate-700 shadow-sm ring-1 ring-slate-200 transition",
+            "flex h-10 w-[min(220px,calc(100vw-48px))] items-center gap-1.5 rounded-md bg-slate-50 px-2 text-left text-[11px] text-slate-700 shadow-sm ring-1 ring-slate-200 transition",
             item.canPreview ? "hover:bg-white hover:shadow-md" : "cursor-not-allowed opacity-70",
           )}
         >
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white shadow-sm">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white shadow-sm">
             {item.kind === "pdf" ? (
-              <FileText className="h-5 w-5 text-red-500" />
+              <FileText className="h-3.5 w-3.5 text-red-500" />
             ) : (
-              <LinkIcon className="h-5 w-5 text-slate-500" />
+              <LinkIcon className="h-3.5 w-3.5 text-slate-500" />
             )}
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate font-medium text-slate-900">{item.fileName}</span>
-            <span className="mt-1 block text-xs text-slate-500">
+            <span className="mt-0.5 block text-[9px] text-slate-500">
               {item.canPreview ? "点击预览文件" : "等待 R2 镜像后预览"}
             </span>
           </span>
-          {item.canPreview ? <Maximize2 className="h-4 w-4 shrink-0 text-slate-400" /> : null}
+          {item.canPreview ? <Maximize2 className="h-3.5 w-3.5 shrink-0 text-slate-400" /> : null}
         </button>
       </DialogTrigger>
       {item.canPreview ? <FilePreviewDialog item={item} /> : null}
@@ -1428,6 +1745,9 @@ function TicketActionSidebar({
   onConfirmFeeSetupSync,
   onRetryProductTracking,
   onConfirmProductOnline,
+  isCollapsed,
+  onExpand,
+  onOpenRatingComparison,
 }: {
   model: TicketWorkbenchModel;
   ticket: TicketRecord;
@@ -1452,20 +1772,41 @@ function TicketActionSidebar({
   onConfirmFeeSetupSync: () => void;
   onRetryProductTracking: () => void;
   onConfirmProductOnline: () => void;
+  isCollapsed: boolean;
+  onExpand: () => void;
+  onOpenRatingComparison: () => void;
 }) {
   const isBusy = isOptimizing || isActionSubmitting;
   const isProductTrackingFlow = model.currentFlow === "product_online_pending";
   const visibleActionButtons = isProductTrackingFlow
     ? model.actionButtons.filter((actionButton) => actionButton.label !== "自动追踪中")
     : model.actionButtons;
+
+  if (isCollapsed) {
+    return (
+      <aside className="lg:sticky lg:top-4 lg:self-start">
+        <button
+          type="button"
+          className="flex min-h-[180px] w-14 flex-col items-center justify-start gap-3 rounded-md bg-white px-2 py-4 text-slate-500 shadow-sm ring-1 ring-slate-100 hover:bg-slate-50 hover:text-slate-800"
+          title="展开工单操作"
+          onClick={onExpand}
+        >
+          <Maximize2 className="h-4 w-4" />
+          <span className="[writing-mode:vertical-rl] text-xs font-semibold tracking-normal">工单操作</span>
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="space-y-6 lg:sticky lg:top-4 lg:self-start">
+    <aside className="lg:sticky lg:top-4 lg:self-start">
+      <div className="space-y-0 rounded-md bg-white p-4 shadow-sm">
       <SidebarSection title="工单属性">
         <div className="space-y-2">
           {model.metaItems.map((item) => (
-            <div key={item.label} className="grid grid-cols-[72px_1fr] gap-3 text-xs">
+            <div key={item.label} className="grid grid-cols-[72px_minmax(0,1fr)] items-start gap-3 text-xs">
               <span className="text-slate-400">{item.label}</span>
-              <span className="min-w-0 truncate text-right font-medium text-slate-800">{item.value}</span>
+              <span className="min-w-0 truncate text-left font-medium text-slate-800">{item.value}</span>
             </div>
           ))}
         </div>
@@ -1589,6 +1930,17 @@ function TicketActionSidebar({
           {isProductTrackingFlow ? (
             <ProductTrackingPanel ticket={ticket} />
           ) : null}
+          {model.currentFlow === "access_review" ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full bg-white text-slate-700 hover:bg-slate-50"
+              onClick={onOpenRatingComparison}
+            >
+              <Sparkles className="h-4 w-4" />
+              商品评级
+            </Button>
+          ) : null}
           {visibleActionButtons.map((actionButton) => (
             <SidebarActionButton
               key={actionButton.label}
@@ -1614,6 +1966,7 @@ function TicketActionSidebar({
         </div>
         <p className="mt-3 text-[11px] leading-5 text-slate-400">{getActionHint(model.currentFlow)}</p>
       </SidebarSection>
+      </div>
     </aside>
   );
 }
@@ -1756,7 +2109,7 @@ function SidebarActionButton({
       <Button
         type="button"
         className={className}
-        onClick={() => openRebuildApproval(ticket.supplyGoodsId)}
+        onClick={() => openRebuildApproval(ticket.supplyGoodsId, getTicketProductName(ticket))}
       >
         {icon}
         {actionButton.label}
@@ -1805,8 +2158,13 @@ function buildSupplyGoodsApprovalUrl(supplyGoodsId: string): string {
   return `${SUPPLY_GOODS_APPROVAL_BASE_URL}/${encodeURIComponent(supplyGoodsId)}`;
 }
 
-function openRebuildApproval(supplyGoodsId: string) {
-  if (isElectronEmbedded() && openRebuildApprovalInElectron(supplyGoodsId)) {
+function getTicketProductName(ticket: TicketRecord): string {
+  return readPayloadText(buildCurrentDisplayPayload(ticket.sourcePayload, ticket.payload), "goodsName", "goodsNameInput")
+    || "未命名商品";
+}
+
+function openRebuildApproval(supplyGoodsId: string, productName: string) {
+  if (isElectronEmbedded() && openRebuildApprovalInElectron(supplyGoodsId, productName)) {
     return;
   }
   window.open(buildSupplyGoodsApprovalUrl(supplyGoodsId), "_blank", "noopener,noreferrer");
@@ -1822,7 +2180,7 @@ function openLinKeDraftUrl(url: string) {
 
 function SidebarSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="border-b border-slate-100 pb-5 last:border-b-0">
+    <section className="border-b border-slate-100 py-5 first:pt-0 last:border-b-0 last:pb-0">
       <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{title}</h2>
       {children}
     </section>

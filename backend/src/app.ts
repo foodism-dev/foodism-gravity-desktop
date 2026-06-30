@@ -16,13 +16,23 @@ import {
 } from "./auth.ts";
 import {
   createRebuildSupplyGoodsClient,
+  extractSupplyCompanyId,
   extractSupplyGoodsId,
+  extractSupplyHostId,
   getDefaultSupplyGoodsRecordRepository,
   syncSupplyGoodsFromCallback,
   type RebuildSupplyGoodsClient,
   type SupplyGoodsRecordRepository,
 } from "./service/rebuild/supplygoods.ts";
 import { getDefaultRebuildAssetUploader, type RebuildAssetUploader } from "./service/rebuild/assets.ts";
+import {
+  extractSupplyCompanyIdFromCallback,
+  extractSupplyHostIdFromCallback,
+  getDefaultRebuildSupplierRecordRepository,
+  syncSupplyCompanyFromCallback,
+  syncSupplyHostFromCallback,
+  type RebuildSupplierRecordRepository,
+} from "./service/rebuild/suppliers.ts";
 import {
   createRebuildMetadataClient,
   getDefaultRebuildFieldMetadataRepository,
@@ -64,6 +74,12 @@ import {
 } from "./service/lin-ke/repository.ts";
 import { checkCookie } from "./service/lin-ke/service.ts";
 import {
+  getDefaultGravityJobsQueue,
+  REBUILD_SUPPLIER_SYNC_JOB_NAME,
+  type GravityJobsQueueClient,
+} from "./jobs/queue.ts";
+import type { RebuildSupplierSyncJobData } from "./jobs/types.ts";
+import {
   getDefaultLinKeDraftQueue,
   type LinKeDraftQueueClient,
 } from "./service/lin-ke/draft-queue.ts";
@@ -102,9 +118,11 @@ interface ServerAppOptions {
   rebuildSupplyGoodsClient?: RebuildSupplyGoodsClient;
   rebuildMetadataClient?: RebuildMetadataClient;
   rebuildAssetUploader?: RebuildAssetUploader | null;
+  rebuildSupplierRepository?: RebuildSupplierRecordRepository | null;
   supplyGoodsRecordRepository?: SupplyGoodsRecordRepository | null;
   rebuildFieldMetadataRepository?: RebuildFieldMetadataRepository | null;
   ticketRepository?: TicketRepository | null;
+  gravityJobsQueue?: GravityJobsQueueClient | null;
   fetchImpl?: FetchLike;
   linKeRoutesOptions?: LinKeRoutesOptions;
   linKeDraftQueue?: LinKeDraftQueueClient | null;
@@ -227,6 +245,43 @@ function logSsoPayload(body: unknown, authAction: "create_user" | "sso_login"): 
   console.log(`[认证] SSO ${authAction} user 字段: ${getRecordKeys(getNestedRecord(body, ["user"]))}`);
   console.log(`[认证] SSO ${authAction} account 字段: ${getRecordKeys(getNestedRecord(body, ["account"]))}`);
   console.log(`[认证] SSO ${authAction} account.account 字段: ${getRecordKeys(getNestedRecord(body, ["account", "account"]))}`);
+}
+
+async function enqueueLinkedSupplierSyncJobs(input: {
+  queue: GravityJobsQueueClient | null;
+  supplyGoodsId: string;
+  payload: Record<string, unknown>;
+}): Promise<void> {
+  if (!input.queue) return;
+
+  const jobs: RebuildSupplierSyncJobData[] = [];
+  const supplyCompanyId = extractSupplyCompanyId(input.payload);
+  if (supplyCompanyId) {
+    jobs.push({
+      entityName: "SupplyCompany",
+      recordId: supplyCompanyId,
+      source: "supply_goods_callback",
+      supplyGoodsId: input.supplyGoodsId,
+    });
+  }
+
+  const supplyHostId = extractSupplyHostId(input.payload);
+  if (supplyHostId) {
+    jobs.push({
+      entityName: "SupplyHost",
+      recordId: supplyHostId,
+      source: "supply_goods_callback",
+      supplyGoodsId: input.supplyGoodsId,
+    });
+  }
+
+  for (const job of jobs) {
+    try {
+      await input.queue.addJob(REBUILD_SUPPLIER_SYNC_JOB_NAME, job);
+    } catch (error) {
+      console.warn(`[REBUILD] 投递 ${job.entityName} 异步同步任务失败: ${job.recordId} ${getBriefErrorMessage(error)}`);
+    }
+  }
 }
 
 function toSkillListItem(skill: MarketSkill) {
@@ -729,8 +784,11 @@ export function createServerApp(options: ServerAppOptions = {}) {
   });
   const listSupplyGoodsFields = createCachedRebuildFieldLoader(rebuildFieldMetadataRepository, "SupplyGoods");
   const listSupplyCompanyFields = createCachedRebuildFieldLoader(rebuildFieldMetadataRepository, "SupplyCompany");
+  const listSupplyHostFields = createCachedRebuildFieldLoader(rebuildFieldMetadataRepository, "SupplyHost");
   const rebuildAssetUploader = options.rebuildAssetUploader ?? getDefaultRebuildAssetUploader();
+  const rebuildSupplierRepository = options.rebuildSupplierRepository ?? getDefaultRebuildSupplierRecordRepository();
   const ticketRepository = options.ticketRepository ?? getDefaultTicketRepository();
+  const gravityJobsQueue = options.gravityJobsQueue !== undefined ? options.gravityJobsQueue : getDefaultGravityJobsQueue();
   const fetchImpl = options.fetchImpl ?? fetch;
   const webSsoStates = new Map<string, WebSsoState>();
   const handoffSessions = new Map<string, HandoffSession>();
@@ -935,6 +993,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
   app.use("/api/rebuild/supplygoods/fields/sync", jwtMiddleware, requireApiUser);
   app.use("/api/rebuild/supplycompany/fields/sync", jwtMiddleware, requireApiUser);
   app.use("/api/rebuild/fields/options", jwtMiddleware, requireApiUser);
+  app.use("/api/rebuild/references/*", jwtMiddleware, requireApiUser);
 
   async function handleSupplyGoodsCallback(context: Context<{ Variables: ServerVariables }>) {
     let body: unknown;
@@ -963,6 +1022,11 @@ export function createServerApp(options: ServerAppOptions = {}) {
         assetUploader: rebuildAssetUploader,
         listFields: listSupplyGoodsFields,
       });
+      await enqueueLinkedSupplierSyncJobs({
+        queue: gravityJobsQueue,
+        supplyGoodsId: result.supplyGoodsId,
+        payload: result.normalizedPayload,
+      });
       console.log(`[REBUILD] SupplyGoods 已同步: ${result.supplyGoodsId}`);
       return context.json({
         ok: true,
@@ -975,8 +1039,90 @@ export function createServerApp(options: ServerAppOptions = {}) {
     }
   }
 
+  async function handleSupplyCompanyCallback(context: Context<{ Variables: ServerVariables }>) {
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "Bad Request", message: "请求体必须是 JSON" }, 400);
+    }
+    const rawPayload = isRecord(body) ? body : {};
+    console.log(`[REBUILD] SupplyCompany callback payload（已脱敏）=${stringifyForLog(sanitizeForLog(body))}`);
+
+    const supplyCompanyId = extractSupplyCompanyIdFromCallback(rawPayload);
+    if (!supplyCompanyId) {
+      return context.json({ error: "Bad Request", message: "supply_company_id 不能为空" }, 400);
+    }
+
+    if (!rebuildSupplierRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    try {
+      const result = await syncSupplyCompanyFromCallback({
+        supplyCompanyId,
+        rawPayload,
+        rebuildClient: rebuildSupplyGoodsClient,
+        repository: rebuildSupplierRepository,
+        assetUploader: rebuildAssetUploader,
+        listFields: rebuildFieldMetadataRepository ? listSupplyCompanyFields : undefined,
+      });
+      console.log(`[REBUILD] SupplyCompany 已同步: ${result.recordId}`);
+      return context.json({
+        ok: true,
+        supply_company_id: result.recordId,
+        updated_at: result.updatedAt.toISOString(),
+      });
+    } catch (error) {
+      console.error(`[REBUILD] SupplyCompany 回调同步失败: ${getErrorMessage(error)}`);
+      return context.json({ error: "Bad Gateway", message: "同步 SupplyCompany 失败" }, 502);
+    }
+  }
+
+  async function handleSupplyHostCallback(context: Context<{ Variables: ServerVariables }>) {
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "Bad Request", message: "请求体必须是 JSON" }, 400);
+    }
+    const rawPayload = isRecord(body) ? body : {};
+    console.log(`[REBUILD] SupplyHost callback payload（已脱敏）=${stringifyForLog(sanitizeForLog(body))}`);
+
+    const supplyHostId = extractSupplyHostIdFromCallback(rawPayload);
+    if (!supplyHostId) {
+      return context.json({ error: "Bad Request", message: "supply_host_id 不能为空" }, 400);
+    }
+
+    if (!rebuildSupplierRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+
+    try {
+      const result = await syncSupplyHostFromCallback({
+        supplyHostId,
+        rawPayload,
+        rebuildClient: rebuildSupplyGoodsClient,
+        repository: rebuildSupplierRepository,
+        assetUploader: rebuildAssetUploader,
+        listFields: rebuildFieldMetadataRepository ? listSupplyHostFields : undefined,
+      });
+      console.log(`[REBUILD] SupplyHost 已同步: ${result.recordId}`);
+      return context.json({
+        ok: true,
+        supply_host_id: result.recordId,
+        updated_at: result.updatedAt.toISOString(),
+      });
+    } catch (error) {
+      console.error(`[REBUILD] SupplyHost 回调同步失败: ${getErrorMessage(error)}`);
+      return context.json({ error: "Bad Gateway", message: "同步 SupplyHost 失败" }, 502);
+    }
+  }
+
   app.post("/api/rebuild/supplygoods/callback", handleSupplyGoodsCallback);
   app.post("/api/m/rebuild/saveReportSupplierGoodsInfo", handleSupplyGoodsCallback);
+  app.post("/api/m/rebuild/saveReportSupplierCompanyInfo", handleSupplyCompanyCallback);
+  app.post("/api/m/rebuild/saveReportSupplierHostInfo", handleSupplyHostCallback);
 
   app.post("/api/internal/skills", async (context) => {
     if (!skillRepository || !skillPublisher) {
@@ -1896,6 +2042,67 @@ export function createServerApp(options: ServerAppOptions = {}) {
     });
   });
 
+  app.get("/api/rebuild/references/:entityName/metadata", async (context) => {
+    const entityName = context.req.param("entityName").trim();
+    if (entityName !== "SupplyCompany" && entityName !== "SupplyHost") {
+      return context.json({ error: "Bad Request", message: "仅支持查询 SupplyCompany 或 SupplyHost" }, 400);
+    }
+    const listFields = entityName === "SupplyCompany" ? listSupplyCompanyFields : listSupplyHostFields;
+    const metadata = await buildRebuildReferenceMetadataFieldsMap(rebuildFieldMetadataRepository, entityName, listFields);
+    return context.json({
+      entity: entityName,
+      ...metadata,
+    });
+  });
+
+  app.get("/api/rebuild/references/:entityName/:recordId", async (context) => {
+    const entityName = context.req.param("entityName").trim();
+    const recordId = context.req.param("recordId").trim();
+    if (!recordId) {
+      return context.json({ error: "Bad Request", message: "记录 ID 不能为空" }, 400);
+    }
+    if (entityName !== "SupplyCompany" && entityName !== "SupplyHost") {
+      return context.json({ error: "Bad Request", message: "仅支持查询 SupplyCompany 或 SupplyHost" }, 400);
+    }
+    if (!rebuildSupplierRepository) {
+      return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
+    }
+    try {
+      if (entityName === "SupplyCompany") {
+        if (!rebuildSupplierRepository.findSupplyCompany) {
+          return context.json({ error: "Service Unavailable", message: "SupplyCompany 查询不可用" }, 503);
+        }
+        const record = await rebuildSupplierRepository.findSupplyCompany(recordId);
+        if (!record) {
+          return context.json({ error: "Not Found", message: "SupplyCompany 记录不存在" }, 404);
+        }
+        return context.json({
+          entity: entityName,
+          id: recordId,
+          payload: record.payload,
+        });
+      }
+
+      if (entityName === "SupplyHost") {
+        if (!rebuildSupplierRepository.findSupplyHost) {
+          return context.json({ error: "Service Unavailable", message: "SupplyHost 查询不可用" }, 503);
+        }
+        const record = await rebuildSupplierRepository.findSupplyHost(recordId);
+        if (!record) {
+          return context.json({ error: "Not Found", message: "SupplyHost 记录不存在" }, 404);
+        }
+        return context.json({
+          entity: entityName,
+          id: recordId,
+          payload: record.payload,
+        });
+      }
+    } catch (error) {
+      console.error(`[REBUILD] 查询 ${entityName} 详情失败: ${getErrorMessage(error)}`);
+      return context.json({ error: "Bad Gateway", message: `查询 ${entityName} 详情失败：${getErrorMessage(error)}` }, 502);
+    }
+  });
+
   app.post("/api/tickets/:supplyGoodsId/action-records", async (context) => {
     if (!ticketRepository) {
       return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
@@ -1979,9 +2186,17 @@ async function buildTicketFieldOptionsMap(
 ): Promise<TicketFieldOptionsApiMap> {
   if (!repository) return {};
   const fields = await listSupplyGoodsFields();
+  return buildRebuildFieldOptionsMap(repository, "SupplyGoods", fields);
+}
+
+async function buildRebuildFieldOptionsMap(
+  repository: RebuildFieldMetadataRepository,
+  entityName: string,
+  fields: RebuildFieldMetadata[],
+): Promise<TicketFieldOptionsApiMap> {
   const entries = await Promise.all(
     getSupplyGoodsOptionFieldNames(fields).map(async (fieldName) => {
-      const options = await repository.listFieldOptions("SupplyGoods", fieldName);
+      const options = await repository.listFieldOptions(entityName, fieldName);
       return [fieldName, options.map(serializeFieldOption)] as const;
     }),
   );
@@ -2005,5 +2220,26 @@ async function buildTicketMetadataMap(
   return {
     field_options: await buildTicketFieldOptionsMap(repository, listSupplyGoodsFields),
     field_metadata: serializeFieldMetadata(allFields),
+  };
+}
+
+async function buildRebuildReferenceMetadataFieldsMap(
+  repository: RebuildFieldMetadataRepository | null,
+  entityName: string,
+  listFields: CachedRebuildFieldLoader,
+): Promise<{
+  field_options: TicketFieldOptionsApiMap;
+  field_metadata: TicketFieldMetadataApiMap;
+}> {
+  if (!repository) {
+    return {
+      field_options: {},
+      field_metadata: {},
+    };
+  }
+  const fields = await listFields();
+  return {
+    field_options: await buildRebuildFieldOptionsMap(repository, entityName, fields),
+    field_metadata: serializeFieldMetadata(fields),
   };
 }

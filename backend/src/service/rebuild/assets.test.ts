@@ -99,6 +99,35 @@ describe("REBUILD 资产镜像", () => {
     expect(payload.mainPic).toEqual(["rb/20260624/main.jpg"]);
   });
 
+  test("Given WebComponent assets, When serializing payload, Then it preserves text and replaces image source", () => {
+    const certification = JSON.stringify({
+      viewList: [
+        {
+          text: "食品经营许可证",
+          imgSrc: "rb/20260629/food-license.jpg",
+        },
+      ],
+    });
+
+    const payload = replacePayloadAssetUrls(
+      { certification },
+      {
+        certification: [
+          {
+            source: "rb/20260629/food-license.jpg",
+            url: "https://cdn.example.com/certification/food-license.jpg",
+          },
+        ],
+      },
+    );
+    const parsed = JSON.parse(String(payload.certification)) as { viewList: Array<{ text: string; imgSrc: string }> };
+
+    expect(parsed.viewList[0]).toEqual({
+      text: "食品经营许可证",
+      imgSrc: "https://cdn.example.com/certification/food-license.jpg",
+    });
+  });
+
   test("Given rb asset path and local download is available, When downloading, Then it uses local file endpoint first", async () => {
     const originalBaseUrl = Bun.env.REBUILD_BASE_URL;
     const requests: Array<{ url: string; method: string; body: string }> = [];
@@ -411,6 +440,130 @@ describe("REBUILD 资产镜像", () => {
 
     expect(uploads).toEqual([]);
     expect(assets).toEqual({});
+  });
+
+  test("Given asset-like field contains plain text, When mirroring assets, Then it skips non-path text", async () => {
+    const uploads: Array<{ fieldName: string; sourcePath: string }> = [];
+    const uploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        uploads.push({ fieldName: input.fieldName, sourcePath: input.sourcePath });
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.fieldName}`,
+        };
+      },
+    };
+
+    const assets = await mirrorSupplyGoodsAssets({
+      supplyGoodsId: "944-expiry",
+      payload: {
+        businessLicenseExpiryDate: "长期有效",
+      },
+      fields: [
+        {
+          entityName: "SupplyGoods",
+          fieldName: "businessLicenseExpiryDate",
+          label: "营业执照有效期",
+          fieldType: "",
+          raw: { name: "businessLicenseExpiryDate" },
+        },
+      ],
+      uploader,
+    });
+
+    expect(uploads).toEqual([]);
+    expect(assets).toEqual({});
+  });
+
+  test("Given one asset upload fails, When mirroring assets, Then it warns and keeps successful assets", async () => {
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+
+    try {
+      const uploader: RebuildAssetUploader = {
+        async uploadAsset(input) {
+          if (input.sourcePath.endsWith("missing.pdf")) {
+            throw new Error("REBUILD 资产下载失败: 404");
+          }
+          return {
+            source: input.sourcePath,
+            url: `https://cdn.example.com/${input.fieldName}/${input.sourcePath.split("/").pop()}`,
+          };
+        },
+      };
+
+      const assets = await mirrorSupplyGoodsAssets({
+        supplyGoodsId: "944-partial",
+        payload: {
+          mainPic: ["rb/20260624/main.jpg"],
+          packageContract: { url: "rb/20260624/missing.pdf" },
+        },
+        fields,
+        uploader,
+      });
+
+      expect(assets).toEqual({
+        mainPic: [
+          {
+            source: "rb/20260624/main.jpg",
+            url: "https://cdn.example.com/mainPic/main.jpg",
+          },
+        ],
+      });
+      expect(warnings).toEqual([
+        "[REBUILD] 资产镜像失败: packageContract rb/20260624/missing.pdf REBUILD 资产下载失败: 404",
+      ]);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test("Given industry license WebComponent field, When mirroring assets, Then it uploads viewList images", async () => {
+    const uploads: Array<{ fieldName: string; sourcePath: string }> = [];
+    const uploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        uploads.push({ fieldName: input.fieldName, sourcePath: input.sourcePath });
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.fieldName}/${input.sourcePath.split("/").pop()}`,
+        };
+      },
+    };
+
+    const assets = await mirrorSupplyGoodsAssets({
+      supplyGoodsId: "946-license",
+      payload: {
+        certification: JSON.stringify({
+          viewList: [
+            {
+              text: "食品经营许可证",
+              imgSrc: "rb/20260629/food-license.jpg",
+            },
+          ],
+        }),
+      },
+      fields: [
+        {
+          entityName: "SupplyHost",
+          fieldName: "certification",
+          label: "行业许可证",
+          fieldType: "WEBCOMPONENT",
+          raw: { name: "certification", displayType: "WEBCOMPONENT" },
+        },
+      ],
+      uploader,
+    });
+
+    expect(uploads).toEqual([{ fieldName: "certification", sourcePath: "rb/20260629/food-license.jpg" }]);
+    expect(assets.certification).toEqual([
+      {
+        source: "rb/20260629/food-license.jpg",
+        url: "https://cdn.example.com/certification/food-license.jpg",
+      },
+    ]);
   });
 
   test("Given no asset prefix, When uploading asset to R2, Then object key starts from supplygoods", async () => {

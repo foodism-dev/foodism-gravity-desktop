@@ -94,6 +94,18 @@ export const rebuildSupplyCompany = pgTable(
   (table) => [unique("rebuild_supply_company_supply_company_id_unique").on(table.supplyCompanyId)]
 );
 
+export const rebuildSupplyHost = pgTable(
+  "rebuild_supply_host",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    supplyHostId: text("supply_host_id").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique("rebuild_supply_host_supply_host_id_unique").on(table.supplyHostId)]
+);
+
 export const rebuildSupplyGoodsCallbackRecords = pgTable(
   "rebuild_supply_goods_callback_records",
   {
@@ -109,6 +121,42 @@ export const rebuildSupplyGoodsCallbackRecords = pgTable(
   (table) => [
     index("rebuild_supply_goods_callback_records_goods_created_idx").on(table.supplyGoodsId, table.createdAt),
     index("rebuild_supply_goods_callback_records_status_idx").on(table.status),
+  ],
+);
+
+export const rebuildSupplyCompanyCallbackRecords = pgTable(
+  "rebuild_supply_company_callback_records",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    supplyCompanyId: text("supply_company_id").notNull(),
+    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull().default({}),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    normalizedPayload: jsonb("normalized_payload").$type<Record<string, unknown>>().notNull().default({}),
+    status: text("status").notNull(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("rebuild_supply_company_callback_records_company_created_idx").on(table.supplyCompanyId, table.createdAt),
+    index("rebuild_supply_company_callback_records_status_idx").on(table.status),
+  ],
+);
+
+export const rebuildSupplyHostCallbackRecords = pgTable(
+  "rebuild_supply_host_callback_records",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    supplyHostId: text("supply_host_id").notNull(),
+    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull().default({}),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    normalizedPayload: jsonb("normalized_payload").$type<Record<string, unknown>>().notNull().default({}),
+    status: text("status").notNull(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("rebuild_supply_host_callback_records_host_created_idx").on(table.supplyHostId, table.createdAt),
+    index("rebuild_supply_host_callback_records_status_idx").on(table.status),
   ],
 );
 
@@ -203,7 +251,10 @@ export const linKeAccountConfigs = pgTable(
 
 export type RebuildSupplyGoodsRow = typeof rebuildSupplyGoods.$inferSelect;
 export type RebuildSupplyCompanyRow = typeof rebuildSupplyCompany.$inferSelect;
+export type RebuildSupplyHostRow = typeof rebuildSupplyHost.$inferSelect;
 export type RebuildSupplyGoodsCallbackRecordRow = typeof rebuildSupplyGoodsCallbackRecords.$inferSelect;
+export type RebuildSupplyCompanyCallbackRecordRow = typeof rebuildSupplyCompanyCallbackRecords.$inferSelect;
+export type RebuildSupplyHostCallbackRecordRow = typeof rebuildSupplyHostCallbackRecords.$inferSelect;
 export type TicketRow = typeof tickets.$inferSelect;
 export type TicketActionRecordRow = typeof ticketActionRecords.$inferSelect;
 export type RebuildFieldRow = typeof rebuildFields.$inferSelect;

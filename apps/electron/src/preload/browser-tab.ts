@@ -8,7 +8,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 interface PromaElectronWebviewBridge {
   startSsoLogin: () => void
-  openRebuildApproval: (supplyGoodsId: string) => void
+  openRebuildApproval: (supplyGoodsId: string, productName?: string) => void
   reloadWorkOrders: () => void
   openBrowserTab: (url: string) => void
 }
@@ -17,10 +17,11 @@ const bridge: PromaElectronWebviewBridge = {
   startSsoLogin: () => {
     ipcRenderer.send('browser-tab:host-message', { type: 'proma:start-sso-login' })
   },
-  openRebuildApproval: (supplyGoodsId: string) => {
+  openRebuildApproval: (supplyGoodsId: string, productName?: string) => {
     ipcRenderer.send('browser-tab:host-message', {
       type: 'proma:open-rebuild-approval',
       supplyGoodsId,
+      productName,
     })
   },
   reloadWorkOrders: () => {
@@ -33,5 +34,9 @@ const bridge: PromaElectronWebviewBridge = {
     })
   },
 }
+
+ipcRenderer.on('browser-tab:app-message', (_event, message: unknown) => {
+  window.postMessage(message, window.location.origin)
+})
 
 contextBridge.exposeInMainWorld('promaElectronWebview', bridge)

@@ -59,6 +59,8 @@ export interface RebuildSupplyGoodsListInput {
 export interface RebuildSupplyGoodsClient {
   getSupplyGoods: (supplyGoodsId: string) => Promise<Record<string, unknown>>;
   listSupplyGoodsIds?: (input: RebuildSupplyGoodsListInput) => Promise<string[]>;
+  getSupplyCompany?: (supplyCompanyId: string) => Promise<Record<string, unknown>>;
+  getSupplyHost?: (supplyHostId: string) => Promise<Record<string, unknown>>;
   getSupplyCompanyReference?: (supplyCompanyId: string) => Promise<Record<string, unknown>>;
   getSupplyHostReference?: (supplyHostId: string) => Promise<Record<string, unknown>>;
   clearFieldCache?: () => void;
@@ -72,6 +74,7 @@ export interface RebuildSupplyGoodsClientOptions {
 
 export interface SupplyGoodsCallbackResult {
   supplyGoodsId: string;
+  normalizedPayload: Record<string, unknown>;
   updatedAt: Date;
 }
 
@@ -287,19 +290,11 @@ async function resolveRebuildSyncFields(input: {
   const metadataFields = await input.repository.listFieldsByEntity(input.entityName);
   const fields = buildRebuildSyncFieldsFromMetadata(metadataFields);
   if (fields.length === 0) {
-    if (!input.fallbackFields) {
-      input.setCache({
-        fields: [],
-        expiresAt: currentTime + input.cacheTtlMs,
-      });
-      return [];
-    }
-    console.warn(`[REBUILD] ${input.entityName} 字段元数据为空，回退使用内置字段列表`);
     input.setCache({
-      fields: input.fallbackFields,
+      fields: [],
       expiresAt: currentTime + input.cacheTtlMs,
     });
-    return input.fallbackFields;
+    return [];
   }
 
   input.setCache({
@@ -307,6 +302,11 @@ async function resolveRebuildSyncFields(input: {
     expiresAt: currentTime + input.cacheTtlMs,
   });
   return fields;
+}
+
+function assertRebuildFieldsAvailable(entityName: string, fields: string[]): void {
+  if (fields.length > 0) return;
+  throw new Error(`${entityName} 字段元数据为空，请先同步 rebuild_fields`);
 }
 
 function buildRebuildEntityGetUrl(entity: string, id: string, fields: string[]): URL {
@@ -371,12 +371,16 @@ function extractSupplyGoodsIdsFromListResponse(data: unknown): string[] {
 
 export function createRebuildSupplyGoodsClient(options: RebuildSupplyGoodsClientOptions = {}): RebuildSupplyGoodsClient {
   let supplyGoodsFieldCache: CachedRebuildFields | null = null;
+  let supplyCompanyFieldCache: CachedRebuildFields | null = null;
+  let supplyHostFieldCache: CachedRebuildFields | null = null;
   const fieldCacheTtlMs = options.fieldCacheTtlMs ?? DEFAULT_FIELD_CACHE_TTL_MS;
   const now = options.now ?? Date.now;
 
   return {
     clearFieldCache(): void {
       supplyGoodsFieldCache = null;
+      supplyCompanyFieldCache = null;
+      supplyHostFieldCache = null;
     },
 
     async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
@@ -391,6 +395,7 @@ export function createRebuildSupplyGoodsClient(options: RebuildSupplyGoodsClient
           supplyGoodsFieldCache = nextCache;
         },
       });
+      assertRebuildFieldsAvailable(SUPPLY_GOODS_ENTITY, fields);
       const url = buildSupplyGoodsGetUrl(supplyGoodsId, fields);
       console.log(`[REBUILD] 回调同步 SupplyGoods: ${supplyGoodsId}`);
       const result = await readJsonResponse<Record<string, unknown>>(await fetch(url));
@@ -415,6 +420,56 @@ export function createRebuildSupplyGoodsClient(options: RebuildSupplyGoodsClient
         throw new Error(result.error_msg || `REBUILD OpenAPI 调用失败: ${result.error_code}`);
       }
       return extractSupplyGoodsIdsFromListResponse(result.data);
+    },
+
+    async getSupplyCompany(supplyCompanyId: string): Promise<Record<string, unknown>> {
+      const fields = await resolveRebuildSyncFields({
+        entityName: SUPPLY_COMPANY_ENTITY,
+        fallbackFields: null,
+        repository: options.fieldMetadataRepository,
+        cache: supplyCompanyFieldCache,
+        cacheTtlMs: fieldCacheTtlMs,
+        now,
+        setCache: (nextCache) => {
+          supplyCompanyFieldCache = nextCache;
+        },
+      });
+      assertRebuildFieldsAvailable(SUPPLY_COMPANY_ENTITY, fields);
+      const url = buildSupplyCompanyGetUrl(supplyCompanyId, fields);
+      console.log(`[REBUILD] 查询 SupplyCompany 详情: ${supplyCompanyId}`);
+      const result = await readJsonResponse<Record<string, unknown>>(await fetch(url));
+      if (result.error_code !== 0) {
+        throw new Error(result.error_msg || `REBUILD OpenAPI 调用失败: ${result.error_code}`);
+      }
+      if (!isRecord(result.data)) {
+        throw new Error("REBUILD OpenAPI 未返回 SupplyCompany 记录");
+      }
+      return result.data;
+    },
+
+    async getSupplyHost(supplyHostId: string): Promise<Record<string, unknown>> {
+      const fields = await resolveRebuildSyncFields({
+        entityName: SUPPLY_HOST_ENTITY,
+        fallbackFields: null,
+        repository: options.fieldMetadataRepository,
+        cache: supplyHostFieldCache,
+        cacheTtlMs: fieldCacheTtlMs,
+        now,
+        setCache: (nextCache) => {
+          supplyHostFieldCache = nextCache;
+        },
+      });
+      assertRebuildFieldsAvailable(SUPPLY_HOST_ENTITY, fields);
+      const url = buildSupplyHostGetUrl(supplyHostId, fields);
+      console.log(`[REBUILD] 查询 SupplyHost 详情: ${supplyHostId}`);
+      const result = await readJsonResponse<Record<string, unknown>>(await fetch(url));
+      if (result.error_code !== 0) {
+        throw new Error(result.error_msg || `REBUILD OpenAPI 调用失败: ${result.error_code}`);
+      }
+      if (!isRecord(result.data)) {
+        throw new Error("REBUILD OpenAPI 未返回 SupplyHost 记录");
+      }
+      return result.data;
     },
 
     async getSupplyCompanyReference(supplyCompanyId: string): Promise<Record<string, unknown>> {
@@ -644,6 +699,7 @@ export async function syncSupplyGoodsFromCallback(input: {
 
   return {
     supplyGoodsId: input.supplyGoodsId,
+    normalizedPayload,
     updatedAt,
   };
 }

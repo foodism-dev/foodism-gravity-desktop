@@ -5,6 +5,7 @@ import {
   GRAVITY_JOBS_QUEUE_NAME,
   LIN_KE_DRAFT_JOB_NAME,
   REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME,
+  REBUILD_SUPPLIER_SYNC_JOB_NAME,
 } from "./queue.ts";
 import {
   LIN_KE_DRAFT_JOB_NAME as LIN_KE_QUEUE_JOB_NAME,
@@ -33,5 +34,9 @@ describe("Gravity jobs 队列", () => {
   test("Given Lin-Ke draft queue is used, When checking queue metadata, Then it also publishes into gravity-jobs", () => {
     expect(LIN_KE_DRAFT_QUEUE_NAME).toBe(GRAVITY_JOBS_QUEUE_NAME);
     expect(LIN_KE_QUEUE_JOB_NAME).toBe(LIN_KE_DRAFT_JOB_NAME);
+  });
+
+  test("Given supplier sync is enqueued from SupplyGoods callback, When checking queue metadata, Then it uses a named gravity job", () => {
+    expect(REBUILD_SUPPLIER_SYNC_JOB_NAME).toBe("rebuild:supplier:sync");
   });
 });

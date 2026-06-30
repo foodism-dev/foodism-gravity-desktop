@@ -24,6 +24,11 @@ interface BrowserTabIdInput {
   id: string
 }
 
+interface BrowserTabPostMessageInput {
+  id: string
+  message: unknown
+}
+
 interface BrowserTabHostMessagePayload {
   tabId: string
   message: unknown
@@ -87,6 +92,12 @@ function isIdInput(value: unknown): value is BrowserTabIdInput {
   if (typeof value !== 'object' || value === null) return false
   const input = value as Partial<BrowserTabIdInput>
   return typeof input.id === 'string' && input.id.trim().length > 0
+}
+
+function isPostMessageInput(value: unknown): value is BrowserTabPostMessageInput {
+  if (typeof value !== 'object' || value === null) return false
+  const input = value as Partial<BrowserTabPostMessageInput>
+  return typeof input.id === 'string' && input.id.trim().length > 0 && 'message' in input
 }
 
 function isBounds(value: unknown): value is BrowserTabBounds {
@@ -286,6 +297,13 @@ function reloadBrowserTab(input: unknown): void {
   managed.view.webContents.reload()
 }
 
+function postMessageToBrowserTab(input: unknown): void {
+  if (!isPostMessageInput(input)) return
+  const managed = managedViews.get(input.id.trim())
+  if (!managed || managed.view.webContents.isDestroyed()) return
+  managed.view.webContents.send('browser-tab:app-message', input.message)
+}
+
 function destroyBrowserTab(input: unknown): void {
   if (!isIdInput(input)) return
   removeManagedView(input.id.trim())
@@ -309,6 +327,7 @@ export function registerBrowserTabViewIpc(): void {
   ipcMain.handle('browser-tab:show', (_, input: unknown) => setBrowserTabVisible(input, true))
   ipcMain.handle('browser-tab:hide', (_, input: unknown) => setBrowserTabVisible(input, false))
   ipcMain.handle('browser-tab:reload', (_, input: unknown) => reloadBrowserTab(input))
+  ipcMain.handle('browser-tab:post-message', (_, input: unknown) => postMessageToBrowserTab(input))
   ipcMain.handle('browser-tab:destroy', (_, input: unknown) => destroyBrowserTab(input))
   ipcMain.on('browser-tab:host-message', relayHostMessage)
 }

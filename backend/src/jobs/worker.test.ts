@@ -1,18 +1,28 @@
 import { describe, expect, test } from "bun:test";
 
-import { LIN_KE_DRAFT_JOB_NAME, REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME } from "./queue.ts";
+import {
+  LIN_KE_DRAFT_JOB_NAME,
+  REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME,
+  REBUILD_SUPPLIER_SYNC_JOB_NAME,
+} from "./queue.ts";
 import { processGravityJob } from "./worker.ts";
 import type { LinKeSettings } from "../service/lin-ke/config.ts";
 import type { LinKeAccountConfig, LinKeRepository } from "../service/lin-ke/repository.ts";
 import type { JsonRecord } from "../service/lin-ke/utils.ts";
 import type { RebuildAssetUploader } from "../service/rebuild/assets.ts";
-import type { RebuildFieldMetadataRepository } from "../service/rebuild/fields.ts";
+import type { RebuildFieldMetadata, RebuildFieldMetadataRepository } from "../service/rebuild/fields.ts";
 import type {
   RebuildSupplyGoodsClient,
   SupplyGoodsCallbackRecordInput,
   SupplyGoodsRecordRepository,
   SupplyGoodsRecordUpsertInput,
 } from "../service/rebuild/supplygoods.ts";
+import type {
+  RebuildSupplierCallbackRecordInput,
+  RebuildSupplierRecordRepository,
+  SupplyCompanyRecordInput,
+  SupplyHostRecordInput,
+} from "../service/rebuild/suppliers.ts";
 import {
   normalizeTicketBusinessStatus,
   normalizeTicketStatus,
@@ -145,6 +155,33 @@ function ticketRepository(currentTicket: TicketWithSupplyGoods): { repository: T
   };
 }
 
+function supplierRepository(): {
+  repository: RebuildSupplierRecordRepository;
+  companies: SupplyCompanyRecordInput[];
+  hosts: SupplyHostRecordInput[];
+  callbacks: RebuildSupplierCallbackRecordInput[];
+} {
+  const companies: SupplyCompanyRecordInput[] = [];
+  const hosts: SupplyHostRecordInput[] = [];
+  const callbacks: RebuildSupplierCallbackRecordInput[] = [];
+  return {
+    companies,
+    hosts,
+    callbacks,
+    repository: {
+      async upsertSupplyCompany(input): Promise<void> {
+        companies.push(input);
+      },
+      async upsertSupplyHost(input): Promise<void> {
+        hosts.push(input);
+      },
+      async createCallbackRecord(input): Promise<void> {
+        callbacks.push(input);
+      },
+    },
+  };
+}
+
 describe("Gravity jobs worker", () => {
   test("Given import-from-supplygoods job, When processing gravity job, Then it dispatches to SupplyGoods importer", async () => {
     const saved: SupplyGoodsRecordUpsertInput[] = [];
@@ -203,6 +240,66 @@ describe("Gravity jobs worker", () => {
     expect(callbackRecords.map((record) => record.rawPayload)).toEqual([{}]);
   });
 
+  test("Given import-from-supplygoods job has rebuild_fields asset type, When processing, Then it mirrors SupplyGoods asset fields", async () => {
+    const saved: SupplyGoodsRecordUpsertInput[] = [];
+    const repository: SupplyGoodsRecordRepository = {
+      async findMissingSupplyGoodsIds(supplyGoodsIds): Promise<string[]> {
+        return supplyGoodsIds;
+      },
+      async upsertRecord(input): Promise<void> {
+        saved.push(input);
+      },
+      async createCallbackRecord(): Promise<void> {},
+    };
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async listSupplyGoodsIds(): Promise<string[]> {
+        return ["944-worker-asset"];
+      },
+      async getSupplyGoods(supplyGoodsId): Promise<Record<string, unknown>> {
+        return {
+          SupplyGoodsId: supplyGoodsId,
+          extraMenuFile: ["rb/goods/worker-menu.pdf"],
+        };
+      },
+    };
+    const fieldMetadataRepository = {
+      async listFieldsByEntity(entityName: string): Promise<RebuildFieldMetadata[]> {
+        return [
+          {
+            entityName,
+            fieldName: "extraMenuFile",
+            label: "额外菜单附件",
+            fieldType: "FILE",
+            raw: { name: "extraMenuFile", type: "FILE" },
+          },
+        ];
+      },
+    } as unknown as RebuildFieldMetadataRepository;
+    const assetUploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.entityName}/${input.recordId}/${input.fieldName}/asset.pdf`,
+        };
+      },
+    };
+
+    await processGravityJob({
+      name: REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME,
+      data: {},
+      options: {
+        rebuildClient,
+        repository,
+        fieldMetadataRepository,
+        assetUploader,
+      },
+    });
+
+    expect(saved[0]?.normalizedPayload.extraMenuFile).toEqual([
+      "https://cdn.example.com/SupplyGoods/944-worker-asset/extraMenuFile/asset.pdf",
+    ]);
+  });
+
   test("Given Lin-Ke draft job, When processing gravity job, Then it dispatches to draft creator", async () => {
     const currentTicket = ticket();
     const { repository, records } = ticketRepository(currentTicket);
@@ -229,5 +326,143 @@ describe("Gravity jobs worker", () => {
     });
     expect(currentTicket.businessStatus).toBe(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING);
     expect(records[0]?.action).toBe("info_optimized");
+  });
+
+  test("Given supplier sync job, When processing SupplyCompany, Then it stores normalized supplier detail", async () => {
+    const { repository, companies, callbacks } = supplierRepository();
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async getSupplyCompany(supplyCompanyId): Promise<Record<string, unknown>> {
+        return {
+          SupplyCompanyId: supplyCompanyId,
+          companyName: "异步公司",
+        };
+      },
+    };
+
+    const result = await processGravityJob({
+      name: REBUILD_SUPPLIER_SYNC_JOB_NAME,
+      data: {
+        entityName: "SupplyCompany",
+        recordId: "945-worker-company",
+        source: "supply_goods_callback",
+        supplyGoodsId: "944-source",
+      },
+      options: {
+        rebuildClient,
+        supplierRepository: repository,
+        assetUploader: null as RebuildAssetUploader | null,
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      entityName: "SupplyCompany",
+      recordId: "945-worker-company",
+    });
+    expect(companies[0]?.payload.companyName).toBe("异步公司");
+    expect(callbacks[0]?.rawPayload).toEqual({
+      source: "supply_goods_callback",
+      supplyGoodsId: "944-source",
+    });
+  });
+
+  test("Given supplier sync job, When processing SupplyHost, Then it stores normalized supplier detail", async () => {
+    const { repository, hosts, callbacks } = supplierRepository();
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async getSupplyHost(supplyHostId): Promise<Record<string, unknown>> {
+        return {
+          SupplyHostId: supplyHostId,
+          hostName: "异步商户",
+        };
+      },
+    };
+
+    const result = await processGravityJob({
+      name: REBUILD_SUPPLIER_SYNC_JOB_NAME,
+      data: {
+        entityName: "SupplyHost",
+        recordId: "946-worker-host",
+        source: "supply_goods_callback",
+        supplyGoodsId: "944-source",
+      },
+      options: {
+        rebuildClient,
+        supplierRepository: repository,
+        assetUploader: null as RebuildAssetUploader | null,
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      entityName: "SupplyHost",
+      recordId: "946-worker-host",
+    });
+    expect(hosts[0]?.payload.hostName).toBe("异步商户");
+    expect(callbacks[0]?.rawPayload).toEqual({
+      source: "supply_goods_callback",
+      supplyGoodsId: "944-source",
+    });
+  });
+
+  test("Given supplier sync job has SupplyHost rebuild_fields asset type, When processing, Then it mirrors host asset fields", async () => {
+    const { repository, hosts } = supplierRepository();
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async getSupplyHost(supplyHostId): Promise<Record<string, unknown>> {
+        return {
+          SupplyHostId: supplyHostId,
+          extraHostPermit: ["rb/host/worker-permit.pdf"],
+        };
+      },
+    };
+    const fieldMetadataRepository = {
+      async listFieldsByEntity(entityName: string): Promise<RebuildFieldMetadata[]> {
+        return [
+          {
+            entityName,
+            fieldName: "extraHostPermit",
+            label: "额外商户证照",
+            fieldType: "FILE",
+            raw: { name: "extraHostPermit", type: "FILE" },
+          },
+        ];
+      },
+    } as unknown as RebuildFieldMetadataRepository;
+    const assetUploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.entityName}/${input.recordId}/${input.fieldName}/asset.pdf`,
+        };
+      },
+    };
+
+    await processGravityJob({
+      name: REBUILD_SUPPLIER_SYNC_JOB_NAME,
+      data: {
+        entityName: "SupplyHost",
+        recordId: "946-worker-host-asset",
+        source: "supply_goods_callback",
+        supplyGoodsId: "944-source",
+      },
+      options: {
+        rebuildClient,
+        supplierRepository: repository,
+        fieldMetadataRepository,
+        assetUploader,
+      },
+    });
+
+    expect(hosts[0]?.payload.extraHostPermit).toEqual([
+      "https://cdn.example.com/SupplyHost/946-worker-host-asset/extraHostPermit/asset.pdf",
+    ]);
   });
 });

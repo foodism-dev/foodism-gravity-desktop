@@ -12,7 +12,7 @@ import type {
   RebuildFieldOptionMetadata,
   RebuildMetadataClient,
 } from "./service/rebuild/fields.ts";
-import { SUPPLY_GOODS_SYNC_FIELDS } from "./service/rebuild/supplygoods.ts";
+import { SUPPLY_COMPANY_ENTITY, SUPPLY_GOODS_SYNC_FIELDS, SUPPLY_HOST_ENTITY } from "./service/rebuild/supplygoods.ts";
 import { createRebuildSupplyGoodsClient } from "./service/rebuild/supplygoods.ts";
 import type {
   RebuildSupplyGoodsClient,
@@ -22,6 +22,12 @@ import type {
   SupplyGoodsRecordUpsertInput,
 } from "./service/rebuild/supplygoods.ts";
 import type { RebuildAssetUploader } from "./service/rebuild/assets.ts";
+import type {
+  RebuildSupplierCallbackRecordInput,
+  RebuildSupplierRecordRepository,
+  SupplyCompanyRecordInput,
+  SupplyHostRecordInput,
+} from "./service/rebuild/suppliers.ts";
 import type { PublishSkillPackageInput, SkillPublisher } from "./skill-publisher.ts";
 import type {
   CreateTicketActionRecordInput,
@@ -48,6 +54,11 @@ import type {
   LinKeJobStatus,
 } from "./service/lin-ke/fee-setup-queue.ts";
 import { LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS } from "./service/lin-ke/fee-setup-queue.ts";
+import type { GravityJobsQueueClient } from "./jobs/queue.ts";
+import {
+  REBUILD_SUPPLIER_SYNC_JOB_NAME,
+  type RebuildSupplierSyncJobData,
+} from "./jobs/types.ts";
 
 process.env.DATABASE_URL = "";
 process.env.PROMA_SERVER_JWT_SECRET = "";
@@ -140,6 +151,18 @@ interface SupplyGoodsCallbackResponse {
   updated_at: string;
 }
 
+interface SupplyCompanyCallbackResponse {
+  ok: boolean;
+  supply_company_id: string;
+  updated_at: string;
+}
+
+interface SupplyHostCallbackResponse {
+  ok: boolean;
+  supply_host_id: string;
+  updated_at: string;
+}
+
 interface TicketsResponse {
   tickets: Array<{
     id: number;
@@ -207,6 +230,20 @@ interface RebuildFieldSyncResponse {
   fields: number;
   options: number;
   updated_at: string;
+}
+
+interface RebuildReferenceDetailResponse {
+  entity: string;
+  id: string;
+  payload: Record<string, unknown>;
+  field_options?: never;
+  field_metadata?: never;
+}
+
+interface RebuildReferenceMetadataResponse {
+  entity: string;
+  field_metadata: TicketMetadataResponse["field_metadata"];
+  field_options: TicketMetadataResponse["field_options"];
 }
 
 async function createAuthHeaders(app: ReturnType<typeof createServerApp>): Promise<Record<string, string>> {
@@ -359,6 +396,61 @@ function createMemorySupplyGoodsRepository(): {
       },
       async createCallbackRecord(input: SupplyGoodsCallbackRecordInput): Promise<void> {
         callbackRecords.push(input);
+      },
+    },
+  };
+}
+
+function createMemorySupplierRepository(): {
+  repository: RebuildSupplierRecordRepository;
+  savedCompanies: SupplyCompanyRecordInput[];
+  savedHosts: SupplyHostRecordInput[];
+  callbackRecords: RebuildSupplierCallbackRecordInput[];
+} {
+  const savedCompanies: SupplyCompanyRecordInput[] = [];
+  const savedHosts: SupplyHostRecordInput[] = [];
+  const callbackRecords: RebuildSupplierCallbackRecordInput[] = [];
+  return {
+    savedCompanies,
+    savedHosts,
+    callbackRecords,
+    repository: {
+      async findSupplyCompany(supplyCompanyId: string): Promise<SupplyCompanyRecordInput | null> {
+        return savedCompanies.find((record) => record.supplyCompanyId === supplyCompanyId) ?? null;
+      },
+      async findSupplyHost(supplyHostId: string): Promise<SupplyHostRecordInput | null> {
+        return savedHosts.find((record) => record.supplyHostId === supplyHostId) ?? null;
+      },
+      async upsertSupplyCompany(input: SupplyCompanyRecordInput): Promise<void> {
+        savedCompanies.push(input);
+      },
+      async upsertSupplyHost(input: SupplyHostRecordInput): Promise<void> {
+        savedHosts.push(input);
+      },
+      async createCallbackRecord(input: RebuildSupplierCallbackRecordInput): Promise<void> {
+        callbackRecords.push(input);
+      },
+    },
+  };
+}
+
+function createMemoryGravityJobsQueue(options: { failAdds?: boolean } = {}): {
+  queue: GravityJobsQueueClient;
+  jobs: Array<{ name: string; data: unknown }>;
+} {
+  const jobs: Array<{ name: string; data: unknown }> = [];
+  return {
+    jobs,
+    queue: {
+      async schedulePeriodicJobs(): Promise<string[]> {
+        return [];
+      },
+      async addJob(name, data): Promise<string> {
+        if (options.failAdds) {
+          throw new Error("队列不可用");
+        }
+        jobs.push({ name, data });
+        return `job-${jobs.length}`;
       },
     },
   };
@@ -682,6 +774,217 @@ describe("server app", () => {
     expect(queriedFields[0]?.split(",")).not.toContain("company.guestId");
     expect(queriedFields[0]?.split(",")).not.toContain("rbhost.approvalState");
     expect(queriedFields[1]).toBe(queriedFields[0]);
+  });
+
+  test("Given SupplyGoods fields are missing in database, When querying detail from REBUILD, Then it fails without fallback request", async () => {
+    const { repository: fieldRepository } = createMemoryFieldRepository();
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    const fetchMock = async (...args: Parameters<typeof fetch>): Promise<Response> => {
+      requests.push(String(args[0]));
+      return new Response(JSON.stringify({ error_code: 0, error_msg: "", data: {} }));
+    };
+    globalThis.fetch = Object.assign(fetchMock, { preconnect: originalFetch.preconnect });
+
+    try {
+      const client = createRebuildSupplyGoodsClient({ fieldMetadataRepository: fieldRepository });
+
+      await expect(client.getSupplyGoods("944-missing-fields")).rejects.toThrow("SupplyGoods 字段元数据为空");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(requests).toEqual([]);
+  });
+
+  test("Given SupplyCompany fields stored in database, When querying detail from REBUILD, Then it requests database fields", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalBaseUrl = Bun.env.REBUILD_BASE_URL;
+    const originalAppId = Bun.env.REBUILD_APP_ID;
+    const originalAppSecret = Bun.env.REBUILD_APP_SECRET;
+    const queriedFields: string[] = [];
+    const { repository: fieldRepository, fields } = createMemoryFieldRepository();
+
+    fields.push(
+      {
+        entityName: SUPPLY_COMPANY_ENTITY,
+        fieldName: "SupplyCompanyId",
+        label: "公司ID",
+        fieldType: "TEXT",
+        raw: { name: "SupplyCompanyId", type: "TEXT" },
+      },
+      {
+        entityName: SUPPLY_COMPANY_ENTITY,
+        fieldName: "legalPersonMobile",
+        label: "法人手机号",
+        fieldType: "TEXT",
+        raw: { name: "legalPersonMobile", type: "TEXT" },
+      },
+      {
+        entityName: SUPPLY_COMPANY_ENTITY,
+        fieldName: "companyContract",
+        label: "公司合同",
+        fieldType: "FILE",
+        raw: { name: "companyContract", type: "FILE" },
+      },
+      {
+        entityName: SUPPLY_COMPANY_ENTITY,
+        fieldName: "extraCompanyField",
+        label: "额外公司字段",
+        fieldType: "TEXT",
+        raw: { name: "extraCompanyField", type: "TEXT" },
+      },
+    );
+
+    Bun.env.REBUILD_BASE_URL = "https://rebuild.example.com";
+    Bun.env.REBUILD_APP_ID = "app-id";
+    Bun.env.REBUILD_APP_SECRET = "app-secret";
+    const fetchMock = async (...args: Parameters<typeof fetch>): Promise<Response> => {
+      const [input] = args;
+      const url = new URL(String(input));
+      queriedFields.push(url.searchParams.get("fields") ?? "");
+      return new Response(JSON.stringify({
+        error_code: 0,
+        error_msg: "",
+        data: { SupplyCompanyId: url.searchParams.get("id") ?? "", extraCompanyField: "已返回" },
+      }));
+    };
+    globalThis.fetch = Object.assign(fetchMock, { preconnect: originalFetch.preconnect });
+
+    try {
+      const client = createRebuildSupplyGoodsClient({ fieldMetadataRepository: fieldRepository });
+
+      await client.getSupplyCompany?.("945-full-fields");
+    } finally {
+      globalThis.fetch = originalFetch;
+      Bun.env.REBUILD_BASE_URL = originalBaseUrl;
+      Bun.env.REBUILD_APP_ID = originalAppId;
+      Bun.env.REBUILD_APP_SECRET = originalAppSecret;
+    }
+
+    expect(queriedFields).toHaveLength(1);
+    expect(queriedFields[0]?.split(",")).toEqual([
+      "SupplyCompanyId",
+      "legalPersonMobile",
+      "companyContract",
+      "extraCompanyField",
+    ]);
+  });
+
+  test("Given SupplyHost fields stored in database, When querying detail from REBUILD, Then it requests database fields", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalBaseUrl = Bun.env.REBUILD_BASE_URL;
+    const originalAppId = Bun.env.REBUILD_APP_ID;
+    const originalAppSecret = Bun.env.REBUILD_APP_SECRET;
+    const queriedFields: string[] = [];
+    const { repository: fieldRepository, fields } = createMemoryFieldRepository();
+
+    fields.push(
+      {
+        entityName: SUPPLY_HOST_ENTITY,
+        fieldName: "SupplyHostId",
+        label: "商户ID",
+        fieldType: "TEXT",
+        raw: { name: "SupplyHostId", type: "TEXT" },
+      },
+      {
+        entityName: SUPPLY_HOST_ENTITY,
+        fieldName: "tableCount",
+        label: "商户桌数",
+        fieldType: "NUMBER",
+        raw: { name: "tableCount", type: "NUMBER" },
+      },
+      {
+        entityName: SUPPLY_HOST_ENTITY,
+        fieldName: "hostPic",
+        label: "商户头图",
+        fieldType: "FILE",
+        raw: { name: "hostPic", type: "FILE" },
+      },
+      {
+        entityName: SUPPLY_HOST_ENTITY,
+        fieldName: "extraHostField",
+        label: "额外商户字段",
+        fieldType: "TEXT",
+        raw: { name: "extraHostField", type: "TEXT" },
+      },
+    );
+
+    Bun.env.REBUILD_BASE_URL = "https://rebuild.example.com";
+    Bun.env.REBUILD_APP_ID = "app-id";
+    Bun.env.REBUILD_APP_SECRET = "app-secret";
+    const fetchMock = async (...args: Parameters<typeof fetch>): Promise<Response> => {
+      const [input] = args;
+      const url = new URL(String(input));
+      queriedFields.push(url.searchParams.get("fields") ?? "");
+      return new Response(JSON.stringify({
+        error_code: 0,
+        error_msg: "",
+        data: { SupplyHostId: url.searchParams.get("id") ?? "", extraHostField: "已返回" },
+      }));
+    };
+    globalThis.fetch = Object.assign(fetchMock, { preconnect: originalFetch.preconnect });
+
+    try {
+      const client = createRebuildSupplyGoodsClient({ fieldMetadataRepository: fieldRepository });
+
+      await client.getSupplyHost?.("946-full-fields");
+    } finally {
+      globalThis.fetch = originalFetch;
+      Bun.env.REBUILD_BASE_URL = originalBaseUrl;
+      Bun.env.REBUILD_APP_ID = originalAppId;
+      Bun.env.REBUILD_APP_SECRET = originalAppSecret;
+    }
+
+    expect(queriedFields).toHaveLength(1);
+    expect(queriedFields[0]?.split(",")).toEqual([
+      "SupplyHostId",
+      "tableCount",
+      "hostPic",
+      "extraHostField",
+    ]);
+  });
+
+  test("Given SupplyCompany fields are missing in database, When querying detail from REBUILD, Then it fails without fallback request", async () => {
+    const originalFetch = globalThis.fetch;
+    const { repository: fieldRepository } = createMemoryFieldRepository();
+    let requestCount = 0;
+    const fetchMock = async (): Promise<Response> => {
+      requestCount += 1;
+      return new Response(JSON.stringify({ error_code: 0, error_msg: "", data: {} }));
+    };
+    globalThis.fetch = Object.assign(fetchMock, { preconnect: originalFetch.preconnect });
+
+    try {
+      const client = createRebuildSupplyGoodsClient({ fieldMetadataRepository: fieldRepository });
+
+      await expect(client.getSupplyCompany?.("945-missing-fields")).rejects.toThrow("SupplyCompany 字段元数据为空");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(requestCount).toBe(0);
+  });
+
+  test("Given SupplyHost fields are missing in database, When querying detail from REBUILD, Then it fails without fallback request", async () => {
+    const originalFetch = globalThis.fetch;
+    const { repository: fieldRepository } = createMemoryFieldRepository();
+    let requestCount = 0;
+    const fetchMock = async (): Promise<Response> => {
+      requestCount += 1;
+      return new Response(JSON.stringify({ error_code: 0, error_msg: "", data: {} }));
+    };
+    globalThis.fetch = Object.assign(fetchMock, { preconnect: originalFetch.preconnect });
+
+    try {
+      const client = createRebuildSupplyGoodsClient({ fieldMetadataRepository: fieldRepository });
+
+      await expect(client.getSupplyHost?.("946-missing-fields")).rejects.toThrow("SupplyHost 字段元数据为空");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(requestCount).toBe(0);
   });
 
   test("Given SupplyCompany reference is queried, When calling REBUILD, Then it requests only linked status fields", async () => {
@@ -1485,6 +1788,93 @@ describe("server app", () => {
     expect(callbackRecords[0]?.normalizedPayload).toEqual(saved[0]?.normalizedPayload);
   });
 
+  test("Given SupplyGoods callback has company and host references, When sync succeeds, Then linked supplier sync jobs are enqueued", async () => {
+    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const { queue, jobs } = createMemoryGravityJobsQueue();
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
+        return {
+          SupplyGoodsId: supplyGoodsId,
+          goodsName: "带关联实体商品",
+          company: {
+            id: "945-company-async",
+            entity: "SupplyCompany",
+          },
+          rbhost: {
+            id: "946-host-async",
+            entity: "SupplyHost",
+          },
+          approvalState: { value: 2, text: "审批中" },
+        };
+      },
+    };
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      supplyGoodsRecordRepository: repository,
+      gravityJobsQueue: queue,
+    });
+
+    const response = await app.request("/api/m/rebuild/saveReportSupplierGoodsInfo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ primaryId: "944-linked-async" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(saved).toHaveLength(1);
+    expect(jobs).toEqual([
+      {
+        name: REBUILD_SUPPLIER_SYNC_JOB_NAME,
+        data: {
+          entityName: "SupplyCompany",
+          recordId: "945-company-async",
+          source: "supply_goods_callback",
+          supplyGoodsId: "944-linked-async",
+        } satisfies RebuildSupplierSyncJobData,
+      },
+      {
+        name: REBUILD_SUPPLIER_SYNC_JOB_NAME,
+        data: {
+          entityName: "SupplyHost",
+          recordId: "946-host-async",
+          source: "supply_goods_callback",
+          supplyGoodsId: "944-linked-async",
+        } satisfies RebuildSupplierSyncJobData,
+      },
+    ]);
+  });
+
+  test("Given supplier sync queue fails, When SupplyGoods callback succeeds, Then the callback still returns success", async () => {
+    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const { queue } = createMemoryGravityJobsQueue({ failAdds: true });
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
+        return {
+          SupplyGoodsId: supplyGoodsId,
+          goodsName: "队列失败商品",
+          company: {
+            id: "945-company-queue-failed",
+            entity: "SupplyCompany",
+          },
+        };
+      },
+    };
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      supplyGoodsRecordRepository: repository,
+      gravityJobsQueue: queue,
+    });
+
+    const response = await app.request("/api/m/rebuild/saveReportSupplierGoodsInfo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ primaryId: "944-queue-failed" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(saved[0]?.supplyGoodsId).toBe("944-queue-failed");
+  });
+
   test("Given a SupplyGoods callback with media fields, When asset uploader is configured, Then it saves converted asset urls", async () => {
     const { repository, saved, callbackRecords } = createMemorySupplyGoodsRepository();
     const { repository: fieldRepository, fields } = createMemoryFieldRepository();
@@ -1532,6 +1922,57 @@ describe("server app", () => {
     expect(callbackRecords[0]?.normalizedPayload.mainPic).toEqual(["https://cdn.example.com/mainPic/main.jpg"]);
   });
 
+  test("Given SupplyGoods callback has asset fields from rebuild_fields, When syncing, Then it mirrors fields by metadata type", async () => {
+    const { repository, saved } = createMemorySupplyGoodsRepository();
+    const { repository: fieldRepository, fields } = createMemoryFieldRepository();
+    const uploaded: string[] = [];
+    const assetUploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        uploaded.push(`${input.entityName}:${input.recordId}:${input.fieldName}:${input.sourcePath}`);
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.entityName}/${input.recordId}/${input.fieldName}/asset.jpg`,
+        };
+      },
+    };
+    fields.push({
+      entityName: "SupplyGoods",
+      fieldName: "extraMenuFile",
+      label: "额外菜单附件",
+      fieldType: "FILE",
+      raw: { name: "extraMenuFile", type: "FILE" },
+    });
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(supplyGoodsId: string): Promise<Record<string, unknown>> {
+        return {
+          SupplyGoodsId: supplyGoodsId,
+          goodsName: "元数据资源商品",
+          extraMenuFile: ["rb/goods/menu.pdf"],
+        };
+      },
+    };
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      rebuildAssetUploader: assetUploader,
+      rebuildFieldMetadataRepository: fieldRepository,
+      supplyGoodsRecordRepository: repository,
+    });
+
+    const response = await app.request("/api/m/rebuild/saveReportSupplierGoodsInfo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ supply_goods_id: "944-extra-file" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(uploaded).toEqual([
+      "SupplyGoods:944-extra-file:extraMenuFile:rb/goods/menu.pdf",
+    ]);
+    expect(saved[0]?.normalizedPayload.extraMenuFile).toEqual([
+      "https://cdn.example.com/SupplyGoods/944-extra-file/extraMenuFile/asset.jpg",
+    ]);
+  });
+
   test("Given a REBUILD SupplyGoods hook callback, When primaryId is provided, Then the compatible URL also syncs the record", async () => {
     const { repository, saved } = createMemorySupplyGoodsRepository();
     const queriedIds: string[] = [];
@@ -1565,6 +2006,237 @@ describe("server app", () => {
       SupplyGoodsId: "944-compatible",
       goodsName: "兼容路径商品",
     });
+  });
+
+  test("Given report supplier company callback, When primaryId is provided, Then it refreshes and stores normalized company detail", async () => {
+    const { repository, savedCompanies, callbackRecords } = createMemorySupplierRepository();
+    const uploaded: string[] = [];
+    const assetUploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        uploaded.push(`${input.entityName}:${input.recordId}:${input.fieldName}:${input.sourcePath}`);
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.entityName}/${input.recordId}/${input.fieldName}/asset.jpg`,
+        };
+      },
+    };
+    const queriedIds: string[] = [];
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async getSupplyCompany(supplyCompanyId: string): Promise<Record<string, unknown>> {
+        queriedIds.push(supplyCompanyId);
+        return {
+          SupplyCompanyId: supplyCompanyId,
+          companyName: "回调公司",
+          businessLicensePicture: ["rb/company/license.jpg"],
+          authLetter: ["rb/company/auth-letter.jpg"],
+          coontractFile: ["rb/company/cooperation.pdf"],
+          publicityContract: ["rb/company/publicity.pdf"],
+          extraAgreement: ["rb/company/extra-agreement.pdf"],
+        };
+      },
+    };
+    const { repository: fieldRepository, fields } = createMemoryFieldRepository();
+    fields.push(
+      {
+        entityName: "SupplyCompany",
+        fieldName: "businessLicensePicture",
+        label: "商家营业执照",
+        fieldType: "IMAGE",
+        raw: { name: "businessLicensePicture", type: "IMAGE" },
+      },
+      {
+        entityName: "SupplyCompany",
+        fieldName: "authLetter",
+        label: "收款委托书",
+        fieldType: "IMAGE",
+        raw: { name: "authLetter", type: "IMAGE" },
+      },
+      {
+        entityName: "SupplyCompany",
+        fieldName: "coontractFile",
+        label: "商户合作协议",
+        fieldType: "FILE",
+        raw: { name: "coontractFile", type: "FILE" },
+      },
+      {
+        entityName: "SupplyCompany",
+        fieldName: "publicityContract",
+        label: "宣传推广合同",
+        fieldType: "FILE",
+        raw: { name: "publicityContract", type: "FILE" },
+      },
+      {
+        entityName: "SupplyCompany",
+        fieldName: "extraAgreement",
+        label: "额外协议",
+        fieldType: "FILE",
+        raw: { name: "extraAgreement", type: "FILE" },
+      },
+    );
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      rebuildAssetUploader: assetUploader,
+      rebuildSupplierRepository: repository,
+      rebuildFieldMetadataRepository: fieldRepository,
+    });
+
+    const response = await app.request("/api/m/rebuild/saveReportSupplierCompanyInfo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ primaryId: "945-company-callback" }),
+    });
+    const body = (await response.json()) as SupplyCompanyCallbackResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.supply_company_id).toBe("945-company-callback");
+    expect(queriedIds).toEqual(["945-company-callback"]);
+    expect(uploaded).toEqual([
+      "SupplyCompany:945-company-callback:businessLicensePicture:rb/company/license.jpg",
+      "SupplyCompany:945-company-callback:authLetter:rb/company/auth-letter.jpg",
+      "SupplyCompany:945-company-callback:coontractFile:rb/company/cooperation.pdf",
+      "SupplyCompany:945-company-callback:publicityContract:rb/company/publicity.pdf",
+      "SupplyCompany:945-company-callback:extraAgreement:rb/company/extra-agreement.pdf",
+    ]);
+    expect(savedCompanies).toHaveLength(1);
+    expect(savedCompanies[0]?.payload.businessLicensePicture).toEqual([
+      "https://cdn.example.com/SupplyCompany/945-company-callback/businessLicensePicture/asset.jpg",
+    ]);
+    expect(savedCompanies[0]?.payload.authLetter).toEqual([
+      "https://cdn.example.com/SupplyCompany/945-company-callback/authLetter/asset.jpg",
+    ]);
+    expect(savedCompanies[0]?.payload.coontractFile).toEqual([
+      "https://cdn.example.com/SupplyCompany/945-company-callback/coontractFile/asset.jpg",
+    ]);
+    expect(savedCompanies[0]?.payload.publicityContract).toEqual([
+      "https://cdn.example.com/SupplyCompany/945-company-callback/publicityContract/asset.jpg",
+    ]);
+    expect(savedCompanies[0]?.payload.extraAgreement).toEqual([
+      "https://cdn.example.com/SupplyCompany/945-company-callback/extraAgreement/asset.jpg",
+    ]);
+    expect(callbackRecords).toHaveLength(1);
+    expect(callbackRecords[0]?.entityName).toBe("SupplyCompany");
+    expect(callbackRecords[0]?.recordId).toBe("945-company-callback");
+    expect(callbackRecords[0]?.rawPayload).toEqual({ primaryId: "945-company-callback" });
+    expect(callbackRecords[0]?.payload.businessLicensePicture).toEqual(["rb/company/license.jpg"]);
+    expect(callbackRecords[0]?.normalizedPayload).toEqual(savedCompanies[0]?.payload);
+    expect(callbackRecords[0]?.status).toBe("success");
+  });
+
+  test("Given report supplier host callback, When supply_host_id is provided, Then it refreshes and stores normalized host detail", async () => {
+    const { repository, savedHosts, callbackRecords } = createMemorySupplierRepository();
+    const { repository: fieldRepository, fields } = createMemoryFieldRepository();
+    const uploaded: string[] = [];
+    const assetUploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        uploaded.push(`${input.entityName}:${input.recordId}:${input.fieldName}:${input.sourcePath}`);
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.entityName}/${input.recordId}/${input.fieldName}/asset.jpg`,
+        };
+      },
+    };
+    const queriedIds: string[] = [];
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async getSupplyHost(supplyHostId: string): Promise<Record<string, unknown>> {
+        queriedIds.push(supplyHostId);
+        return {
+          SupplyHostId: supplyHostId,
+          hostName: "回调商户",
+          hostPic: ["rb/host/head.jpg"],
+          extraHostPermit: ["rb/host/permit.pdf"],
+        };
+      },
+    };
+    fields.push(
+      {
+        entityName: "SupplyHost",
+        fieldName: "hostPic",
+        label: "商户头图",
+        fieldType: "IMAGE",
+        raw: { name: "hostPic", type: "IMAGE" },
+      },
+      {
+        entityName: "SupplyHost",
+        fieldName: "extraHostPermit",
+        label: "额外商户证照",
+        fieldType: "FILE",
+        raw: { name: "extraHostPermit", type: "FILE" },
+      },
+    );
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      rebuildAssetUploader: assetUploader,
+      rebuildSupplierRepository: repository,
+      rebuildFieldMetadataRepository: fieldRepository,
+    });
+
+    const response = await app.request("/api/m/rebuild/saveReportSupplierHostInfo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ supply_host_id: "946-host-callback" }),
+    });
+    const body = (await response.json()) as SupplyHostCallbackResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.supply_host_id).toBe("946-host-callback");
+    expect(queriedIds).toEqual(["946-host-callback"]);
+    expect(uploaded).toEqual([
+      "SupplyHost:946-host-callback:hostPic:rb/host/head.jpg",
+      "SupplyHost:946-host-callback:extraHostPermit:rb/host/permit.pdf",
+    ]);
+    expect(savedHosts).toHaveLength(1);
+    expect(savedHosts[0]?.payload.hostPic).toEqual([
+      "https://cdn.example.com/SupplyHost/946-host-callback/hostPic/asset.jpg",
+    ]);
+    expect(savedHosts[0]?.payload.extraHostPermit).toEqual([
+      "https://cdn.example.com/SupplyHost/946-host-callback/extraHostPermit/asset.jpg",
+    ]);
+    expect(callbackRecords).toHaveLength(1);
+    expect(callbackRecords[0]?.entityName).toBe("SupplyHost");
+    expect(callbackRecords[0]?.recordId).toBe("946-host-callback");
+    expect(callbackRecords[0]?.rawPayload).toEqual({ supply_host_id: "946-host-callback" });
+    expect(callbackRecords[0]?.payload.hostPic).toEqual(["rb/host/head.jpg"]);
+    expect(callbackRecords[0]?.normalizedPayload).toEqual(savedHosts[0]?.payload);
+    expect(callbackRecords[0]?.status).toBe("success");
+  });
+
+  test("Given report supplier callback sync fails, When detail query throws, Then failed callback record is stored", async () => {
+    const { repository, callbackRecords } = createMemorySupplierRepository();
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async getSupplyHost(): Promise<Record<string, unknown>> {
+        throw new Error("Rebuild 商户查询失败");
+      },
+    };
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      rebuildSupplierRepository: repository,
+    });
+
+    const response = await app.request("/api/m/rebuild/saveReportSupplierHostInfo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ primaryId: "946-host-failed" }),
+    });
+    const body = (await response.json()) as ErrorResponse;
+
+    expect(response.status).toBe(502);
+    expect(body.message).toBe("同步 SupplyHost 失败");
+    expect(callbackRecords).toHaveLength(1);
+    expect(callbackRecords[0]?.entityName).toBe("SupplyHost");
+    expect(callbackRecords[0]?.recordId).toBe("946-host-failed");
+    expect(callbackRecords[0]?.status).toBe("failed");
+    expect(callbackRecords[0]?.errorMessage).toBe("Rebuild 商户查询失败");
   });
 
   test("Given SupplyGoods callback sync fails, When logging the error, Then stack and cause are included", async () => {
@@ -3079,6 +3751,249 @@ describe("server app", () => {
         is_default: true,
       },
     ]);
+  });
+
+  test("Given stored Rebuild reference entity, When detail API is requested, Then it reads supplier repository", async () => {
+    const { repository, savedCompanies, savedHosts } = createMemorySupplierRepository();
+    const { repository: fieldRepository, fields, options } = createMemoryFieldRepository();
+    const rebuildClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async getSupplyCompany(): Promise<Record<string, unknown>> {
+        throw new Error("不应该实时查询 SupplyCompany");
+      },
+      async getSupplyHost(): Promise<Record<string, unknown>> {
+        throw new Error("不应该实时查询 SupplyHost");
+      },
+    } as unknown as RebuildSupplyGoodsClient;
+    savedCompanies.push({
+      supplyCompanyId: "945-company",
+      payload: {
+        SupplyCompanyId: "945-company",
+        companyName: "测试公司",
+        guestId: "guest-001",
+        auditStatus: { value: "approved", text: "approved" },
+      },
+      updatedAt: new Date("2026-06-30T06:00:00.000Z"),
+    });
+    savedHosts.push({
+      supplyHostId: "946-host",
+      payload: {
+        SupplyHostId: "946-host",
+        hostName: "测试门店",
+        approvalState: { value: 2, text: "审核中" },
+      },
+      updatedAt: new Date("2026-06-30T06:01:00.000Z"),
+    });
+    fields.push(
+      {
+        entityName: "SupplyCompany",
+        fieldName: "companyName",
+        label: "公司名称",
+        fieldType: "TEXT",
+        raw: { name: "companyName", label: "公司名称", type: "TEXT" },
+      },
+      {
+        entityName: "SupplyCompany",
+        fieldName: "auditStatus",
+        label: "公司审核状态",
+        fieldType: "PICKLIST",
+        raw: { name: "auditStatus", label: "公司审核状态", type: "PICKLIST" },
+      },
+      {
+        entityName: "SupplyHost",
+        fieldName: "hostName",
+        label: "主商户名称",
+        fieldType: "TEXT",
+        raw: { name: "hostName", label: "主商户名称", type: "TEXT" },
+      },
+    );
+    options.push({
+      entityName: "SupplyCompany",
+      fieldName: "auditStatus",
+      optionValue: "approved",
+      optionLabel: "审核通过",
+      sortOrder: 1,
+      isDefault: false,
+      raw: { id: "approved", text: "审核通过" },
+    });
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      rebuildSupplierRepository: repository,
+      rebuildFieldMetadataRepository: fieldRepository,
+      supplyGoodsRecordRepository: null,
+    });
+
+    const companyResponse = await app.request("/api/rebuild/references/SupplyCompany/945-company", {
+      headers: await createAuthHeaders(app),
+    });
+    const companyBody = (await companyResponse.json()) as RebuildReferenceDetailResponse;
+    const hostResponse = await app.request("/api/rebuild/references/SupplyHost/946-host", {
+      headers: await createAuthHeaders(app),
+    });
+    const hostBody = (await hostResponse.json()) as RebuildReferenceDetailResponse;
+
+    expect(companyResponse.status).toBe(200);
+    expect(companyBody).toEqual({
+      entity: "SupplyCompany",
+      id: "945-company",
+      payload: {
+        SupplyCompanyId: "945-company",
+        companyName: "测试公司",
+        guestId: "guest-001",
+        auditStatus: { value: "approved", text: "approved" },
+      },
+    });
+    expect("field_options" in companyBody).toBe(false);
+    expect("field_metadata" in companyBody).toBe(false);
+    expect(hostResponse.status).toBe(200);
+    expect(hostBody.payload.hostName).toBe("测试门店");
+    expect("field_options" in hostBody).toBe(false);
+    expect("field_metadata" in hostBody).toBe(false);
+
+    const companyMetadataResponse = await app.request("/api/rebuild/references/SupplyCompany/metadata", {
+      headers: await createAuthHeaders(app),
+    });
+    const companyMetadataBody = (await companyMetadataResponse.json()) as RebuildReferenceMetadataResponse;
+    const hostMetadataResponse = await app.request("/api/rebuild/references/SupplyHost/metadata", {
+      headers: await createAuthHeaders(app),
+    });
+    const hostMetadataBody = (await hostMetadataResponse.json()) as RebuildReferenceMetadataResponse;
+
+    expect(companyMetadataResponse.status).toBe(200);
+    expect(companyMetadataBody).toEqual({
+      entity: "SupplyCompany",
+      field_metadata: {
+        companyName: {
+          label: "公司名称",
+          field_type: "TEXT",
+        },
+        auditStatus: {
+          label: "公司审核状态",
+          field_type: "PICKLIST",
+        },
+      },
+      field_options: {
+        auditStatus: [
+          {
+            value: "approved",
+            label: "审核通过",
+            sort_order: 1,
+            is_default: false,
+          },
+        ],
+      },
+    });
+    expect(hostMetadataResponse.status).toBe(200);
+    expect(hostMetadataBody).toEqual({
+      entity: "SupplyHost",
+      field_metadata: {
+        hostName: {
+          label: "主商户名称",
+          field_type: "TEXT",
+        },
+      },
+      field_options: {},
+    });
+  });
+
+  test("Given stored Rebuild reference detail has media fields, When detail API is requested, Then it returns stored urls without reuploading", async () => {
+    const { repository, savedCompanies, savedHosts } = createMemorySupplierRepository();
+    const uploaded: Array<{ entityName?: string; recordId?: string; fieldName: string; sourcePath: string }> = [];
+    const assetUploader: RebuildAssetUploader = {
+      async uploadAsset(input) {
+        uploaded.push({
+          entityName: input.entityName,
+          recordId: input.recordId,
+          fieldName: input.fieldName,
+          sourcePath: input.sourcePath,
+        });
+        return {
+          source: input.sourcePath,
+          url: `https://cdn.example.com/${input.entityName}/${input.recordId}/${input.fieldName}/asset.jpg`,
+        };
+      },
+    };
+    const rebuildClient = {
+      async getSupplyGoods(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async getSupplyCompany(): Promise<Record<string, unknown>> {
+        throw new Error("不应该实时查询 SupplyCompany");
+      },
+      async getSupplyHost(): Promise<Record<string, unknown>> {
+        throw new Error("不应该实时查询 SupplyHost");
+      },
+    } as unknown as RebuildSupplyGoodsClient;
+    savedCompanies.push({
+      supplyCompanyId: "945-company",
+      payload: {
+        SupplyCompanyId: "945-company",
+        companyName: "测试公司",
+        businessLicensePicture: ["https://cdn.example.com/SupplyCompany/945-company/businessLicensePicture/asset.jpg"],
+      },
+      updatedAt: new Date("2026-06-30T06:00:00.000Z"),
+    });
+    savedHosts.push({
+      supplyHostId: "946-host",
+      payload: {
+        SupplyHostId: "946-host",
+        hostName: "测试门店",
+        hostPic: ["https://cdn.example.com/SupplyHost/946-host/hostPic/asset.jpg"],
+      },
+      updatedAt: new Date("2026-06-30T06:01:00.000Z"),
+    });
+    const app = createServerApp({
+      rebuildSupplyGoodsClient: rebuildClient,
+      rebuildAssetUploader: assetUploader,
+      rebuildSupplierRepository: repository,
+      supplyGoodsRecordRepository: null,
+    });
+
+    const companyResponse = await app.request("/api/rebuild/references/SupplyCompany/945-company", {
+      headers: await createAuthHeaders(app),
+    });
+    const companyBody = (await companyResponse.json()) as RebuildReferenceDetailResponse;
+    const hostResponse = await app.request("/api/rebuild/references/SupplyHost/946-host", {
+      headers: await createAuthHeaders(app),
+    });
+    const hostBody = (await hostResponse.json()) as RebuildReferenceDetailResponse;
+
+    expect(companyResponse.status).toBe(200);
+    expect(hostResponse.status).toBe(200);
+    expect(companyBody.payload.businessLicensePicture).toEqual([
+      "https://cdn.example.com/SupplyCompany/945-company/businessLicensePicture/asset.jpg",
+    ]);
+    expect(hostBody.payload.hostPic).toEqual([
+      "https://cdn.example.com/SupplyHost/946-host/hostPic/asset.jpg",
+    ]);
+    expect(uploaded).toEqual([]);
+  });
+
+  test("Given Rebuild reference entity is not stored, When detail API is requested, Then it returns not found", async () => {
+    const { repository } = createMemorySupplierRepository();
+    const app = createServerApp({ rebuildSupplierRepository: repository });
+
+    const response = await app.request("/api/rebuild/references/SupplyCompany/945-missing", {
+      headers: await createAuthHeaders(app),
+    });
+    const body = (await response.json()) as ErrorResponse;
+
+    expect(response.status).toBe(404);
+    expect(body.message).toBe("SupplyCompany 记录不存在");
+  });
+
+  test("Given unsupported Rebuild reference entity, When detail API is requested, Then it rejects the request", async () => {
+    const app = createServerApp();
+
+    const response = await app.request("/api/rebuild/references/SupplyGoods/944-goods", {
+      headers: await createAuthHeaders(app),
+    });
+    const body = (await response.json()) as ErrorResponse;
+
+    expect(response.status).toBe(400);
+    expect(body.message).toBe("仅支持查询 SupplyCompany 或 SupplyHost");
   });
 
   test("Given a SupplyGoods callback, When supply_goods_id is missing, Then it rejects the request", async () => {

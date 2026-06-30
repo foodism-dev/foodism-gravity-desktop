@@ -5,9 +5,12 @@ import {
   rebuildFieldOptions,
   rebuildFields,
   rebuildSupplyCompany,
+  rebuildSupplyCompanyCallbackRecords,
   rebuildSupplyGoods,
   rebuildSupplyGoodsCallbackRecords,
   linKeAccountConfigs,
+  rebuildSupplyHost,
+  rebuildSupplyHostCallbackRecords,
   tickets,
 } from "./schema.ts";
 
@@ -29,11 +32,27 @@ describe("数据库 schema", () => {
     expect(rebuildSupplyCompany.payload.name).toBe("payload");
   });
 
+  test("SupplyHost 落库表使用业务命名与 supply_host_id 唯一键", () => {
+    expect(getTableName(rebuildSupplyHost)).toBe("rebuild_supply_host");
+    expect(rebuildSupplyHost.supplyHostId.name).toBe("supply_host_id");
+    expect(rebuildSupplyHost.payload.name).toBe("payload");
+  });
+
   test("SupplyGoods callback 记录表保存原始、查询和标准化 payload", () => {
     expect(getTableName(rebuildSupplyGoodsCallbackRecords)).toBe("rebuild_supply_goods_callback_records");
     expect(rebuildSupplyGoodsCallbackRecords.rawPayload.name).toBe("raw_payload");
     expect(rebuildSupplyGoodsCallbackRecords.payload.name).toBe("payload");
     expect(rebuildSupplyGoodsCallbackRecords.normalizedPayload.name).toBe("normalized_payload");
+  });
+
+  test("销售提报商户和公司 callback 记录表保存原始、查询和标准化 payload", () => {
+    expect(getTableName(rebuildSupplyCompanyCallbackRecords)).toBe("rebuild_supply_company_callback_records");
+    expect(rebuildSupplyCompanyCallbackRecords.supplyCompanyId.name).toBe("supply_company_id");
+    expect(rebuildSupplyCompanyCallbackRecords.normalizedPayload.name).toBe("normalized_payload");
+
+    expect(getTableName(rebuildSupplyHostCallbackRecords)).toBe("rebuild_supply_host_callback_records");
+    expect(rebuildSupplyHostCallbackRecords.supplyHostId.name).toBe("supply_host_id");
+    expect(rebuildSupplyHostCallbackRecords.normalizedPayload.name).toBe("normalized_payload");
   });
 
   test("工单表关联 SupplyGoods 业务 ID 并保存整体状态和业务状态", () => {
