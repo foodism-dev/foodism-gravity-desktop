@@ -36,6 +36,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table.tsx";
 import {
   createTicketActionRecord,
   confirmLinKeFeeSetup,
@@ -49,7 +50,6 @@ import {
   retryLinKeDraftJob,
   retryLinKeProductTracking,
   startLinKeFeeSetupJob,
-  type LinKeFeeRates,
   type RebuildReferenceDetail,
   type RebuildReferenceEntity,
   type RebuildReferenceMetadata,
@@ -64,6 +64,19 @@ import {
   openRebuildApprovalInElectron,
   shouldRefreshTicketFromMessage,
 } from "@/lib/electron-bridge.ts";
+import {
+  COMMISSION_CHILD_OPEN_MAX,
+  COMMISSION_TRAFFIC_ROWS,
+  allCommissionTrafficSources,
+  applyDefaultCommissionRate,
+  formatCommissionRateInput,
+  getCommissionInputError,
+  normalizeLinkeCommission,
+  sanitizeCommissionRateInput,
+  validateLinkeCommission,
+  activeCommissionTrafficFields,
+  type CommissionRateValues,
+} from "@/lib/linke-fee-rates.ts";
 import { buildMediaPreviewItems, type MediaPreviewItem, type MediaPreviewKind } from "@/lib/media-preview.ts";
 import {
   haveSameVisiblePackageNames,
@@ -122,29 +135,13 @@ interface DetailSection {
   fields: DetailField[];
 }
 
-interface CommissionRateField {
-  key: keyof LinKeFeeRates;
-  label: string;
-  max: number;
-}
-
-type CommissionRateValues = Record<string, string>;
-
 interface ReportReferenceField {
   label: string;
   fields: string[];
   kindHint?: MediaPreviewKind;
 }
 
-const COMMISSION_RATE_FIELDS: CommissionRateField[] = [
-  { key: "onlineOperation", label: "线上经营", max: 80 },
-  { key: "professionalAccount", label: "职人账号", max: 20 },
-  { key: "growthBooster", label: "增量宝", max: 80 },
-  { key: "acquisitionCard", label: "获客卡", max: 80 },
-  { key: "offlineQrScan", label: "线下扫码", max: 80 },
-];
-
-const LIN_KE_FEE_SETUP_SAVE_VERSION = "product_commission_save_v1";
+const LIN_KE_FEE_SETUP_SAVE_VERSION = "product_commission_save_v3";
 
 const BASIC_SECTIONS: DetailSection[] = [
   {
@@ -409,6 +406,7 @@ function LoadedTicketDetail({
     setOptimizationErrorMessage("");
     setDraftJobId("");
     setIsDraftJobPolling(false);
+    setLinkeCommission(buildInitialLinkeCommission(ticket.payload));
     setFeeSetupJobId("");
     setIsFeeSetupJobPolling(false);
     setIsRatingComparisonOpen(false);
@@ -631,6 +629,13 @@ function LoadedTicketDetail({
       setActionErrorMessage("未找到林客商户ID，请检查套餐中的 company.guestId");
       return;
     }
+    const normalizedRates = normalizeLinkeCommission(linkeCommission);
+    const activeSources = activeCommissionTrafficFields(linkeCommission).map((field) => field.source).sort();
+    const submittedSources = Object.keys(normalizedRates.values).sort();
+    if (activeSources.join("/") !== submittedSources.join("/")) {
+      setActionErrorMessage("费用比例表格状态与提交内容不一致，请刷新页面后重试");
+      return;
+    }
 
     setIsActionSubmitting(true);
     setActionErrorMessage("");
@@ -638,7 +643,7 @@ function LoadedTicketDetail({
       const result = await startLinKeFeeSetupJob(ticket.supplyGoodsId, {
         merchantId,
         linkeGoodsId: goodsId,
-        rates: normalizeLinkeCommission(linkeCommission),
+        rates: normalizedRates,
         skipLinKeExternal,
       });
       onTicketUpdated(result.ticket);
@@ -823,7 +828,17 @@ function LoadedTicketDetail({
                 values={linkeCommission}
                 feeSettingUrl={readPayloadText(ticket.payload, "linkeFeeSettingUrl")}
                 canOpenFeeSettingUrl={canOpenFeeSettingUrl}
-                onChange={(label, value) => setLinkeCommission((current) => ({ ...current, [label]: value }))}
+                onChange={(source, value) =>
+                  setLinkeCommission((current) => ({
+                    ...current,
+                    values: { ...current.values, [source]: value },
+                  }))}
+                onSingleSettingChange={(source, enabled) =>
+                  setLinkeCommission((current) => ({
+                    ...current,
+                    singleSettings: { ...current.singleSettings, [source]: enabled },
+                  }))}
+                onDefaultChange={(value) => setLinkeCommission((current) => applyDefaultCommissionRate(current, value))}
               />
             ) : null}
           </div>
@@ -1563,12 +1578,26 @@ function CommissionSetupPanel({
   feeSettingUrl,
   canOpenFeeSettingUrl,
   onChange,
+  onSingleSettingChange,
+  onDefaultChange,
 }: {
   values: CommissionRateValues;
   feeSettingUrl: string;
   canOpenFeeSettingUrl: boolean;
-  onChange: (label: string, value: string) => void;
+  onChange: (source: string, value: string) => void;
+  onSingleSettingChange: (source: string, enabled: boolean) => void;
+  onDefaultChange: (value: string) => void;
 }) {
+  const [defaultValue, setDefaultValue] = useState("");
+
+  function handleDefaultValueChange(value: string) {
+    const sanitized = sanitizeCommissionRateInput(value);
+    setDefaultValue(sanitized);
+    if (sanitized.trim()) {
+      onDefaultChange(sanitized);
+    }
+  }
+
   return (
     <Card className="border-slate-200 bg-white shadow-sm">
       <CardHeader className="pb-4">
@@ -1590,15 +1619,88 @@ function CommissionSetupPanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid gap-4 lg:grid-cols-2">
-          {COMMISSION_RATE_FIELDS.map((field) => (
-            <CommissionRateInput
-              key={field.label}
-              field={field}
-              value={values[field.label] ?? ""}
-              onChange={(value) => onChange(field.label, value)}
-            />
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-slate-600">默认设置为</span>
+          <CommissionRateInput
+            value={defaultValue}
+            max={80}
+            onChange={handleDefaultValueChange}
+            className="w-[190px]"
+          />
+        </div>
+        <div className="overflow-hidden rounded-md ring-1 ring-slate-200">
+          <Table className="min-w-[820px]">
+            <TableHeader className="bg-slate-50">
+              <TableRow className="hover:bg-slate-50">
+                <TableHead className="w-[280px] text-sm text-slate-900">费用渠道</TableHead>
+                <TableHead className="w-[190px] text-sm text-slate-900">是否单独设置费用</TableHead>
+                <TableHead className="text-sm text-slate-900">费用比例</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {COMMISSION_TRAFFIC_ROWS.map((row, index) => {
+                const isFirstInGroup = index === 0 || COMMISSION_TRAFFIC_ROWS[index - 1]?.group !== row.group;
+                const groupRowSpan = COMMISSION_TRAFFIC_ROWS.filter((item) => item.group === row.group).length;
+                const singleEnabled = row.singleSettingEnabled && values.singleSettings[row.source] === true;
+                return (
+                  <TableRow key={row.source} className="hover:bg-white">
+                    {isFirstInGroup ? (
+                      <TableCell rowSpan={groupRowSpan} className="w-28 border-r bg-white text-sm font-medium text-slate-900">
+                        {row.group}
+                      </TableCell>
+                    ) : null}
+                    <TableCell className="w-40 border-r text-sm font-semibold text-slate-900">
+                      {row.label}
+                      <span className="ml-1 text-red-500">*</span>
+                    </TableCell>
+                    <TableCell className="w-[190px] border-r">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        role="switch"
+                        aria-checked={singleEnabled}
+                        disabled={!row.singleSettingEnabled}
+                        className={cn(
+                          "h-7 rounded-full px-3 text-xs",
+                          singleEnabled
+                            ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                            : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
+                          !row.singleSettingEnabled && "cursor-not-allowed opacity-50",
+                        )}
+                        onClick={() => {
+                          if (row.singleSettingEnabled) onSingleSettingChange(row.source, !singleEnabled);
+                        }}
+                      >
+                        {singleEnabled ? "是" : "否"}
+                      </Button>
+                    </TableCell>
+                    <TableCell>
+                      {singleEnabled ? (
+                        <div className="flex flex-wrap gap-3">
+                          {row.children.map((child) => (
+                            <CommissionRateInput
+                              key={child.source}
+                              label={child.label}
+                              value={values.values[child.source] ?? "0.00"}
+                              max={COMMISSION_CHILD_OPEN_MAX}
+                              onChange={(value) => onChange(child.source, value)}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <CommissionRateInput
+                          value={values.values[row.source] ?? "0.00"}
+                          max={row.closedMax}
+                          onChange={(value) => onChange(row.source, value)}
+                        />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
         <div className="rounded-md bg-blue-50 px-4 py-3 text-sm font-medium leading-6 text-blue-700 ring-1 ring-blue-100">
           同步成功后，上方链接会启用。请进入林客确认费用比例已正确落库，确认无误后点击右侧「确认核对无误」，工单进入「自动追踪中」。
@@ -1609,45 +1711,60 @@ function CommissionSetupPanel({
 }
 
 function CommissionRateInput({
-  field,
   value,
+  max,
+  label,
+  className,
   onChange,
 }: {
-  field: CommissionRateField;
   value: string;
+  max: number;
+  label?: string;
+  className?: string;
   onChange: (value: string) => void;
 }) {
+  const error = getCommissionInputError(value, max);
   return (
-    <div className="rounded-md bg-slate-50 p-4 ring-1 ring-slate-200">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <label className="text-sm font-semibold text-slate-900">
-          <span className="mr-1 text-red-500">*</span>
-          {field.label}
-        </label>
-        <span className="text-sm font-medium text-slate-400">上限 {field.max.toFixed(2)}%</span>
-      </div>
+    <div className={cn("min-w-[190px]", className)}>
       <div className="relative">
+        {label ? (
+          <span className="pointer-events-none absolute inset-y-0 left-0 flex min-w-[88px] items-center border-r border-slate-100 px-3 text-sm font-medium text-slate-500">
+            {label}
+          </span>
+        ) : null}
         <Input
           value={value}
           inputMode="decimal"
           placeholder="请输入"
           onChange={(event) => onChange(sanitizeCommissionRateInput(event.target.value))}
-          className="h-12 bg-white pr-12 text-lg font-semibold"
+          className={cn(
+            "h-11 bg-white pr-10 text-base font-semibold",
+            label && "pl-[104px]",
+            error && "border-red-300 text-red-600 focus-visible:ring-red-200",
+          )}
         />
-        <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-lg font-semibold text-slate-500">%</span>
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-base font-semibold text-slate-500">%</span>
       </div>
+      {error ? <p className="mt-1 text-xs text-red-500">{error}</p> : null}
     </div>
   );
 }
 
 function buildInitialLinkeCommission(payload: Record<string, unknown>): CommissionRateValues {
   const storedRates = readStoredLinkeCommissionSource(payload);
-  return Object.fromEntries(
-    COMMISSION_RATE_FIELDS.map((field) => [
-      field.label,
-      formatCommissionRateInput(readStoredCommissionRate(storedRates, field) ?? 4),
-    ]),
-  );
+  return {
+    values: Object.fromEntries(
+      allCommissionTrafficSources().map((field) => [
+        field.source,
+        formatCommissionRateInput(readStoredCommissionRate(storedRates, field.source) ?? 0),
+      ]),
+    ),
+    singleSettings: Object.fromEntries(
+      COMMISSION_TRAFFIC_ROWS
+        .filter((row) => row.singleSettingEnabled)
+        .map((row) => [row.source, readStoredSingleSetting(storedRates, row.source)]),
+    ),
+  };
 }
 
 function isCurrentLinKeFeeSetup(payload: Record<string, unknown>, values: CommissionRateValues): boolean {
@@ -1670,18 +1787,23 @@ function readStoredLinkeCommissionSource(payload: Record<string, unknown>): unkn
 
 function valuesMatchStoredLinkeCommission(payload: Record<string, unknown>, values: CommissionRateValues): boolean {
   const storedRates = readStoredLinkeCommissionSource(payload);
-  for (const field of COMMISSION_RATE_FIELDS) {
-    const storedRate = readStoredCommissionRate(storedRates, field);
-    const currentRate = Number(values[field.label]);
+  for (const field of activeCommissionTrafficFields(values)) {
+    const storedRate = readStoredCommissionRate(storedRates, field.source);
+    const currentRate = Number(values.values[field.source]);
     if (storedRate === undefined || !Number.isFinite(currentRate)) return false;
     if (formatCommissionRateInput(storedRate) !== formatCommissionRateInput(currentRate)) return false;
+  }
+  for (const row of COMMISSION_TRAFFIC_ROWS) {
+    if (!row.singleSettingEnabled) continue;
+    if (readStoredSingleSetting(storedRates, row.source) !== values.singleSettings[row.source]) return false;
   }
   return true;
 }
 
-function readStoredCommissionRate(value: unknown, field: CommissionRateField): number | undefined {
+function readStoredCommissionRate(value: unknown, source: string): number | undefined {
   if (!isRecord(value)) return undefined;
-  const rate = value[field.key] ?? value[field.label];
+  const sourceValues = isRecord(value.values) ? value.values : value;
+  const rate = sourceValues[source];
   if (typeof rate === "number" && Number.isFinite(rate)) return rate;
   if (typeof rate === "string" && rate.trim()) {
     const parsed = Number(rate.replace("%", ""));
@@ -1690,35 +1812,9 @@ function readStoredCommissionRate(value: unknown, field: CommissionRateField): n
   return undefined;
 }
 
-function sanitizeCommissionRateInput(value: string): string {
-  const normalized = value.replace(/[^\d.]/g, "");
-  const [integer = "", ...decimalParts] = normalized.split(".");
-  if (decimalParts.length === 0) return integer;
-  return `${integer}.${decimalParts.join("").slice(0, 2)}`;
-}
-
-function formatCommissionRateInput(value: number): string {
-  return value.toFixed(2);
-}
-
-function validateLinkeCommission(values: CommissionRateValues): string {
-  for (const field of COMMISSION_RATE_FIELDS) {
-    const value = values[field.label]?.trim();
-    const numberValue = Number(value);
-    if (!value || !Number.isFinite(numberValue)) return `请填写${field.label}费用比例`;
-    if (numberValue < 0) return `${field.label}费用比例不能小于 0`;
-    if (numberValue > field.max) return `${field.label}费用比例不能超过 ${field.max.toFixed(2)}%`;
-  }
-  return "";
-}
-
-function normalizeLinkeCommission(values: CommissionRateValues): LinKeFeeRates {
-  const rates: Partial<LinKeFeeRates> = {};
-  for (const field of COMMISSION_RATE_FIELDS) {
-    const numberValue = Number(values[field.label]);
-    rates[field.key] = Number(formatCommissionRateInput(Number.isFinite(numberValue) ? numberValue : 0));
-  }
-  return rates as LinKeFeeRates;
+function readStoredSingleSetting(value: unknown, source: string): boolean {
+  if (!isRecord(value) || !isRecord(value.singleSettings)) return false;
+  return value.singleSettings[source] === true;
 }
 
 function TicketActionSidebar({

@@ -166,11 +166,8 @@ export interface LinKeDraftJobStatus {
 }
 
 export interface LinKeFeeRates {
-  onlineOperation: number;
-  professionalAccount: number;
-  growthBooster: number;
-  acquisitionCard: number;
-  offlineQrScan: number;
+  values: Record<string, number>;
+  singleSettings: Record<string, boolean>;
 }
 
 export type LinKeJobStatus = LinKeDraftJobStatus;

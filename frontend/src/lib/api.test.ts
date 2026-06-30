@@ -74,6 +74,45 @@ function installFetchMock(
   return calls;
 }
 
+function feeRates(patch: {
+  values?: Record<string, number>;
+  singleSettings?: Record<string, boolean>;
+} = {}) {
+  return {
+    values: {
+      "1000": 0,
+      "1001": 0,
+      "1002": 0,
+      "1003": 0,
+      "2000": 0,
+      "2001": 0,
+      "2002": 0,
+      "2003": 0,
+      "3000": 0,
+      "3001": 0,
+      "3002": 0,
+      "4000": 0,
+      "5000": 0,
+      "5001": 0,
+      "5002": 0,
+      "7000": 0,
+      "7001": 0,
+      "7002": 0,
+      "7003": 0,
+      "7100": 0,
+      ...patch.values,
+    },
+    singleSettings: {
+      "1000": false,
+      "2000": false,
+      "3000": false,
+      "5000": false,
+      "7000": false,
+      ...patch.singleSettings,
+    },
+  };
+}
+
 describe("前端 API", () => {
   test("Given ticket detail response has no field dictionary, When getting ticket, Then it returns only ticket data", async () => {
     installSessionStorage();
@@ -378,16 +417,11 @@ describe("前端 API", () => {
       jobId: "fee-job-1",
     }));
 
+    const rates = feeRates({ values: { "1000": 4, "4000": 8 } });
     const result = await startLinKeFeeSetupJob("944-detail", {
       merchantId: "merchant-from-package",
       linkeGoodsId: "linke-goods-1",
-      rates: {
-        onlineOperation: 4,
-        professionalAccount: 4,
-        growthBooster: 4,
-        acquisitionCard: 4,
-        offlineQrScan: 4,
-      },
+      rates,
     });
 
     expect(result.jobId).toBe("fee-job-1");
@@ -395,13 +429,7 @@ describe("前端 API", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({
       merchantId: "merchant-from-package",
       linkeGoodsId: "linke-goods-1",
-      rates: {
-        onlineOperation: 4,
-        professionalAccount: 4,
-        growthBooster: 4,
-        acquisitionCard: 4,
-        offlineQrScan: 4,
-      },
+      rates,
     }));
   });
 
@@ -435,13 +463,7 @@ describe("前端 API", () => {
       merchantId: "merchant-from-package",
       linkeGoodsId: "linke-goods-1",
       skipLinKeExternal: true,
-      rates: {
-        onlineOperation: 4,
-        professionalAccount: 4,
-        growthBooster: 4,
-        acquisitionCard: 4,
-        offlineQrScan: 4,
-      },
+      rates: feeRates(),
     });
 
     expect(result.jobId).toBeUndefined();
