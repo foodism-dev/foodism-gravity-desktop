@@ -245,6 +245,46 @@ describe("前端 API", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ optimizedPackages: { viewList: [{ groupName: "优化组" }] } }));
   });
 
+  test("Given Lin-Ke skip option, When confirming optimization, Then it posts skip flag and accepts missing job id", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      ticket: {
+        id: 1,
+        supply_goods_id: "944-detail",
+        status: "processing",
+        business_status: "shelf_confirm_pending",
+        payload: { linkeDraftState: "completed" },
+        source_payload: {},
+        created_at: "2026-06-24T10:00:00.000Z",
+        updated_at: "2026-06-24T11:00:00.000Z",
+      },
+      record: {
+        id: 3,
+        ticket_id: 1,
+        action: "info_optimized",
+        origin: {},
+        current: { linkeDraftState: "completed" },
+        operator: {},
+        remark: null,
+        created_at: "2026-06-24T11:00:00.000Z",
+      },
+      skippedLinKeExternal: true,
+    }));
+
+    const result = await confirmTicketInfoOptimization(
+      "944-detail",
+      { viewList: [{ groupName: "优化组" }] },
+      { skipLinKeExternal: true },
+    );
+
+    expect(result.jobId).toBeUndefined();
+    expect(result.skippedLinKeExternal).toBe(true);
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({
+      optimizedPackages: { viewList: [{ groupName: "优化组" }] },
+      skipLinKeExternal: true,
+    }));
+  });
+
   test("Given draft job response, When reading job status, Then it returns BullMQ state", async () => {
     installSessionStorage();
     installFetchMock(() => ({
@@ -313,6 +353,50 @@ describe("前端 API", () => {
     }));
   });
 
+  test("Given Lin-Ke skip option, When starting fee setup, Then it posts skip flag and accepts missing job id", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      ticket: {
+        id: 1,
+        supply_goods_id: "944-detail",
+        status: "processing",
+        business_status: "commission_setup_pending",
+        payload: { linkeFeeSetupState: "completed" },
+        source_payload: {},
+        created_at: "2026-06-24T10:00:00.000Z",
+        updated_at: "2026-06-24T11:00:00.000Z",
+      },
+      record: {
+        id: 4,
+        ticket_id: 1,
+        action: "lin_ke_fee_setup_completed",
+        origin: {},
+        current: { linkeFeeSetupState: "completed" },
+        operator: {},
+        remark: null,
+        created_at: "2026-06-24T11:00:00.000Z",
+      },
+      skippedLinKeExternal: true,
+    }));
+
+    const result = await startLinKeFeeSetupJob("944-detail", {
+      merchantId: "merchant-from-package",
+      linkeGoodsId: "linke-goods-1",
+      skipLinKeExternal: true,
+      rates: {
+        onlineOperation: 4,
+        professionalAccount: 4,
+        growthBooster: 4,
+        acquisitionCard: 4,
+        offlineQrScan: 4,
+      },
+    });
+
+    expect(result.jobId).toBeUndefined();
+    expect(result.skippedLinKeExternal).toBe(true);
+    expect(calls[0]?.init?.body).toContain("\"skipLinKeExternal\":true");
+  });
+
   test("Given fee setup job response, When reading job status, Then it returns BullMQ state", async () => {
     installSessionStorage();
     installFetchMock(() => ({
@@ -362,6 +446,39 @@ describe("前端 API", () => {
       "http://localhost:8787/api/tickets/944-detail/lin-ke-product-tracking/retry",
     ]);
     expect(calls.map((call) => call.init?.method)).toEqual(["POST", "POST"]);
+  });
+
+  test("Given Lin-Ke skip option, When confirming fee setup, Then it posts skip flag and accepts missing tracking job id", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      ticket: {
+        id: 1,
+        supply_goods_id: "944-detail",
+        status: "processing",
+        business_status: "product_online_pending",
+        payload: { linkeProductTrackingState: "skipped" },
+        source_payload: {},
+        created_at: "2026-06-24T10:00:00.000Z",
+        updated_at: "2026-06-24T11:00:00.000Z",
+      },
+      record: {
+        id: 5,
+        ticket_id: 1,
+        action: "commission_configured",
+        origin: {},
+        current: { linkeProductTrackingState: "skipped" },
+        operator: {},
+        remark: null,
+        created_at: "2026-06-24T11:00:00.000Z",
+      },
+      skippedLinKeExternal: true,
+    }));
+
+    const result = await confirmLinKeFeeSetup("944-detail", { skipLinKeExternal: true });
+
+    expect(result.jobId).toBeUndefined();
+    expect(result.skippedLinKeExternal).toBe(true);
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ skipLinKeExternal: true }));
   });
 
   test("Given ticket status filter, When listing tickets, Then it sends status query instead of business status", async () => {

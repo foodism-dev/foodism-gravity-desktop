@@ -10,6 +10,8 @@ describe("工单列表页布局", () => {
     expect(source).toContain('placeholder="搜索城市、商品、门店、商品 ID等"');
     expect(source).toContain("TICKET_STATUS_OPTIONS.map");
     expect(source).toContain("status: option.value");
+    expect(source).toContain("测试跳过林客");
+    expect(source).toContain('role="switch"');
     expect(source).not.toContain("buildTicketStatusColumns");
   });
 });

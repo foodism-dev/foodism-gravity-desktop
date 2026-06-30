@@ -89,6 +89,8 @@ const SUPPLY_GOODS_APPROVAL_BASE_URL = "https://sale.foodism.cc/app/SupplyGoods/
 interface TicketDetailPageProps {
   authState: AuthState;
   ticketId: string;
+  isLinKeTestSkipVisible: boolean;
+  skipLinKeExternal: boolean;
 }
 
 interface DetailField {
@@ -237,7 +239,7 @@ const MEDIA_FIELDS: MediaField[] = [
   { label: "食品经营许可证", fields: ["foodLicense"] },
 ];
 
-export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
+export function TicketDetailPage({ ticketId, isLinKeTestSkipVisible, skipLinKeExternal }: TicketDetailPageProps) {
   const metadataState = useAtomValue(ticketMetadataStateAtom);
   const ensureTicketMetadata = useSetAtom(ensureTicketMetadataAtom);
   const [ticket, setTicket] = useState<TicketRecord | null>(null);
@@ -307,6 +309,7 @@ export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
       setRecords={setRecords}
       isLoadingRecords={isLoadingRecords}
       recordErrorMessage={recordErrorMessage}
+      skipLinKeExternal={isLinKeTestSkipVisible && skipLinKeExternal}
     />
   );
 }
@@ -320,6 +323,7 @@ function LoadedTicketDetail({
   setRecords,
   isLoadingRecords,
   recordErrorMessage,
+  skipLinKeExternal,
 }: {
   ticket: TicketRecord;
   metadata: TicketMetadata;
@@ -329,6 +333,7 @@ function LoadedTicketDetail({
   setRecords: Dispatch<SetStateAction<TicketActionRecord[]>>;
   isLoadingRecords: boolean;
   recordErrorMessage: string;
+  skipLinKeExternal: boolean;
 }) {
   const sourcePayload = ticket.sourcePayload;
   const currentPayload = useMemo(
@@ -366,8 +371,8 @@ function LoadedTicketDetail({
   );
   const canOpenFeeSettingUrl = isLinKeFeeSetupCurrent;
   const workbenchModel = useMemo(
-    () => buildTicketWorkbenchModel(ticket, records, { isLinKeFeeSetupCurrent }),
-    [ticket, records, isLinKeFeeSetupCurrent],
+    () => buildTicketWorkbenchModel(ticket, records, { isLinKeFeeSetupCurrent, skipLinKeExternal }),
+    [ticket, records, isLinKeFeeSetupCurrent, skipLinKeExternal],
   );
 
   useEffect(() => {
@@ -513,10 +518,16 @@ function LoadedTicketDetail({
     setIsActionSubmitting(true);
     setActionErrorMessage("");
     try {
-      const result = await confirmTicketInfoOptimization(ticket.supplyGoodsId, editedOptimizedPackages);
+      const result = await confirmTicketInfoOptimization(ticket.supplyGoodsId, editedOptimizedPackages, {
+        skipLinKeExternal,
+      });
       onTicketUpdated(result.ticket);
       setRecords((currentRecords) => [result.record, ...currentRecords]);
-      setDraftJobId(result.jobId);
+      if (result.jobId) {
+        setDraftJobId(result.jobId);
+      } else {
+        await refreshTicketAndRecords();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "确认信息优化失败";
       await refreshTicketAndRecords().catch(() => {});
@@ -530,8 +541,14 @@ function LoadedTicketDetail({
     setIsActionSubmitting(true);
     setActionErrorMessage("");
     try {
-      const result = await retryLinKeDraftJob(ticket.supplyGoodsId);
-      setDraftJobId(result.jobId);
+      const result = await retryLinKeDraftJob(ticket.supplyGoodsId, { skipLinKeExternal });
+      onTicketUpdated(result.ticket);
+      setRecords((currentRecords) => [result.record, ...currentRecords]);
+      if (result.jobId) {
+        setDraftJobId(result.jobId);
+      } else {
+        await refreshTicketAndRecords();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "重试创建林客草稿失败";
       await refreshTicketAndRecords().catch(() => {});
@@ -583,10 +600,15 @@ function LoadedTicketDetail({
         merchantId,
         linkeGoodsId: goodsId,
         rates: normalizeLinkeCommission(linkeCommission),
+        skipLinKeExternal,
       });
       onTicketUpdated(result.ticket);
       setRecords((currentRecords) => [result.record, ...currentRecords]);
-      setFeeSetupJobId(result.jobId);
+      if (result.jobId) {
+        setFeeSetupJobId(result.jobId);
+      } else {
+        await refreshTicketAndRecords();
+      }
     } catch (error) {
       setActionErrorMessage(error instanceof Error ? error.message : "同步林客费用设置失败");
     } finally {
@@ -598,7 +620,7 @@ function LoadedTicketDetail({
     setIsActionSubmitting(true);
     setActionErrorMessage("");
     try {
-      const result = await confirmLinKeFeeSetup(ticket.supplyGoodsId);
+      const result = await confirmLinKeFeeSetup(ticket.supplyGoodsId, { skipLinKeExternal });
       onTicketUpdated(result.ticket);
       setRecords((currentRecords) => [result.record, ...currentRecords]);
     } catch (error) {
@@ -740,6 +762,7 @@ function LoadedTicketDetail({
           isActionSubmitting={isActionSubmitting || isDraftJobPolling || isFeeSetupJobPolling}
           isDraftJobPolling={isDraftJobPolling}
           isFeeSetupJobPolling={isFeeSetupJobPolling}
+          skipLinKeExternal={skipLinKeExternal}
           canConfirmOptimization={canConfirmOptimization}
           canRetryDraftCreation={hasPackageContent(readPackagesFromPayload(ticket.payload))}
           linkeGoodsId={linkeGoodsId}
@@ -1390,6 +1413,7 @@ function TicketActionSidebar({
   isActionSubmitting,
   isDraftJobPolling,
   isFeeSetupJobPolling,
+  skipLinKeExternal,
   canConfirmOptimization,
   canRetryDraftCreation,
   linkeGoodsId,
@@ -1413,6 +1437,7 @@ function TicketActionSidebar({
   isActionSubmitting: boolean;
   isDraftJobPolling: boolean;
   isFeeSetupJobPolling: boolean;
+  skipLinKeExternal: boolean;
   canConfirmOptimization: boolean;
   canRetryDraftCreation: boolean;
   linkeGoodsId: string;
@@ -1513,6 +1538,11 @@ function TicketActionSidebar({
 
       <SidebarSection title={model.operationSectionTitle}>
         <div className="space-y-2">
+          {skipLinKeExternal ? (
+            <div className="rounded-md bg-amber-50 p-3 text-xs font-medium leading-5 text-amber-700 ring-1 ring-amber-100">
+              测试模式：跳过林客外部操作
+            </div>
+          ) : null}
           {isDraftJobPolling ? (
             <div className="rounded-md bg-emerald-50 p-3 text-xs font-medium leading-5 text-emerald-700 ring-1 ring-emerald-100">
               林客草稿创建中，请稍候...
@@ -1654,6 +1684,7 @@ function readPayloadNumber(payload: Record<string, unknown>, key: string): numbe
 function formatProductTrackingState(value: string): string {
   if (value === "queued") return "等待检查";
   if (value === "waiting") return "自动追踪中";
+  if (value === "skipped") return "已跳过";
   if (value === "failed") return "追踪失败";
   if (value === "completed") return "已完成";
   return "自动追踪中";

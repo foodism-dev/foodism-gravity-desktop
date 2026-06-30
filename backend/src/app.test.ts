@@ -545,6 +545,14 @@ function createMemoryLinKeFeeSetupQueue(): LinKeFeeSetupQueueClient & {
   };
 }
 
+function restoreLinKeTestSkipEnv(value: string | undefined): void {
+  if (value === undefined) {
+    delete Bun.env.LIN_KE_TEST_SKIP_ENABLED;
+    return;
+  }
+  Bun.env.LIN_KE_TEST_SKIP_ENABLED = value;
+}
+
 function createMemoryFieldRepository(initialOptions: RebuildFieldOptionMetadata[] = []): {
   repository: RebuildFieldMetadataRepository;
   fields: RebuildFieldMetadata[];
@@ -2190,6 +2198,90 @@ describe("server app", () => {
     expect(actionRecords[0]?.action).toBe("info_optimization_generated");
   });
 
+  test("Given Lin-Ke test skip is disabled, When confirming info optimization with skip flag, Then request is rejected", async () => {
+    const originalSkip = Bun.env.LIN_KE_TEST_SKIP_ENABLED;
+    delete Bun.env.LIN_KE_TEST_SKIP_ENABLED;
+    try {
+      const { repository } = createMemoryTicketRepository([
+        {
+          id: 10,
+          supplyGoodsId: "944-info-skip-disabled",
+          status: TICKET_STATUS.PROCESSING,
+          businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+          payload: { packages: { viewList: [] } },
+          sourcePayload: { packages: { viewList: [] } },
+          createdAt: new Date("2026-06-24T10:00:00.000Z"),
+          updatedAt: new Date("2026-06-24T10:00:00.000Z"),
+        },
+      ]);
+      const app = createServerApp({ ticketRepository: repository, linKeDraftQueue: null });
+
+      const response = await app.request("/api/tickets/944-info-skip-disabled/info-optimization/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+        body: JSON.stringify({
+          optimizedPackages: { viewList: [] },
+          skipLinKeExternal: true,
+        }),
+      });
+      const body = await response.json() as ErrorResponse;
+
+      expect(response.status).toBe(403);
+      expect(body.message).toBe("林客外部操作跳过模式未启用");
+    } finally {
+      restoreLinKeTestSkipEnv(originalSkip);
+    }
+  });
+
+  test("Given Lin-Ke test skip is enabled, When confirming info optimization, Then draft external operation is skipped and flow advances", async () => {
+    const originalSkip = Bun.env.LIN_KE_TEST_SKIP_ENABLED;
+    Bun.env.LIN_KE_TEST_SKIP_ENABLED = "true";
+    try {
+      const originalPackages = JSON.stringify({
+        viewList: [{ groupName: "原始组", list: [{ title: "原始菜", price: "12.00", num: "1" }] }],
+      });
+      const { repository, actionRecords } = createMemoryTicketRepository([
+        {
+          id: 10,
+          supplyGoodsId: "944-info-skip",
+          status: TICKET_STATUS.PROCESSING,
+          businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+          payload: { bdCity: { text: "上海" }, packages: originalPackages },
+          sourcePayload: { bdCity: { text: "上海" }, packages: originalPackages },
+          createdAt: new Date("2026-06-24T10:00:00.000Z"),
+          updatedAt: new Date("2026-06-24T10:00:00.000Z"),
+        },
+      ]);
+      const app = createServerApp({ ticketRepository: repository, linKeDraftQueue: null });
+
+      const response = await app.request("/api/tickets/944-info-skip/info-optimization/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+        body: JSON.stringify({
+          optimizedPackages: { viewList: [{ groupName: "优化组", list: [{ title: "优化菜" }] }] },
+          skipLinKeExternal: true,
+        }),
+      });
+      const body = await response.json() as TicketActionRecordResponse & {
+        jobId?: string;
+        skippedLinKeExternal?: boolean;
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.jobId).toBeUndefined();
+      expect(body.skippedLinKeExternal).toBe(true);
+      expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING);
+      expect(body.ticket.payload.linkeDraftState).toBe("completed");
+      expect(String(body.ticket.payload.linkeDraftUrl)).toContain("/test/mock-draft/944-info-skip");
+      expect(actionRecords.map((record) => record.action)).toEqual([
+        "info_optimization_generated",
+        "info_optimized",
+      ]);
+    } finally {
+      restoreLinKeTestSkipEnv(originalSkip);
+    }
+  });
+
   test("Given Lin-Ke cookie is invalid, When confirming info optimization, Then draft job is not enqueued and failure is recorded", async () => {
     const originalPackages = JSON.stringify({
       viewList: [
@@ -2293,6 +2385,50 @@ describe("server app", () => {
     expect(actionRecords.map((record) => record.action)).toEqual(["lin_ke_draft_failed"]);
     expect(actionRecords[0]?.origin.linkeDraftError).toBe("previous error");
     expect(actionRecords[0]?.current.linkeDraftError).toContain("expired cookie");
+  });
+
+  test("Given Lin-Ke test skip is enabled, When retrying draft creation, Then draft external operation is skipped", async () => {
+    const originalSkip = Bun.env.LIN_KE_TEST_SKIP_ENABLED;
+    Bun.env.LIN_KE_TEST_SKIP_ENABLED = "true";
+    try {
+      const { repository, actionRecords } = createMemoryTicketRepository([
+        {
+          id: 12,
+          supplyGoodsId: "944-draft-retry-skip",
+          status: TICKET_STATUS.PROCESSING,
+          businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+          payload: {
+            bdCity: { text: "上海" },
+            packages: { viewList: [{ groupName: "优化组", list: [] }] },
+            linkeDraftState: "failed",
+            linkeDraftError: "previous error",
+          },
+          sourcePayload: { bdCity: { text: "上海" } },
+          createdAt: new Date("2026-06-24T10:00:00.000Z"),
+          updatedAt: new Date("2026-06-24T10:00:00.000Z"),
+        },
+      ]);
+      const app = createServerApp({ ticketRepository: repository, linKeDraftQueue: null });
+
+      const response = await app.request("/api/tickets/944-draft-retry-skip/lin-ke-draft/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+        body: JSON.stringify({ skipLinKeExternal: true }),
+      });
+      const body = await response.json() as TicketActionRecordResponse & {
+        jobId?: string;
+        skippedLinKeExternal?: boolean;
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.jobId).toBeUndefined();
+      expect(body.skippedLinKeExternal).toBe(true);
+      expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.SHELF_CONFIRM_PENDING);
+      expect(body.ticket.payload.linkeDraftState).toBe("completed");
+      expect(actionRecords.map((record) => record.action)).toEqual(["info_optimized"]);
+    } finally {
+      restoreLinKeTestSkipEnv(originalSkip);
+    }
   });
 
   test("Given a shelf confirmation action record, When creating it, Then the ticket moves to commission setup", async () => {
@@ -2428,6 +2564,65 @@ describe("server app", () => {
     expect(actionRecords[0]?.action).toBe("lin_ke_fee_setup_started");
   });
 
+  test("Given Lin-Ke test skip is enabled, When starting fee setup, Then fee external operation is skipped", async () => {
+    const originalSkip = Bun.env.LIN_KE_TEST_SKIP_ENABLED;
+    Bun.env.LIN_KE_TEST_SKIP_ENABLED = "true";
+    try {
+      const now = new Date("2026-06-24T10:00:00.000Z");
+      const { repository, actionRecords } = createMemoryTicketRepository([
+        {
+          id: 12,
+          supplyGoodsId: "944-fee-skip",
+          status: TICKET_STATUS.PROCESSING,
+          businessStatus: TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING,
+          payload: {
+            linkeGoodsId: "linke-goods-skip",
+            packages: { company: { guestId: "merchant-skip" } },
+          },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+      const feeSetupQueue = createMemoryLinKeFeeSetupQueue();
+      const app = createServerApp({
+        ticketRepository: repository,
+        linKeFeeSetupQueue: feeSetupQueue,
+      });
+
+      const response = await app.request("/api/tickets/944-fee-skip/lin-ke-fee-setup/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+        body: JSON.stringify({
+          merchantId: "merchant-skip",
+          linkeGoodsId: "linke-goods-skip",
+          skipLinKeExternal: true,
+          rates: {
+            onlineOperation: 4,
+            professionalAccount: 4,
+            growthBooster: 4,
+            acquisitionCard: 4,
+            offlineQrScan: 4,
+          },
+        }),
+      });
+      const body = await response.json() as TicketActionRecordResponse & {
+        jobId?: string;
+        skippedLinKeExternal?: boolean;
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.jobId).toBeUndefined();
+      expect(body.skippedLinKeExternal).toBe(true);
+      expect(feeSetupQueue.feeJobs).toEqual([]);
+      expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING);
+      expect(body.ticket.payload.linkeFeeSetupState).toBe("completed");
+      expect(String(body.ticket.payload.linkeFeeSettingUrl)).toContain("/test/mock-fee-setting/944-fee-skip");
+      expect(actionRecords[0]?.action).toBe("lin_ke_fee_setup_completed");
+    } finally {
+      restoreLinKeTestSkipEnv(originalSkip);
+    }
+  });
+
   test("Given legacy Lin-Ke fee setup completed without save marker, When confirming sync, Then it rejects tracking", async () => {
     const now = new Date("2026-06-24T10:00:00.000Z");
     const { repository } = createMemoryTicketRepository([
@@ -2521,6 +2716,58 @@ describe("server app", () => {
         - new Date(String(body.ticket.payload.linkeProductTrackingStartedAt)).getTime(),
     ).toBe(LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS);
     expect(actionRecords[0]?.action).toBe("commission_configured");
+  });
+
+  test("Given Lin-Ke test skip is enabled, When confirming fee setup, Then product tracking external operation is skipped", async () => {
+    const originalSkip = Bun.env.LIN_KE_TEST_SKIP_ENABLED;
+    Bun.env.LIN_KE_TEST_SKIP_ENABLED = "true";
+    try {
+      const now = new Date("2026-06-24T10:00:00.000Z");
+      const { repository, actionRecords } = createMemoryTicketRepository([
+        {
+          id: 13,
+          supplyGoodsId: "944-tracking-skip",
+          status: TICKET_STATUS.PROCESSING,
+          businessStatus: TICKET_BUSINESS_STATUS.COMMISSION_SETUP_PENDING,
+          payload: {
+            linkeGoodsId: "linke-goods-skip",
+            company: { guestId: "merchant-skip" },
+            linkeFeeSetupState: "completed",
+            linkeFeeSettingUrl: "https://www.life-partner.cn/test/mock-fee-setting/944-tracking-skip",
+            linkeFeeSetupSaveSubmitted: true,
+            linkeFeeSetupSaveVersion: "product_commission_save_v1",
+          },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+      const feeSetupQueue = createMemoryLinKeFeeSetupQueue();
+      const app = createServerApp({
+        ticketRepository: repository,
+        linKeFeeSetupQueue: feeSetupQueue,
+      });
+
+      const response = await app.request("/api/tickets/944-tracking-skip/lin-ke-fee-setup/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+        body: JSON.stringify({ skipLinKeExternal: true }),
+      });
+      const body = await response.json() as TicketActionRecordResponse & {
+        jobId?: string;
+        skippedLinKeExternal?: boolean;
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.jobId).toBeUndefined();
+      expect(body.skippedLinKeExternal).toBe(true);
+      expect(feeSetupQueue.trackingJobs).toEqual([]);
+      expect(body.ticket.business_status).toBe(TICKET_BUSINESS_STATUS.PRODUCT_ONLINE_PENDING);
+      expect(body.ticket.payload.commissionConfigured).toBe(true);
+      expect(body.ticket.payload.linkeProductTrackingState).toBe("skipped");
+      expect(actionRecords[0]?.action).toBe("commission_configured");
+    } finally {
+      restoreLinKeTestSkipEnv(originalSkip);
+    }
   });
 
   test("Given product online action record, When creating it, Then the ticket is done and online", async () => {

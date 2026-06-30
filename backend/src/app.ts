@@ -42,6 +42,7 @@ import {
   serializeTicket,
   serializeTicketActionRecord,
   serializeTicketList,
+  type CreateTicketActionRecordResult,
   type TicketFieldMetadataApiMap,
   type TicketFieldOptionsApiMap,
   type TicketRepository,
@@ -73,6 +74,7 @@ import {
 } from "./service/lin-ke/fee-setup-queue.ts";
 import {
   LIN_KE_FEE_SETUP_SAVE_VERSION,
+  type LinKeFeeRates,
   normalizeLinKeFeeRates,
   resolveLinKeMerchantId,
   validateLinKeFeeRates,
@@ -443,6 +445,18 @@ function createTicketOperatorSnapshot(user: ApiUser): Record<string, unknown> {
   };
 }
 
+function isLinKeTestSkipEnabled(): boolean {
+  return Bun.env.LIN_KE_TEST_SKIP_ENABLED?.trim() === "true";
+}
+
+function shouldSkipLinKeExternal(body: unknown): boolean {
+  return isRecord(body) && body.skipLinKeExternal === true;
+}
+
+function buildMockLinKeUrl(kind: "draft" | "fee-setting", supplyGoodsId: string): string {
+  return `https://www.life-partner.cn/test/mock-${kind}/${encodeURIComponent(supplyGoodsId)}`;
+}
+
 function readLinKeCookieCheckMessage(result: Record<string, unknown>): string {
   return String(result.error ?? result.reason ?? result.message ?? "").trim();
 }
@@ -507,6 +521,95 @@ async function recordLinKeDraftFailure(input: {
     },
     operator: input.operator,
     remark: `林客草稿创建失败：${input.message}`,
+  });
+}
+
+async function recordSkippedLinKeDraftSuccess(input: {
+  ticketRepository: TicketRepository;
+  supplyGoodsId: string;
+  payload: Record<string, unknown>;
+  operator: Record<string, unknown>;
+}): Promise<CreateTicketActionRecordResult | null> {
+  return await input.ticketRepository.createActionRecord({
+    supplyGoodsId: input.supplyGoodsId,
+    action: "info_optimized",
+    origin: {
+      linkeDraftUrl: readRecordValue(input.payload, "linkeDraftUrl"),
+      linkeDraftState: readRecordValue(input.payload, "linkeDraftState"),
+      linkeDraftError: readRecordValue(input.payload, "linkeDraftError"),
+    },
+    current: {
+      linkeDraftUrl: buildMockLinKeUrl("draft", input.supplyGoodsId),
+      linkeDraftState: "completed",
+      linkeDraftError: "",
+      linkeDraftCompletedAt: new Date().toISOString(),
+    },
+    operator: input.operator,
+    remark: "测试模式跳过林客草稿创建，确认采用信息优化结果",
+  });
+}
+
+async function recordSkippedLinKeFeeSetupSuccess(input: {
+  ticketRepository: TicketRepository;
+  supplyGoodsId: string;
+  ticketPayload: Record<string, unknown>;
+  linkeGoodsId: string;
+  merchantId: string;
+  rates: LinKeFeeRates;
+  operator: Record<string, unknown>;
+}): Promise<CreateTicketActionRecordResult | null> {
+  return await input.ticketRepository.createActionRecord({
+    supplyGoodsId: input.supplyGoodsId,
+    action: "lin_ke_fee_setup_completed",
+    origin: {
+      linkeFeeSetupState: readRecordValue(input.ticketPayload, "linkeFeeSetupState"),
+      linkeFeeSettingUrl: readRecordValue(input.ticketPayload, "linkeFeeSettingUrl"),
+      linkeFeeSetupError: readRecordValue(input.ticketPayload, "linkeFeeSetupError"),
+      linkeFeeSetupSaveSubmitted: readRecordValue(input.ticketPayload, "linkeFeeSetupSaveSubmitted"),
+      linkeFeeSetupSaveVersion: readRecordValue(input.ticketPayload, "linkeFeeSetupSaveVersion"),
+    },
+    current: {
+      linkeGoodsId: input.linkeGoodsId,
+      linkeMerchantId: input.merchantId,
+      linkeFeeRates: input.rates,
+      linkeFeeSetupState: "completed",
+      linkeFeeSettingUrl: buildMockLinKeUrl("fee-setting", input.supplyGoodsId),
+      linkeFeeSetupError: "",
+      linkeFeeSetupCompletedAt: new Date().toISOString(),
+      linkeFeeSetupSaveSubmitted: true,
+      linkeFeeSetupSaveVersion: LIN_KE_FEE_SETUP_SAVE_VERSION,
+    },
+    operator: input.operator,
+    remark: "测试模式跳过林客费用设置，同步结果按完成处理",
+  });
+}
+
+async function recordSkippedLinKeProductTracking(input: {
+  ticketRepository: TicketRepository;
+  supplyGoodsId: string;
+  payload: Record<string, unknown>;
+  operator: Record<string, unknown>;
+}): Promise<CreateTicketActionRecordResult | null> {
+  const now = new Date().toISOString();
+  return await input.ticketRepository.createActionRecord({
+    supplyGoodsId: input.supplyGoodsId,
+    action: "commission_configured",
+    origin: {
+      commissionConfigured: readRecordValue(input.payload, "commissionConfigured"),
+      linkeProductTrackingState: readRecordValue(input.payload, "linkeProductTrackingState"),
+      linkeProductTrackingJobId: readRecordValue(input.payload, "linkeProductTrackingJobId"),
+    },
+    current: {
+      commissionConfigured: true,
+      commissionConfiguredAt: now,
+      linkeFeeSetupConfirmedAt: now,
+      linkeProductTrackingState: "skipped",
+      linkeProductTrackingJobId: "",
+      linkeProductTrackingError: "",
+      ...buildInitialProductTrackingPayload(now),
+    },
+    operator: input.operator,
+    remark: "测试模式跳过林客商品状态追踪，等待人工确认上线",
   });
 }
 
@@ -1150,14 +1253,17 @@ export function createServerApp(options: ServerAppOptions = {}) {
     if (!ticketRepository) {
       return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
     }
-    const linKeDraftQueue = resolveLinKeDraftQueue();
-    if (!linKeDraftQueue) {
-      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
-    }
-
     const body = (await context.req.json().catch(() => null)) as unknown;
     if (!isRecord(body) || !isRecord(body.optimizedPackages)) {
       return context.json({ error: "Bad Request", message: "optimizedPackages 必须是 JSON 对象" }, 400);
+    }
+    const skipLinKeExternal = shouldSkipLinKeExternal(body);
+    if (skipLinKeExternal && !isLinKeTestSkipEnabled()) {
+      return context.json({ error: "Forbidden", message: "林客外部操作跳过模式未启用" }, 403);
+    }
+    const linKeDraftQueue = skipLinKeExternal ? null : resolveLinKeDraftQueue();
+    if (!skipLinKeExternal && !linKeDraftQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
     }
 
     const supplyGoodsId = context.req.param("supplyGoodsId").trim();
@@ -1189,6 +1295,23 @@ export function createServerApp(options: ServerAppOptions = {}) {
       return context.json({ error: "Not Found", message: "工单不存在" }, 404);
     }
 
+    if (skipLinKeExternal) {
+      const skippedActionResult = await recordSkippedLinKeDraftSuccess({
+        ticketRepository,
+        supplyGoodsId,
+        payload: actionResult.ticket.payload,
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+      });
+      if (!skippedActionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
+      return context.json({
+        ticket: serializeTicket(skippedActionResult.ticket),
+        record: serializeTicketActionRecord(skippedActionResult.record),
+        skippedLinKeExternal: true,
+      });
+    }
+
     const draftCookieValidation = await validateLinKeDraftCookie({
       linKeRepository: resolveLinKeRepository(),
       settings: linKeSettings,
@@ -1215,7 +1338,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
     }
 
     try {
-      const jobId = await linKeDraftQueue.addCreateDraftJob(supplyGoodsId);
+      const jobId = await linKeDraftQueue!.addCreateDraftJob(supplyGoodsId);
       const startedActionResult = await ticketRepository.createActionRecord({
         supplyGoodsId,
         action: "lin_ke_draft_started",
@@ -1283,8 +1406,13 @@ export function createServerApp(options: ServerAppOptions = {}) {
     if (!ticketRepository) {
       return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
     }
-    const linKeDraftQueue = resolveLinKeDraftQueue();
-    if (!linKeDraftQueue) {
+    const body = (await context.req.json().catch(() => null)) as unknown;
+    const skipLinKeExternal = shouldSkipLinKeExternal(body);
+    if (skipLinKeExternal && !isLinKeTestSkipEnabled()) {
+      return context.json({ error: "Forbidden", message: "林客外部操作跳过模式未启用" }, 403);
+    }
+    const linKeDraftQueue = skipLinKeExternal ? null : resolveLinKeDraftQueue();
+    if (!skipLinKeExternal && !linKeDraftQueue) {
       return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
     }
 
@@ -1295,6 +1423,23 @@ export function createServerApp(options: ServerAppOptions = {}) {
     }
     if (!readRecordValue(ticket.payload, "packages")) {
       return context.json({ error: "Bad Request", message: "请先确认信息优化内容" }, 400);
+    }
+
+    if (skipLinKeExternal) {
+      const skippedActionResult = await recordSkippedLinKeDraftSuccess({
+        ticketRepository,
+        supplyGoodsId,
+        payload: ticket.payload,
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+      });
+      if (!skippedActionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
+      return context.json({
+        ticket: serializeTicket(skippedActionResult.ticket),
+        record: serializeTicketActionRecord(skippedActionResult.record),
+        skippedLinKeExternal: true,
+      });
     }
 
     const draftCookieValidation = await validateLinKeDraftCookie({
@@ -1323,7 +1468,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
     }
 
     try {
-      const jobId = await linKeDraftQueue.addCreateDraftJob(supplyGoodsId);
+      const jobId = await linKeDraftQueue!.addCreateDraftJob(supplyGoodsId);
       const actionResult = await ticketRepository.createActionRecord({
         supplyGoodsId,
         action: "lin_ke_draft_started",
@@ -1377,14 +1522,17 @@ export function createServerApp(options: ServerAppOptions = {}) {
     if (!ticketRepository) {
       return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
     }
-    const linKeFeeSetupQueue = resolveLinKeFeeSetupQueue();
-    if (!linKeFeeSetupQueue) {
-      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
-    }
-
     const body = (await context.req.json().catch(() => null)) as unknown;
     if (!isRecord(body)) {
       return context.json({ error: "Bad Request", message: "请求体必须是 JSON 对象" }, 400);
+    }
+    const skipLinKeExternal = shouldSkipLinKeExternal(body);
+    if (skipLinKeExternal && !isLinKeTestSkipEnabled()) {
+      return context.json({ error: "Forbidden", message: "林客外部操作跳过模式未启用" }, 403);
+    }
+    const linKeFeeSetupQueue = skipLinKeExternal ? null : resolveLinKeFeeSetupQueue();
+    if (!skipLinKeExternal && !linKeFeeSetupQueue) {
+      return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
     }
     const validationMessage = validateLinKeFeeRates(body.rates);
     if (validationMessage) {
@@ -1419,8 +1567,28 @@ export function createServerApp(options: ServerAppOptions = {}) {
       return context.json({ error: "Bad Request", message: "merchantId 与 company.guestId 不一致" }, 400);
     }
 
+    if (skipLinKeExternal) {
+      const skippedActionResult = await recordSkippedLinKeFeeSetupSuccess({
+        ticketRepository,
+        supplyGoodsId,
+        ticketPayload: ticket.payload,
+        linkeGoodsId,
+        merchantId,
+        rates,
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+      });
+      if (!skippedActionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
+      return context.json({
+        ticket: serializeTicket(skippedActionResult.ticket),
+        record: serializeTicketActionRecord(skippedActionResult.record),
+        skippedLinKeExternal: true,
+      });
+    }
+
     try {
-      const jobId = await linKeFeeSetupQueue.addFeeSetupJob({
+      const jobId = await linKeFeeSetupQueue!.addFeeSetupJob({
         supplyGoodsId,
         merchantId,
         linkeGoodsId,
@@ -1505,8 +1673,13 @@ export function createServerApp(options: ServerAppOptions = {}) {
     if (!ticketRepository) {
       return context.json({ error: "Service Unavailable", message: "DATABASE_URL 未配置" }, 503);
     }
-    const linKeFeeSetupQueue = resolveLinKeFeeSetupQueue();
-    if (!linKeFeeSetupQueue) {
+    const body = (await context.req.json().catch(() => null)) as unknown;
+    const skipLinKeExternal = shouldSkipLinKeExternal(body);
+    if (skipLinKeExternal && !isLinKeTestSkipEnabled()) {
+      return context.json({ error: "Forbidden", message: "林客外部操作跳过模式未启用" }, 403);
+    }
+    const linKeFeeSetupQueue = skipLinKeExternal ? null : resolveLinKeFeeSetupQueue();
+    if (!skipLinKeExternal && !linKeFeeSetupQueue) {
       return context.json({ error: "Service Unavailable", message: "REDIS_URL 未配置" }, 503);
     }
 
@@ -1528,10 +1701,27 @@ export function createServerApp(options: ServerAppOptions = {}) {
       return context.json({ error: "Bad Request", message: "请先点击确认同步完成林客费用设置后再核对确认" }, 400);
     }
 
+    if (skipLinKeExternal) {
+      const skippedActionResult = await recordSkippedLinKeProductTracking({
+        ticketRepository,
+        supplyGoodsId,
+        payload: ticket.payload,
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+      });
+      if (!skippedActionResult) {
+        return context.json({ error: "Not Found", message: "工单不存在" }, 404);
+      }
+      return context.json({
+        ticket: serializeTicket(skippedActionResult.ticket),
+        record: serializeTicketActionRecord(skippedActionResult.record),
+        skippedLinKeExternal: true,
+      });
+    }
+
     try {
       const now = new Date().toISOString();
       const trackingPayload = buildInitialProductTrackingPayload(now);
-      const jobId = await linKeFeeSetupQueue.addProductTrackingJob({
+      const jobId = await linKeFeeSetupQueue!.addProductTrackingJob({
         supplyGoodsId,
         startedAt: now,
         checkCount: 1,

@@ -23,9 +23,12 @@ import { cn } from "@/lib/utils.ts";
 interface TicketsPageProps {
   authState: AuthState;
   onSignOut: () => void;
+  isLinKeTestSkipVisible: boolean;
+  skipLinKeExternal: boolean;
+  onSkipLinKeExternalChange: (enabled: boolean) => void;
 }
 
-export function TicketsPage(_props: TicketsPageProps) {
+export function TicketsPage(props: TicketsPageProps) {
   const ensureTicketMetadata = useSetAtom(ensureTicketMetadataAtom);
   const [columns, setColumns] = useState<TicketStatusColumn[]>(() => createEmptyTicketStatusColumns());
   const [isLoading, setIsLoading] = useState(true);
@@ -81,6 +84,24 @@ export function TicketsPage(_props: TicketsPageProps) {
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold text-slate-950">我的工单</h1>
+            {props.isLinKeTestSkipVisible ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                role="switch"
+                aria-checked={props.skipLinKeExternal}
+                className={cn(
+                  "h-7 rounded-full px-3 text-xs",
+                  props.skipLinKeExternal
+                    ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
+                )}
+                onClick={() => props.onSkipLinKeExternalChange(!props.skipLinKeExternal)}
+              >
+                测试跳过林客：{props.skipLinKeExternal ? "开" : "关"}
+              </Button>
+            ) : null}
           </div>
 
           <div className="relative ml-auto min-w-[260px] flex-1 md:max-w-[360px]">

@@ -272,6 +272,25 @@ describe("工单详情工作台模型", () => {
     expect(buildTicketWorkbenchModel(
       {
         ...ticket,
+        businessStatus: "product_online_pending",
+        payload: { linkeProductTrackingState: "skipped" },
+      },
+      records,
+    ).actionButtons.map((button) => button.label)).toEqual(["人工确认上线"]);
+
+    expect(buildTicketWorkbenchModel(
+      {
+        ...ticket,
+        businessStatus: "product_online_pending",
+        payload: { linkeProductTrackingState: "waiting" },
+      },
+      records,
+      { skipLinKeExternal: true },
+    ).actionButtons.map((button) => button.label)).toEqual(["人工确认上线"]);
+
+    expect(buildTicketWorkbenchModel(
+      {
+        ...ticket,
         businessStatus: "commission_setup_pending",
       },
       records,

@@ -48,6 +48,7 @@ export interface TicketWorkbenchModel {
 
 export interface TicketWorkbenchModelOptions {
   isLinKeFeeSetupCurrent?: boolean;
+  skipLinKeExternal?: boolean;
 }
 
 const FLOW_STEPS: Array<{ key: TicketFlowKey; label: string }> = [
@@ -168,6 +169,9 @@ function buildActionButtons(
     return [{ label: "确认同步", tone: "primary" }];
   }
   if (flow === "product_online_pending") {
+    if (options.skipLinKeExternal || readPayloadText(payload, "linkeProductTrackingState") === "skipped") {
+      return [{ label: "人工确认上线", tone: "secondary" }];
+    }
     if (readPayloadText(payload, "linkeProductTrackingState") === "failed") {
       return [
         { label: "重试追踪", tone: "primary" },

@@ -140,7 +140,8 @@ interface TicketActionRecordCreateResponse {
 interface TicketInfoOptimizationConfirmResponse {
   ticket: TicketApiRecord;
   record: TicketActionRecordApiRecord;
-  jobId: string;
+  jobId?: string;
+  skippedLinKeExternal?: boolean;
 }
 
 export interface LinKeDraftJobStatus {
@@ -163,7 +164,8 @@ export type LinKeJobStatus = LinKeDraftJobStatus;
 interface TicketJobActionResponse {
   ticket: TicketApiRecord;
   record: TicketActionRecordApiRecord;
-  jobId: string;
+  jobId?: string;
+  skippedLinKeExternal?: boolean;
 }
 
 interface TicketMetadataResponse {
@@ -430,32 +432,44 @@ export async function generateTicketInfoOptimization(supplyGoodsId: string): Pro
 export async function confirmTicketInfoOptimization(
   supplyGoodsId: string,
   optimizedPackages: Record<string, unknown>,
-): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  options: { skipLinKeExternal?: boolean } = {},
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId?: string; skippedLinKeExternal?: boolean }> {
   const response = await apiFetch<TicketInfoOptimizationConfirmResponse>(
     `/api/tickets/${encodeURIComponent(supplyGoodsId)}/info-optimization/confirm`,
     {
       method: "POST",
-      body: JSON.stringify({ optimizedPackages }),
+      body: JSON.stringify({
+        optimizedPackages,
+        ...(options.skipLinKeExternal ? { skipLinKeExternal: true } : {}),
+      }),
     },
   );
   return {
     ticket: normalizeTicket(response.ticket),
     record: normalizeTicketActionRecord(response.record),
     jobId: response.jobId,
+    skippedLinKeExternal: response.skippedLinKeExternal,
   };
 }
 
 export async function retryLinKeDraftJob(
   supplyGoodsId: string,
-): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  options: { skipLinKeExternal?: boolean } = {},
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId?: string; skippedLinKeExternal?: boolean }> {
   const response = await apiFetch<TicketJobActionResponse>(
     `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-draft/retry`,
-    { method: "POST", body: JSON.stringify({}) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(options.skipLinKeExternal ? { skipLinKeExternal: true } : {}),
+      }),
+    },
   );
   return {
     ticket: normalizeTicket(response.ticket),
     record: normalizeTicketActionRecord(response.record),
     jobId: response.jobId,
+    skippedLinKeExternal: response.skippedLinKeExternal,
   };
 }
 
@@ -470,8 +484,8 @@ export async function getLinKeDraftJobStatus(
 
 export async function startLinKeFeeSetupJob(
   supplyGoodsId: string,
-  input: { merchantId: string; linkeGoodsId: string; rates: LinKeFeeRates },
-): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  input: { merchantId: string; linkeGoodsId: string; rates: LinKeFeeRates; skipLinKeExternal?: boolean },
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId?: string; skippedLinKeExternal?: boolean }> {
   const response = await apiFetch<TicketJobActionResponse>(
     `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-fee-setup/jobs`,
     {
@@ -483,6 +497,7 @@ export async function startLinKeFeeSetupJob(
     ticket: normalizeTicket(response.ticket),
     record: normalizeTicketActionRecord(response.record),
     jobId: response.jobId,
+    skippedLinKeExternal: response.skippedLinKeExternal,
   };
 }
 
@@ -497,21 +512,28 @@ export async function getLinKeFeeSetupJobStatus(
 
 export async function confirmLinKeFeeSetup(
   supplyGoodsId: string,
-): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+  options: { skipLinKeExternal?: boolean } = {},
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId?: string; skippedLinKeExternal?: boolean }> {
   const response = await apiFetch<TicketJobActionResponse>(
     `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-fee-setup/confirm`,
-    { method: "POST", body: JSON.stringify({}) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(options.skipLinKeExternal ? { skipLinKeExternal: true } : {}),
+      }),
+    },
   );
   return {
     ticket: normalizeTicket(response.ticket),
     record: normalizeTicketActionRecord(response.record),
     jobId: response.jobId,
+    skippedLinKeExternal: response.skippedLinKeExternal,
   };
 }
 
 export async function retryLinKeProductTracking(
   supplyGoodsId: string,
-): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId: string }> {
+): Promise<{ ticket: TicketRecord; record: TicketActionRecord; jobId?: string }> {
   const response = await apiFetch<TicketJobActionResponse>(
     `/api/tickets/${encodeURIComponent(supplyGoodsId)}/lin-ke-product-tracking/retry`,
     { method: "POST", body: JSON.stringify({}) },

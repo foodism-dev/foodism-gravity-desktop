@@ -30,6 +30,9 @@ export interface AuthState {
 interface RouterContext {
   authState: AuthState;
   onSignOut: () => void;
+  isLinKeTestSkipVisible: boolean;
+  skipLinKeExternal: boolean;
+  onSkipLinKeExternalChange: (enabled: boolean) => void;
 }
 
 const emptyAuthState: AuthState = {
@@ -38,6 +41,22 @@ const emptyAuthState: AuthState = {
   isHandoffLoading: false,
   handoffError: null,
 };
+
+const LIN_KE_TEST_SKIP_STORAGE_KEY = "proma_lin_ke_test_skip_enabled";
+
+function isLinKeTestSkipVisible(): boolean {
+  return import.meta.env.VITE_LIN_KE_TEST_SKIP_ENABLED === "true";
+}
+
+function readStoredLinKeTestSkip(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(LIN_KE_TEST_SKIP_STORAGE_KEY) === "true";
+}
+
+function writeStoredLinKeTestSkip(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LIN_KE_TEST_SKIP_STORAGE_KEY, enabled ? "true" : "false");
+}
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
@@ -74,6 +93,9 @@ const router = createRouter({
   context: {
     authState: emptyAuthState,
     onSignOut: () => undefined,
+    isLinKeTestSkipVisible: false,
+    skipLinKeExternal: false,
+    onSkipLinKeExternalChange: () => undefined,
   },
 });
 
@@ -88,6 +110,8 @@ export function App() {
   const [user, setUser] = useState(() => getStoredUser());
   const [isHandoffLoading, setIsHandoffLoading] = useState(false);
   const [handoffError, setHandoffError] = useState<string | null>(null);
+  const linKeTestSkipVisible = isLinKeTestSkipVisible();
+  const [skipLinKeExternal, setSkipLinKeExternal] = useState(() => linKeTestSkipVisible && readStoredLinKeTestSkip());
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -130,7 +154,23 @@ export function App() {
     void router.navigate({ to: "/" });
   }
 
-  return <RouterProvider router={router} context={{ authState, onSignOut: handleSignOut }} />;
+  function handleSkipLinKeExternalChange(enabled: boolean) {
+    setSkipLinKeExternal(enabled);
+    writeStoredLinKeTestSkip(enabled);
+  }
+
+  return (
+    <RouterProvider
+      router={router}
+      context={{
+        authState,
+        onSignOut: handleSignOut,
+        isLinKeTestSkipVisible: linKeTestSkipVisible,
+        skipLinKeExternal: linKeTestSkipVisible && skipLinKeExternal,
+        onSkipLinKeExternalChange: handleSkipLinKeExternalChange,
+      }}
+    />
+  );
 }
 
 function RootLayout() {
@@ -148,12 +188,33 @@ function LandingRoute() {
 }
 
 function TicketsRoute() {
-  const { authState, onSignOut } = rootRoute.useRouteContext();
-  return <TicketsPage authState={authState} onSignOut={onSignOut} />;
+  const {
+    authState,
+    onSignOut,
+    isLinKeTestSkipVisible,
+    skipLinKeExternal,
+    onSkipLinKeExternalChange,
+  } = rootRoute.useRouteContext();
+  return (
+    <TicketsPage
+      authState={authState}
+      onSignOut={onSignOut}
+      isLinKeTestSkipVisible={isLinKeTestSkipVisible}
+      skipLinKeExternal={skipLinKeExternal}
+      onSkipLinKeExternalChange={onSkipLinKeExternalChange}
+    />
+  );
 }
 
 function TicketDetailRoute() {
-  const { authState } = rootRoute.useRouteContext();
+  const { authState, isLinKeTestSkipVisible, skipLinKeExternal } = rootRoute.useRouteContext();
   const { ticketId } = ticketDetailRoute.useParams();
-  return <TicketDetailPage authState={authState} ticketId={ticketId} />;
+  return (
+    <TicketDetailPage
+      authState={authState}
+      ticketId={ticketId}
+      isLinKeTestSkipVisible={isLinKeTestSkipVisible}
+      skipLinKeExternal={skipLinKeExternal}
+    />
+  );
 }
