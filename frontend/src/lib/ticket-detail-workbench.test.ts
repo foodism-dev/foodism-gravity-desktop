@@ -65,6 +65,24 @@ describe("工单详情工作台模型", () => {
     ]);
     expect(model.currentFlow).toBe("access_review");
     expect(model.activityItems[0]?.title).toBe("Rebuild");
+    expect(model.allActivityItems[0]?.title).toBe("Rebuild");
+  });
+
+  test("Given more than four action records, When building workbench model, Then sidebar preview is limited and full activity remains available", () => {
+    const manyRecords = Array.from({ length: 6 }, (_, index) => ({
+      ...records[0],
+      id: index + 1,
+      action: `custom_action_${index + 1}`,
+      remark: `日志 ${index + 1}`,
+      createdAt: `2026-06-21T09:4${index}:00.000Z`,
+    }));
+
+    const model = buildTicketWorkbenchModel(ticket, manyRecords);
+
+    expect(model.activityItems).toHaveLength(4);
+    expect(model.allActivityItems).toHaveLength(6);
+    expect(model.activityItems[3]?.description).toBe("日志 4");
+    expect(model.allActivityItems[5]?.description).toBe("日志 6");
   });
 
   test("Given current payload overrides source payload, When building workbench model, Then meta uses latest values", () => {

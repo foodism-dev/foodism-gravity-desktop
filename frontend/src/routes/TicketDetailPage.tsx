@@ -95,6 +95,7 @@ import {
   isProductOperationRatingEditable,
   type TicketWorkbenchModel,
   type WorkbenchActionButton,
+  type WorkbenchActivityItem,
 } from "@/lib/ticket-detail-workbench.ts";
 import { cn } from "@/lib/utils.ts";
 
@@ -244,7 +245,7 @@ const SUPPLY_HOST_REPORT_FIELDS: ReportReferenceField[] = [
   { label: "来客门店ID", fields: ["guestId"] },
   { label: "商户ID", fields: ["SupplyHostId", "supplyHostId", "hostId", "id", "value"] },
   { label: "高德ID", fields: ["gaodeId", "amapId"] },
-  { label: "商户审核状态", fields: ["approvalState", "approvalState.text"] },
+  { label: "商户审核状态", fields: ["approval_state", "approvalState", "approvalState.text"] },
   { label: "是否为重复提报商户", fields: ["isRepeatSubmit", "isDuplicateSubmit", "isRepeated"] },
   { label: "城市", fields: ["city", "bdCity"] },
   { label: "区域商圈", fields: ["district", "businessArea", "regionBusinessArea"] },
@@ -760,12 +761,13 @@ function LoadedTicketDetail({
         className={cn(
           "grid gap-4 px-0 pb-4 pt-0 lg:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_280px] xl:gap-5",
           shouldShowRatingComparison && "pb-0",
-          shouldShowRatingComparison && isActionSidebarCollapsed && "lg:grid-cols-[minmax(0,1fr)_56px] xl:grid-cols-[minmax(0,1fr)_56px]",
+          shouldShowRatingComparison && isActionSidebarCollapsed && "lg:grid-cols-[minmax(0,1fr)_40px] lg:gap-1 xl:grid-cols-[minmax(0,1fr)_40px] xl:gap-1",
         )}
       >
         <div className={cn(
           "min-w-0 rounded-md bg-slate-100 px-5 py-6 lg:px-6 xl:px-8 xl:py-7",
           shouldShowRatingComparison && "pb-0 xl:pb-0",
+          shouldShowRatingComparison && isActionSidebarCollapsed && "lg:pr-1 xl:pr-1",
         )}>
           <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
@@ -1883,12 +1885,12 @@ function TicketActionSidebar({
       <aside className="lg:sticky lg:top-4 lg:self-start">
         <button
           type="button"
-          className="flex min-h-[180px] w-14 flex-col items-center justify-start gap-3 rounded-md bg-white px-2 py-4 text-slate-500 shadow-sm ring-1 ring-slate-100 hover:bg-slate-50 hover:text-slate-800"
+          className="flex min-h-[104px] w-10 flex-col items-center justify-start gap-1.5 rounded-md bg-white px-1.5 py-2 text-slate-500 shadow-sm ring-1 ring-slate-100 hover:bg-slate-50 hover:text-slate-800"
           title="展开工单操作"
           onClick={onExpand}
         >
-          <Maximize2 className="h-4 w-4" />
-          <span className="[writing-mode:vertical-rl] text-xs font-semibold tracking-normal">工单操作</span>
+          <Maximize2 className="h-3.5 w-3.5" />
+          <span className="[writing-mode:vertical-rl] text-[11px] font-semibold tracking-normal">工单操作</span>
         </button>
       </aside>
     );
@@ -1951,21 +1953,29 @@ function TicketActionSidebar({
         ) : (
           <div className="space-y-3">
             {model.activityItems.length > 0 ? (
-              model.activityItems.map((item, index) => (
-                <div key={`${item.title}-${index}`} className="flex gap-2 text-xs">
-                  <span className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-50">
-                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-medium text-slate-800">{item.title}</span>
-                    <span className="mt-0.5 block line-clamp-2 text-slate-500">{item.description}</span>
-                    {item.operatorText ? (
-                      <span className="mt-0.5 block text-slate-400">操作人：{item.operatorText}</span>
-                    ) : null}
-                  </span>
-                  <span className="shrink-0 text-slate-400">{item.time}</span>
-                </div>
-              ))
+              <>
+                <ExecutionLogList items={model.activityItems} isCompact />
+                {model.allActivityItems.length > model.activityItems.length ? (
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button type="button" variant="outline" size="sm" className="h-8 w-full bg-white text-xs">
+                        查看全部执行日志
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="w-[min(92vw,720px)] p-5">
+                      <DialogHeader className="pr-8">
+                        <DialogTitle className="text-base">完整执行日志</DialogTitle>
+                        <DialogDescription>
+                          共 {model.allActivityItems.length} 条记录，按时间倒序展示。
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="ticket-scrollbar mt-4 max-h-[68vh] overflow-y-auto pr-2">
+                        <ExecutionLogList items={model.allActivityItems} />
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                ) : null}
+              </>
             ) : (
               <div className="rounded-md bg-slate-50 p-3 text-xs text-slate-500">暂无执行日志</div>
             )}
@@ -2116,6 +2126,28 @@ function TrackingMetric({ label, value }: { label: string; value: string }) {
     <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
       <span className="text-slate-400">{label}</span>
       <span className="min-w-0 truncate text-right font-medium text-slate-800">{value}</span>
+    </div>
+  );
+}
+
+function ExecutionLogList({ items, isCompact = false }: { items: WorkbenchActivityItem[]; isCompact?: boolean }) {
+  return (
+    <div className={cn(isCompact ? "space-y-3" : "space-y-4")}>
+      {items.map((item, index) => (
+        <div key={`${item.title}-${item.time}-${index}`} className="flex gap-2 text-xs">
+          <span className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-50">
+            <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-slate-800">{item.title}</span>
+            <span className={cn("mt-0.5 block text-slate-500", isCompact && "line-clamp-2")}>{item.description}</span>
+            {item.operatorText ? (
+              <span className="mt-0.5 block text-slate-400">操作人：{item.operatorText}</span>
+            ) : null}
+          </span>
+          <span className="shrink-0 text-slate-400">{item.time}</span>
+        </div>
+      ))}
     </div>
   );
 }

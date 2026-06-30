@@ -44,6 +44,7 @@ export interface TicketWorkbenchModel {
   operationSectionTitle: "人工操作" | "自动追踪";
   actionButtons: WorkbenchActionButton[];
   activityItems: WorkbenchActivityItem[];
+  allActivityItems: WorkbenchActivityItem[];
 }
 
 export interface TicketWorkbenchModelOptions {
@@ -88,6 +89,7 @@ export function buildTicketWorkbenchModel(
   const currentPayload = buildCurrentPayload(ticket);
   const currentFlow = deriveTicketFlow(ticket, records);
   const currentStepIndex = FLOW_STEPS.findIndex((step) => step.key === currentFlow);
+  const allActivityItems = records.map(formatActivityItem);
   return {
     metaItems: [
       { label: "工单编号", value: ticket.supplyGoodsId },
@@ -103,12 +105,18 @@ export function buildTicketWorkbenchModel(
     currentFlow,
     operationSectionTitle: currentFlow === "product_online_pending" ? "自动追踪" : "人工操作",
     actionButtons: buildActionButtons(currentFlow, records, currentPayload, options),
-    activityItems: records.slice(0, 4).map((record) => ({
-      title: formatActionTitle(record),
-      description: record.remark || `${formatActionTitle(record)} 已记录 ${Object.keys(record.current).length} 个字段`,
-      operatorText: formatOperatorText(record.operator),
-      time: formatShortDateTime(record.createdAt),
-    })),
+    activityItems: allActivityItems.slice(0, 4),
+    allActivityItems,
+  };
+}
+
+function formatActivityItem(record: TicketActionRecord): WorkbenchActivityItem {
+  const title = formatActionTitle(record);
+  return {
+    title,
+    description: record.remark || `${title} 已记录 ${Object.keys(record.current).length} 个字段`,
+    operatorText: formatOperatorText(record.operator),
+    time: formatShortDateTime(record.createdAt),
   };
 }
 

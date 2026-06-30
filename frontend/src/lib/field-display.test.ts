@@ -13,6 +13,7 @@ const fieldMetadata: TicketFieldMetadataMap = {
   classification: { label: "商品类目", fieldType: "CLASSIFICATION" },
   onlineChannel: { label: "商品计划上线渠道", fieldType: "MULTISELECT" },
   channelLimit: { label: "上架渠道限制", fieldType: "PICKLIST" },
+  approval_state: { label: "审核状态", fieldType: "PICKLIST" },
   rbhost: { label: "提报商户", fieldType: "REFERENCE" },
   price: { label: "售价", fieldType: "DECIMAL" },
   saleBegin: { label: "售卖开始时间", fieldType: "DATE" },
@@ -47,6 +48,14 @@ const fieldOptions: TicketFieldOptionsMap = {
       isDefault: true,
     },
   ],
+  approvalState: [
+    {
+      value: "10",
+      label: "审核通过",
+      sortOrder: 1,
+      isDefault: false,
+    },
+  ],
 };
 
 describe("字段类型展示", () => {
@@ -79,6 +88,19 @@ describe("字段类型展示", () => {
         { fieldMetadata, fieldOptions },
       ),
     ).toBe("无限制");
+  });
+
+  test("Given approval_state value and camel case options, When formatting, Then it displays approval label", () => {
+    expect(formatPayloadValue(10, "approval_state", { fieldMetadata, fieldOptions })).toBe("审核通过");
+  });
+
+  test("Given approval_state options are missing, When formatting known code, Then it falls back to readable status", () => {
+    expect(
+      formatPayloadValue("10", "approval_state", {
+        fieldMetadata,
+        fieldOptions: {},
+      }),
+    ).toBe("审核通过");
   });
 
   test("Given launch channel and channel limit, When display field order prefers launch channel, Then it shows launch channel", () => {

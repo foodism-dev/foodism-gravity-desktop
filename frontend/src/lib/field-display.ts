@@ -18,6 +18,17 @@ export interface FieldDisplayContext {
   fieldOptions: TicketFieldOptionsMap;
 }
 
+const FIELD_OPTION_ALIASES: Record<string, string[]> = {
+  approval_state: ["approvalState"],
+  approvalState: ["approval_state"],
+};
+
+const APPROVAL_STATE_FALLBACK_LABELS: Record<string, string> = {
+  "2": "审批中",
+  "10": "审核通过",
+  "11": "驳回",
+};
+
 interface PackageGroup {
   groupName?: unknown;
   groupSelectNum?: unknown;
@@ -137,9 +148,18 @@ function readTextValue(value: unknown, field: string, context: FieldDisplayConte
 }
 
 function resolveOptionLabel(field: string, rawText: string, fieldOptions: TicketFieldOptionsMap): string | null {
-  const options = fieldOptions[field];
-  if (!options) return null;
-  return options.find((option) => option.value === rawText)?.label ?? null;
+  const fields = [field, ...(FIELD_OPTION_ALIASES[field] ?? [])];
+  for (const optionField of fields) {
+    const options = fieldOptions[optionField];
+    const label = options?.find((option) => option.value === rawText)?.label;
+    if (label) return label;
+  }
+
+  if (fields.includes("approval_state") || fields.includes("approvalState")) {
+    return APPROVAL_STATE_FALLBACK_LABELS[rawText] ?? null;
+  }
+
+  return null;
 }
 
 function formatBoolean(value: string): string {

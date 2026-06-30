@@ -71,7 +71,8 @@ describe("工单详情页布局", () => {
     expect(source).toContain("const [isActionSidebarCollapsed, setIsActionSidebarCollapsed] = useState(false);");
     expect(source).toContain("function closeRatingComparisonAndExpandActionSidebar()");
     expect(source).toContain("setIsRatingComparisonOpen(false);");
-    expect(source).toContain("shouldShowRatingComparison && isActionSidebarCollapsed && \"lg:grid-cols-[minmax(0,1fr)_56px] xl:grid-cols-[minmax(0,1fr)_56px]\"");
+    expect(source).toContain("shouldShowRatingComparison && isActionSidebarCollapsed && \"lg:grid-cols-[minmax(0,1fr)_40px] lg:gap-1 xl:grid-cols-[minmax(0,1fr)_40px] xl:gap-1\"");
+    expect(source).toContain('shouldShowRatingComparison && isActionSidebarCollapsed && "lg:pr-1 xl:pr-1"');
     expect(source).toContain("isCollapsed={shouldShowRatingComparison && isActionSidebarCollapsed}");
     expect(source).toContain("onExpand={closeRatingComparisonAndExpandActionSidebar}");
     expect(source).not.toContain("canCollapse={shouldShowRatingComparison}");
@@ -81,6 +82,8 @@ describe("工单详情页布局", () => {
     expect(source).not.toContain("收起工单操作");
     expect(source).toContain("工单操作");
     expect(source).toContain("[writing-mode:vertical-rl]");
+    expect(source).toContain("min-h-[104px] w-10");
+    expect(source).not.toContain("min-h-[180px] w-14");
   });
 
   test("Given action sidebar is expanded, When rendering sidebar content, Then sections share one aligned panel", async () => {
@@ -92,6 +95,17 @@ describe("工单详情页布局", () => {
     expect(source).toContain('className="min-w-0 truncate text-left font-medium text-slate-800"');
     expect(source).not.toContain('className="grid grid-cols-[72px_1fr] gap-3 text-xs"');
     expect(source).toContain('className="border-b border-slate-100 py-5 first:pt-0 last:border-b-0 last:pb-0"');
+  });
+
+  test("Given execution logs exceed preview count, When rendering sidebar, Then full logs are available in a modal", async () => {
+    const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
+
+    expect(source).toContain("model.allActivityItems.length > model.activityItems.length");
+    expect(source).toContain("查看全部执行日志");
+    expect(source).toContain("ExecutionLogList");
+    expect(source).toContain("<Dialog>");
+    expect(source).toContain("<DialogTrigger asChild>");
+    expect(source).toContain("完整执行日志");
   });
 
   test("Given product operation rating panel, When rendering detail content, Then editability follows current flow", async () => {
@@ -121,6 +135,32 @@ describe("工单详情页布局", () => {
     expect(source).toContain('label="建议总分"');
     expect(source).toContain('label="确认总分"');
     expect(source).toContain('label="最终评级"');
+  });
+
+  test("Given product operation rating has not been saved, When rendering final rating, Then it shows unrated instead of C minus", async () => {
+    const source = await Bun.file("frontend/src/components/tickets/ProductOperationRatingPanel.tsx").text();
+
+    expect(source).toContain('const displayRating = value || hasEditedScores ? preview.rating : "未评分";');
+    expect(source).toContain("setHasEditedScores(false);");
+    expect(source).toContain("setHasEditedScores(true);");
+    expect(source).toContain("value={displayRating}");
+  });
+
+  test("Given product operation rating form, When hovering help entries, Then scoring details appear in a floating tooltip without clicking", async () => {
+    const source = await Bun.file("frontend/src/components/tickets/ProductOperationRatingPanel.tsx").text();
+
+    expect(source).toContain("CircleHelp");
+    expect(source).toContain("查看评分规则");
+    expect(source).toContain("评分规则");
+    expect(source).toContain("PRODUCT_OPERATION_RATING_GRADE_RULES");
+    expect(source).toContain("评级规则");
+    expect(source).toContain("absolute right-0 top-7 z-30");
+    expect(source).toContain("shadow-lg");
+    expect(source).toContain("group-hover/rating-rule:block");
+    expect(source).toContain("group-focus-within/rating-rule:block");
+    expect(source).not.toContain("expandedRuleKey");
+    expect(source).not.toContain("toggleRule");
+    expect(source).not.toContain("onToggleRule");
   });
 
   test("Given product operation rating form, When scrolling fields, Then summary cards stay fixed and compact", async () => {
@@ -232,6 +272,14 @@ describe("工单详情页布局", () => {
 
     expect(source).toContain('{ label: "公司审核状态", fields: ["auditStatus"] }');
     expect(source).not.toContain('{ label: "公司审核状态", fields: ["approvalState", "approvalState.text"] }');
+  });
+
+  test("Given report merchant fields, When rendering merchant review status, Then it uses REBUILD approval_state field without hardcoded enum", async () => {
+    const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
+
+    expect(source).toContain('{ label: "商户审核状态", fields: ["approval_state", "approvalState", "approvalState.text"] }');
+    expect(source).not.toContain("HOST_APPROVAL_STATE");
+    expect(source).not.toContain("SUPPLY_HOST_APPROVAL_STATE");
   });
 
   test("Given report company attachment fields, When rendering company modal, Then it uses REBUILD company asset field names", async () => {
