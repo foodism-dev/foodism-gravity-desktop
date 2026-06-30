@@ -9,13 +9,13 @@ import {
   normalizeTicketStatus,
   TICKET_BUSINESS_STATUS,
   TICKET_STATUS,
-} from "../ticket-status.ts";
+} from "../../ticket-status.ts";
 import type {
   CreateTicketActionRecordInput,
   TicketActionRecord,
   TicketRepository,
   TicketWithSupplyGoods,
-} from "../tickets.ts";
+} from "../../tickets.ts";
 
 function settings(): LinKeSettings {
   return {

@@ -3,7 +3,7 @@ import {
   GRAVITY_JOBS_QUEUE_NAME,
   LIN_KE_DRAFT_JOB_NAME,
   type CreateLinKeDraftJobData,
-} from "../jobs/types.ts";
+} from "../../jobs/types.ts";
 import type { JsonRecord } from "./utils.ts";
 
 export { LIN_KE_DRAFT_JOB_NAME };

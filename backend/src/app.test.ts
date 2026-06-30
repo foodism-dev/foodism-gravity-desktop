@@ -5,23 +5,23 @@ import type { ApiUser } from "./auth.ts";
 import {
   normalizeRebuildClassificationOptions,
   normalizeRebuildFieldOptions,
-} from "./rebuild/fields.ts";
+} from "./service/rebuild/fields.ts";
 import type {
   RebuildFieldMetadata,
   RebuildFieldMetadataRepository,
   RebuildFieldOptionMetadata,
   RebuildMetadataClient,
-} from "./rebuild/fields.ts";
-import { SUPPLY_GOODS_SYNC_FIELDS } from "./rebuild/supplygoods.ts";
-import { createRebuildSupplyGoodsClient } from "./rebuild/supplygoods.ts";
+} from "./service/rebuild/fields.ts";
+import { SUPPLY_GOODS_SYNC_FIELDS } from "./service/rebuild/supplygoods.ts";
+import { createRebuildSupplyGoodsClient } from "./service/rebuild/supplygoods.ts";
 import type {
   RebuildSupplyGoodsClient,
   SupplyGoodsCallbackRecordInput,
   SupplyCompanyRecordUpsertInput,
   SupplyGoodsRecordRepository,
   SupplyGoodsRecordUpsertInput,
-} from "./rebuild/supplygoods.ts";
-import type { RebuildAssetUploader } from "./rebuild/assets.ts";
+} from "./service/rebuild/supplygoods.ts";
+import type { RebuildAssetUploader } from "./service/rebuild/assets.ts";
 import type { PublishSkillPackageInput, SkillPublisher } from "./skill-publisher.ts";
 import type {
   CreateTicketActionRecordInput,
@@ -39,14 +39,14 @@ import {
   TICKET_STATUS,
 } from "./ticket-status.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
-import type { LinKeDraftJobStatus, LinKeDraftQueueClient } from "./lin-ke/draft-queue.ts";
+import type { LinKeDraftJobStatus, LinKeDraftQueueClient } from "./service/lin-ke/draft-queue.ts";
 import type {
   CreateLinKeFeeSetupJobData,
   CreateLinKeProductTrackingJobData,
   LinKeFeeSetupQueueClient,
   LinKeJobStatus,
-} from "./lin-ke/fee-setup-queue.ts";
-import { LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS } from "./lin-ke/fee-setup-queue.ts";
+} from "./service/lin-ke/fee-setup-queue.ts";
+import { LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS } from "./service/lin-ke/fee-setup-queue.ts";
 
 process.env.DATABASE_URL = "";
 process.env.PROMA_SERVER_JWT_SECRET = "";

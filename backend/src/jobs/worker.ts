@@ -1,24 +1,24 @@
 import { Worker, type Job } from "bullmq";
 import { installConsoleTimestamp } from "../logger.ts";
-import { getLinKeSettings, type LinKeSettings } from "../lin-ke/config.ts";
-import { processLinKeDraftJob } from "../lin-ke/draft-worker.ts";
-import { createLinKeFeeSetupWorker } from "../lin-ke/fee-setup-worker.ts";
-import { getDefaultLinKeRepository, type LinKeRepository } from "../lin-ke/repository.ts";
-import { saveSupplyGoodsDraft } from "../lin-ke/service.ts";
-import { conciseError } from "../lin-ke/utils.ts";
-import type { JsonRecord } from "../lin-ke/utils.ts";
-import { getDefaultRebuildAssetUploader, type RebuildAssetUploader } from "../rebuild/assets.ts";
-import { getDefaultRebuildFieldMetadataRepository, type RebuildFieldMetadataRepository } from "../rebuild/fields.ts";
+import { getLinKeSettings, type LinKeSettings } from "../service/lin-ke/config.ts";
+import { processLinKeDraftJob } from "../service/lin-ke/draft-worker.ts";
+import { createLinKeFeeSetupWorker } from "../service/lin-ke/fee-setup-worker.ts";
+import { getDefaultLinKeRepository, type LinKeRepository } from "../service/lin-ke/repository.ts";
+import { saveSupplyGoodsDraft } from "../service/lin-ke/service.ts";
+import { conciseError } from "../service/lin-ke/utils.ts";
+import type { JsonRecord } from "../service/lin-ke/utils.ts";
+import { getDefaultRebuildAssetUploader, type RebuildAssetUploader } from "../service/rebuild/assets.ts";
+import { getDefaultRebuildFieldMetadataRepository, type RebuildFieldMetadataRepository } from "../service/rebuild/fields.ts";
 import {
   processImportFromSupplyGoodsJob,
   type ImportFromSupplyGoodsWorkerOptions,
-} from "../rebuild/import-from-supplygoods-worker.ts";
+} from "../service/rebuild/import-from-supplygoods-worker.ts";
 import {
   createRebuildSupplyGoodsClient,
   getDefaultSupplyGoodsRecordRepository,
   type RebuildSupplyGoodsClient,
   type SupplyGoodsRecordRepository,
-} from "../rebuild/supplygoods.ts";
+} from "../service/rebuild/supplygoods.ts";
 import { getDefaultTicketRepository, type TicketRepository } from "../tickets.ts";
 import {
   getDefaultGravityJobsQueue,

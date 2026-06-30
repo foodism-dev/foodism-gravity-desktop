@@ -1,6 +1,6 @@
 import { createServerApp, DEFAULT_WEB_SSO_REDIRECT_URI } from "./app.ts";
 import { installConsoleTimestamp } from "./logger.ts";
-import { warmRebuildLoginSession } from "./rebuild/login-session.ts";
+import { warmRebuildLoginSession } from "./service/rebuild/login-session.ts";
 
 installConsoleTimestamp();
 

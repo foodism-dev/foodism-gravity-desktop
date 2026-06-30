@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import type { KeyValueCache } from "../cache/key-value.ts";
+import type { KeyValueCache } from "../../cache/key-value.ts";
 import {
   getRebuildLoginSession,
   invalidateRebuildLoginSession,

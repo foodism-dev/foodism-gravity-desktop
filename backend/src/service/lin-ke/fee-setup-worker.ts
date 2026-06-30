@@ -29,7 +29,7 @@ import {
 import { bdCityText } from "./supply-goods.ts";
 import { LifePartnerSession, loadCookieFile } from "./auth.ts";
 import { cleanString, conciseError, type JsonRecord } from "./utils.ts";
-import { getDefaultTicketRepository, type TicketRepository, type TicketWithSupplyGoods } from "../tickets.ts";
+import { getDefaultTicketRepository, type TicketRepository, type TicketWithSupplyGoods } from "../../tickets.ts";
 
 export interface LinKeFeeSetupWorkerOptions {
   settings?: LinKeSettings;

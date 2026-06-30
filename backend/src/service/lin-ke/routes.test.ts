@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { createServerApp } from "../app.ts";
+import { createServerApp } from "../../app.ts";
 import type { LinKeSettings } from "./config.ts";
 import type {
   LinKeAccountConfig,

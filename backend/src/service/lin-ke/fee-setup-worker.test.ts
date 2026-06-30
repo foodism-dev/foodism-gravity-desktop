@@ -24,8 +24,8 @@ import type {
   TicketActionRecord,
   TicketRepository,
   TicketWithSupplyGoods,
-} from "../tickets.ts";
-import { TICKET_BUSINESS_STATUS, TICKET_STATUS } from "../ticket-status.ts";
+} from "../../tickets.ts";
+import { TICKET_BUSINESS_STATUS, TICKET_STATUS } from "../../ticket-status.ts";
 
 function createAccountConfig(cookieFilePath: string): LinKeAccountConfig {
   const now = new Date("2026-06-24T10:00:00.000Z");

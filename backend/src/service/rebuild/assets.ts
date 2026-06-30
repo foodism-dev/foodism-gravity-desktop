@@ -4,7 +4,7 @@ import {
   uploadObjectToR2,
   type R2Config,
   type R2Fetch,
-} from "../skill-publisher.ts";
+} from "../../skill-publisher.ts";
 import type { RebuildFieldMetadata } from "./fields.ts";
 import { getRebuildLoginSession, invalidateRebuildLoginSession } from "./login-session.ts";
 

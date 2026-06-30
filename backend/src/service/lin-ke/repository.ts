@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../db/client.ts";
-import { linKeAccountConfigs, rebuildFieldOptions, rebuildSupplyGoods, tickets } from "../db/schema.ts";
+import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../../db/client.ts";
+import { linKeAccountConfigs, rebuildFieldOptions, rebuildSupplyGoods, tickets } from "../../db/schema.ts";
 import { cleanString, parseIntValue, type JsonRecord } from "./utils.ts";
 
 export interface LinKeAccountConfig {

@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../db/client.ts";
-import { rebuildFieldOptions, rebuildFields } from "../db/schema.ts";
+import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../../db/client.ts";
+import { rebuildFieldOptions, rebuildFields } from "../../db/schema.ts";
 import { buildRebuildOpenApiUrl, readJsonResponse } from "./openapi.ts";
 import { SUPPLY_COMPANY_ENTITY, SUPPLY_GOODS_ENTITY } from "./supplygoods.ts";
 

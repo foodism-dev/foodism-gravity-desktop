@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import type { KeyValueCache } from "../cache/key-value.ts";
-import { getRedisKeyValueCache } from "../cache/redis.ts";
-import type { R2Fetch } from "../skill-publisher.ts";
+import type { KeyValueCache } from "../../cache/key-value.ts";
+import { getRedisKeyValueCache } from "../../cache/redis.ts";
+import type { R2Fetch } from "../../skill-publisher.ts";
 import { buildRebuildOpenApiUrl, readJsonResponse } from "./openapi.ts";
 
 interface RebuildLoginTokenData {

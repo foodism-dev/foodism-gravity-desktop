@@ -3,7 +3,7 @@ import type { LinKeRepository } from "./repository.ts";
 import { bdCityText } from "./supply-goods.ts";
 import { saveSupplyGoodsDraft } from "./service.ts";
 import { cleanString, conciseError, isRecord, type JsonRecord } from "./utils.ts";
-import type { TicketRepository } from "../tickets.ts";
+import type { TicketRepository } from "../../tickets.ts";
 
 export interface LinKeDraftWorkerOptions {
   settings?: LinKeSettings;

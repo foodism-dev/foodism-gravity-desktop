@@ -9,7 +9,7 @@ import {
 import {
   LIN_KE_DRAFT_JOB_NAME as LIN_KE_QUEUE_JOB_NAME,
   LIN_KE_DRAFT_QUEUE_NAME,
-} from "../lin-ke/draft-queue.ts";
+} from "../service/lin-ke/draft-queue.ts";
 
 describe("Gravity jobs 队列", () => {
   test("Given scheduled jobs are built, When checking queue metadata, Then it uses gravity-jobs and includes SupplyGoods import", () => {

@@ -1,7 +1,7 @@
 import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { createDatabase, getDatabaseUrl, type ServerDatabase } from "./db/client.ts";
 import { rebuildSupplyGoods, ticketActionRecords, tickets } from "./db/schema.ts";
-import type { RebuildFieldMetadata, RebuildFieldOptionMetadata } from "./rebuild/fields.ts";
+import type { RebuildFieldMetadata, RebuildFieldOptionMetadata } from "./service/rebuild/fields.ts";
 import {
   getNextTicketFlowStateByAction,
   getTicketStatusByBusinessStatus,

@@ -2,17 +2,17 @@ import { describe, expect, test } from "bun:test";
 
 import { LIN_KE_DRAFT_JOB_NAME, REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME } from "./queue.ts";
 import { processGravityJob } from "./worker.ts";
-import type { LinKeSettings } from "../lin-ke/config.ts";
-import type { LinKeAccountConfig, LinKeRepository } from "../lin-ke/repository.ts";
-import type { JsonRecord } from "../lin-ke/utils.ts";
-import type { RebuildAssetUploader } from "../rebuild/assets.ts";
-import type { RebuildFieldMetadataRepository } from "../rebuild/fields.ts";
+import type { LinKeSettings } from "../service/lin-ke/config.ts";
+import type { LinKeAccountConfig, LinKeRepository } from "../service/lin-ke/repository.ts";
+import type { JsonRecord } from "../service/lin-ke/utils.ts";
+import type { RebuildAssetUploader } from "../service/rebuild/assets.ts";
+import type { RebuildFieldMetadataRepository } from "../service/rebuild/fields.ts";
 import type {
   RebuildSupplyGoodsClient,
   SupplyGoodsCallbackRecordInput,
   SupplyGoodsRecordRepository,
   SupplyGoodsRecordUpsertInput,
-} from "../rebuild/supplygoods.ts";
+} from "../service/rebuild/supplygoods.ts";
 import {
   normalizeTicketBusinessStatus,
   normalizeTicketStatus,

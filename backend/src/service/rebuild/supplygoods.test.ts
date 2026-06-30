@@ -12,7 +12,7 @@ import {
   normalizeSupplyGoodsPayload,
 } from "./supplygoods.ts";
 import type { RebuildAssetUploader } from "./assets.ts";
-import { TICKET_BUSINESS_STATUS, TICKET_STATUS } from "../ticket-status.ts";
+import { TICKET_BUSINESS_STATUS, TICKET_STATUS } from "../../ticket-status.ts";
 
 describe("SupplyGoods 工单 payload 初始化", () => {
   test("Given Rebuild approvalState value is passed, When building ticket payload, Then it copies Rebuild data", () => {

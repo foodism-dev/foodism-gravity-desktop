@@ -1,5 +1,5 @@
-import type { ImportFromSupplyGoodsResult } from "../rebuild/import-from-supplygoods.ts";
-import type { JsonRecord } from "../lin-ke/utils.ts";
+import type { ImportFromSupplyGoodsResult } from "../service/rebuild/import-from-supplygoods.ts";
+import type { JsonRecord } from "../service/lin-ke/utils.ts";
 
 export const GRAVITY_JOBS_QUEUE_NAME = "gravity-jobs";
 export const REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME = "rebuild:import-from-supplygoods";

@@ -2,7 +2,7 @@ import type { RebuildAssetUploader } from "./assets.ts";
 import type { RebuildFieldMetadataRepository } from "./fields.ts";
 import { importFromSupplyGoods, type ImportFromSupplyGoodsResult } from "./import-from-supplygoods.ts";
 import type { RebuildSupplyGoodsClient, SupplyGoodsRecordRepository } from "./supplygoods.ts";
-import type { ImportFromSupplyGoodsJobData } from "../jobs/types.ts";
+import type { ImportFromSupplyGoodsJobData } from "../../jobs/types.ts";
 
 export interface ImportFromSupplyGoodsWorkerOptions {
   rebuildClient?: RebuildSupplyGoodsClient;

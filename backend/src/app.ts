@@ -21,8 +21,8 @@ import {
   syncSupplyGoodsFromCallback,
   type RebuildSupplyGoodsClient,
   type SupplyGoodsRecordRepository,
-} from "./rebuild/supplygoods.ts";
-import { getDefaultRebuildAssetUploader, type RebuildAssetUploader } from "./rebuild/assets.ts";
+} from "./service/rebuild/supplygoods.ts";
+import { getDefaultRebuildAssetUploader, type RebuildAssetUploader } from "./service/rebuild/assets.ts";
 import {
   createRebuildMetadataClient,
   getDefaultRebuildFieldMetadataRepository,
@@ -33,7 +33,7 @@ import {
   type RebuildFieldMetadataRepository,
   type RebuildMetadataSyncResult,
   type RebuildMetadataClient,
-} from "./rebuild/fields.ts";
+} from "./service/rebuild/fields.ts";
 import {
   getDefaultTicketRepository,
   parseTicketQuery,
@@ -49,28 +49,28 @@ import {
 import { getDefaultSkillPublisher, sha256Bytes, type SkillPublisher } from "./skill-publisher.ts";
 import { getDefaultSkillRepository, type MarketSkill, type SkillRepository } from "./skills.ts";
 import { getDefaultUserRepository, type UserRepository } from "./users.ts";
-import { createLinKeRoutes, type LinKeRoutesOptions } from "./lin-ke/routes.ts";
-import { getLinKeSettings } from "./lin-ke/config.ts";
-import { optimizePayloadWithRetries } from "./lin-ke/optimizer.ts";
+import { createLinKeRoutes, type LinKeRoutesOptions } from "./service/lin-ke/routes.ts";
+import { getLinKeSettings } from "./service/lin-ke/config.ts";
+import { optimizePayloadWithRetries } from "./service/lin-ke/optimizer.ts";
 import {
   applyEditablePackages,
   displaySupplyGoodsPackages,
-} from "./lin-ke/supply-goods.ts";
+} from "./service/lin-ke/supply-goods.ts";
 import {
   getDefaultLinKeDraftQueue,
   type LinKeDraftQueueClient,
-} from "./lin-ke/draft-queue.ts";
+} from "./service/lin-ke/draft-queue.ts";
 import {
   getDefaultLinKeFeeSetupQueue,
   LIN_KE_PRODUCT_TRACKING_TIMEOUT_MS,
   type LinKeFeeSetupQueueClient,
-} from "./lin-ke/fee-setup-queue.ts";
+} from "./service/lin-ke/fee-setup-queue.ts";
 import {
   LIN_KE_FEE_SETUP_SAVE_VERSION,
   normalizeLinKeFeeRates,
   resolveLinKeMerchantId,
   validateLinKeFeeRates,
-} from "./lin-ke/fee-setup.ts";
+} from "./service/lin-ke/fee-setup.ts";
 
 interface ServerStatus {
   name: string;

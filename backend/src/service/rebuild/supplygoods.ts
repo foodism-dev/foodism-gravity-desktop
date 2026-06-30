@@ -1,12 +1,12 @@
 import { eq, inArray } from "drizzle-orm";
-import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../db/client.ts";
+import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../../db/client.ts";
 import {
   rebuildSupplyCompany,
   rebuildSupplyGoods,
   rebuildSupplyGoodsCallbackRecords,
   ticketActionRecords,
   tickets,
-} from "../db/schema.ts";
+} from "../../db/schema.ts";
 import { buildRebuildOpenApiUrl, readJsonResponse } from "./openapi.ts";
 import type { RebuildFieldMetadata, RebuildFieldMetadataRepository } from "./fields.ts";
 import { mirrorRebuildAssets, replacePayloadAssetUrls, type RebuildAssetUploader } from "./assets.ts";
@@ -18,7 +18,7 @@ import {
   normalizeTicketBusinessStatus,
   type TicketBusinessStatus,
   type TicketFlowState,
-} from "../ticket-status.ts";
+} from "../../ticket-status.ts";
 
 export interface SupplyGoodsRecordUpsertInput {
   supplyGoodsId: string;
