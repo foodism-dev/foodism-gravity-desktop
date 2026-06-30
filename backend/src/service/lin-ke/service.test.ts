@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
 
-import { BACKEND_DIR, type LinKeSettings } from "./config.ts";
+import type { LinKeSettings } from "./config.ts";
+import { cookieConfigToHeader } from "./auth.ts";
 import type { LinKeAccountConfig, LinKeRepository } from "./repository.ts";
 import {
   LinKeServiceError,
   buildWorkbenchDraftUrl,
-  resolveCookieFilePath,
   saveSupplyGoodsDraft,
 } from "./service.ts";
 import type { JsonRecord } from "./utils.ts";
@@ -45,7 +44,7 @@ function accountConfig(): LinKeAccountConfig {
     id: 1,
     name: "合肥",
     bdCityTexts: ["合肥市"],
-    cookieFilePath: "/tmp/missing-life-partner.cookie.json",
+    cookie: "/tmp/missing-life-partner.cookie.json",
     groupId: "",
     rootLifeAccountId: "",
     accountId: "",
@@ -91,13 +90,12 @@ function repository(labels: Record<string, string> = {}): LinKeRepository & { up
 }
 
 describe("Lin-Ke service", () => {
-  test("Given relative cookie path, When resolving, Then backend directory is used", () => {
-    expect(resolveCookieFilePath(".secrets/lin-ke/cookies/shenzhen.cookie.json"))
-      .toBe(join(BACKEND_DIR, ".secrets/lin-ke/cookies/shenzhen.cookie.json"));
+  test("Given raw cookie content, When normalizing, Then cookie header is returned", () => {
+    expect(cookieConfigToHeader("sessionid=test; uid=1")).toBe("sessionid=test; uid=1");
   });
 
-  test("Given absolute cookie path, When resolving, Then it stays absolute", () => {
-    expect(resolveCookieFilePath("/tmp/life_partner.cookie.json")).toBe("/tmp/life_partner.cookie.json");
+  test("Given JSON cookie content, When normalizing, Then cookie header is returned", () => {
+    expect(cookieConfigToHeader(JSON.stringify([{ name: "sessionid", value: "test" }]))).toBe("sessionid=test");
   });
 
   test("Given option ids, When saving draft, Then labels are mapped before Lin-Ke mapping and record mapping is updated", async () => {
@@ -120,7 +118,7 @@ describe("Lin-Ke service", () => {
       throw new Error("expected cookie error");
     } catch (error) {
       expect(error).toBeInstanceOf(LinKeServiceError);
-      expect((error as LinKeServiceError).payload.reason).toBe("cookie_file_not_found");
+      expect((error as LinKeServiceError).payload.reason).toBe("empty_cookie");
     }
 
     expect(repo.updatedMappings).toHaveLength(1);

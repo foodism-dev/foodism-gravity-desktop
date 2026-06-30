@@ -7,6 +7,7 @@ import {
   rebuildSupplyCompany,
   rebuildSupplyGoods,
   rebuildSupplyGoodsCallbackRecords,
+  linKeAccountConfigs,
   tickets,
 } from "./schema.ts";
 
@@ -52,5 +53,11 @@ describe("数据库 schema", () => {
     expect(getTableName(rebuildFieldOptions)).toBe("rebuild_field_options");
     expect(rebuildFieldOptions.optionValue.name).toBe("option_value");
     expect(rebuildFieldOptions.optionLabel.name).toBe("option_label");
+  });
+
+  test("林客账号配置表直接保存 cookie 内容", () => {
+    expect(getTableName(linKeAccountConfigs)).toBe("lin_ke_account_configs");
+    expect(linKeAccountConfigs.cookie.name).toBe("cookie");
+    expect("cookieFilePath" in linKeAccountConfigs).toBe(false);
   });
 });

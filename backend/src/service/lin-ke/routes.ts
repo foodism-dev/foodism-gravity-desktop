@@ -55,7 +55,7 @@ function parseAccountConfigInput(body: unknown, patch = false): LinKeAccountConf
     if (!Array.isArray(body.bdCityTexts)) throw new Error("bdCityTexts 必须是数组");
     input.bdCityTexts = body.bdCityTexts.map(cleanString).filter(Boolean);
   }
-  if (body.cookieFilePath !== undefined) input.cookieFilePath = cleanString(body.cookieFilePath);
+  if (body.cookie !== undefined) input.cookie = cleanString(body.cookie);
   if (body.groupId !== undefined) input.groupId = cleanString(body.groupId);
   if (body.rootLifeAccountId !== undefined) input.rootLifeAccountId = cleanString(body.rootLifeAccountId);
   if (body.accountId !== undefined) input.accountId = cleanString(body.accountId);
@@ -66,7 +66,7 @@ function parseAccountConfigInput(body: unknown, patch = false): LinKeAccountConf
   if (!patch) {
     if (!input.name) throw new Error("name 不能为空");
     if (!input.bdCityTexts) throw new Error("bdCityTexts 不能为空");
-    if (!input.cookieFilePath) throw new Error("cookieFilePath 不能为空");
+    if (!input.cookie) throw new Error("cookie 不能为空");
   }
   return input;
 }

@@ -33,7 +33,7 @@ function accountConfig(input: Partial<LinKeAccountConfig> = {}): LinKeAccountCon
     id: input.id ?? 1,
     name: input.name ?? "合肥",
     bdCityTexts: input.bdCityTexts ?? ["合肥市"],
-    cookieFilePath: input.cookieFilePath ?? "/tmp/cookie.json",
+    cookie: input.cookie ?? "sessionid=test",
     groupId: input.groupId ?? "",
     rootLifeAccountId: input.rootLifeAccountId ?? "",
     accountId: input.accountId ?? "",
@@ -75,7 +75,7 @@ function createMemoryLinKeRepository(input: {
         id: accountConfigs.length + 1,
         name: configInput.name,
         bdCityTexts: configInput.bdCityTexts,
-        cookieFilePath: configInput.cookieFilePath,
+        cookie: configInput.cookie,
         groupId: configInput.groupId ?? "",
         rootLifeAccountId: configInput.rootLifeAccountId ?? "",
         accountId: configInput.accountId ?? "",
@@ -104,6 +104,26 @@ function createMemoryLinKeRepository(input: {
 }
 
 describe("Lin-Ke Hono routes", () => {
+  test("Given account config input, When creating config, Then cookie content is stored and returned", async () => {
+    const repository = createMemoryLinKeRepository();
+    const app = createServerApp({ linKeRoutesOptions: { settings: settings(), repository } });
+
+    const response = await app.request("/api/lin-ke/account-configs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "上海账号",
+        bdCityTexts: ["上海"],
+        cookie: "sessionid=test",
+      }),
+    });
+    const body = await response.json() as { cookie: string; cookieFilePath?: string };
+
+    expect(response.status).toBe(201);
+    expect(body.cookie).toBe("sessionid=test");
+    expect(body.cookieFilePath).toBeUndefined();
+  });
+
   test("Given payload exists, When optimize stream is requested, Then NDJSON item is returned", async () => {
     const repository = createMemoryLinKeRepository({
       payloads: { "goods-a": { packages: "{\"viewList\":[]}" } },

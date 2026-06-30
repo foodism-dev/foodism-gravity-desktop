@@ -37,7 +37,7 @@ function accountConfig(): LinKeAccountConfig {
     id: 1,
     name: "深圳",
     bdCityTexts: ["深圳一区"],
-    cookieFilePath: "/tmp/cookie.json",
+    cookie: "sessionid=test",
     groupId: "",
     rootLifeAccountId: "",
     accountId: "",

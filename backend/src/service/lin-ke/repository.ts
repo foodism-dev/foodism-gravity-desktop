@@ -7,7 +7,7 @@ export interface LinKeAccountConfig {
   id: number;
   name: string;
   bdCityTexts: string[];
-  cookieFilePath: string;
+  cookie: string;
   groupId: string;
   rootLifeAccountId: string;
   accountId: string;
@@ -19,7 +19,7 @@ export interface LinKeAccountConfig {
 export interface LinKeAccountConfigInput {
   name: string;
   bdCityTexts: string[];
-  cookieFilePath: string;
+  cookie: string;
   groupId?: string;
   rootLifeAccountId?: string;
   accountId?: string;
@@ -29,7 +29,7 @@ export interface LinKeAccountConfigInput {
 export interface LinKeAccountConfigPatch {
   name?: string;
   bdCityTexts?: string[];
-  cookieFilePath?: string;
+  cookie?: string;
   groupId?: string;
   rootLifeAccountId?: string;
   accountId?: string;
@@ -53,7 +53,7 @@ function mapAccountConfig(row: typeof linKeAccountConfigs.$inferSelect): LinKeAc
     id: row.id,
     name: row.name,
     bdCityTexts: row.bdCityTexts,
-    cookieFilePath: row.cookieFilePath,
+    cookie: row.cookie,
     groupId: row.groupId,
     rootLifeAccountId: row.rootLifeAccountId,
     accountId: row.accountId,
@@ -68,7 +68,7 @@ export function serializeAccountConfig(row: LinKeAccountConfig): JsonRecord {
     id: row.id,
     name: row.name,
     bdCityTexts: row.bdCityTexts,
-    cookieFilePath: row.cookieFilePath,
+    cookie: row.cookie,
     groupId: row.groupId,
     rootLifeAccountId: row.rootLifeAccountId,
     accountId: row.accountId,
@@ -155,7 +155,7 @@ export function createDrizzleLinKeRepository(db: ServerDatabase): LinKeRepositor
         .values({
           name: input.name,
           bdCityTexts: input.bdCityTexts,
-          cookieFilePath: input.cookieFilePath,
+          cookie: input.cookie,
           groupId: input.groupId ?? "",
           rootLifeAccountId: input.rootLifeAccountId ?? "",
           accountId: input.accountId ?? "",
@@ -170,7 +170,7 @@ export function createDrizzleLinKeRepository(db: ServerDatabase): LinKeRepositor
       const updates: Partial<typeof linKeAccountConfigs.$inferInsert> = {};
       if (input.name !== undefined) updates.name = input.name;
       if (input.bdCityTexts !== undefined) updates.bdCityTexts = input.bdCityTexts;
-      if (input.cookieFilePath !== undefined) updates.cookieFilePath = input.cookieFilePath;
+      if (input.cookie !== undefined) updates.cookie = input.cookie;
       if (input.groupId !== undefined) updates.groupId = input.groupId;
       if (input.rootLifeAccountId !== undefined) updates.rootLifeAccountId = input.rootLifeAccountId;
       if (input.accountId !== undefined) updates.accountId = input.accountId;

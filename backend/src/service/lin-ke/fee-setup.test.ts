@@ -502,7 +502,7 @@ function accountConfig(patch: Partial<LinKeAccountConfig> = {}): LinKeAccountCon
     id: 1,
     name: "深圳食义",
     bdCityTexts: ["深圳一区"],
-    cookieFilePath: "",
+    cookie: "",
     groupId: "",
     rootLifeAccountId: "",
     accountId: "",

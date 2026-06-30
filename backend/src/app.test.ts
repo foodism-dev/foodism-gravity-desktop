@@ -40,6 +40,7 @@ import {
 } from "./ticket-status.ts";
 import type { UserRepository, UserWithPasswordHash } from "./users.ts";
 import type { LinKeDraftJobStatus, LinKeDraftQueueClient } from "./service/lin-ke/draft-queue.ts";
+import type { LinKeAccountConfig, LinKeRepository } from "./service/lin-ke/repository.ts";
 import type {
   CreateLinKeFeeSetupJobData,
   CreateLinKeProductTrackingJobData,
@@ -445,6 +446,54 @@ function createMemoryLinKeDraftQueue(): LinKeDraftQueueClient & { jobs: string[]
     },
     async getCreateDraftJobStatus(jobId: string) {
       return statuses.get(jobId) ?? null;
+    },
+  };
+}
+
+function createLinKeAccountConfig(input: Partial<LinKeAccountConfig> = {}): LinKeAccountConfig {
+  const now = new Date("2026-06-24T10:00:00.000Z");
+  return {
+    id: input.id ?? 1,
+    name: input.name ?? "上海林客账号",
+    bdCityTexts: input.bdCityTexts ?? ["上海"],
+    cookie: input.cookie ?? "sessionid=test",
+    groupId: input.groupId ?? "",
+    rootLifeAccountId: input.rootLifeAccountId ?? "",
+    accountId: input.accountId ?? "",
+    active: input.active ?? true,
+    createdAt: input.createdAt ?? now,
+    updatedAt: input.updatedAt ?? now,
+  };
+}
+
+function createMemoryLinKeRepository(accountConfig = createLinKeAccountConfig()): LinKeRepository {
+  return {
+    async fetchSupplyGoodsPayloads() {
+      return new Map();
+    },
+    async fetchRebuildFieldOptionLabels() {
+      return {};
+    },
+    async listAccountConfigs() {
+      return [accountConfig];
+    },
+    async getAccountConfig() {
+      return accountConfig;
+    },
+    async findAccountConfigByCity(cityText: string) {
+      return accountConfig.active && accountConfig.bdCityTexts.includes(cityText) ? accountConfig : null;
+    },
+    async createAccountConfig() {
+      return accountConfig;
+    },
+    async updateAccountConfig() {
+      return accountConfig;
+    },
+    async deleteAccountConfig() {
+      return true;
+    },
+    async updateSupplyGoodsLinKeMapping() {
+      return true;
     },
   };
 }
@@ -2095,8 +2144,8 @@ describe("server app", () => {
         supplyGoodsId: "944-info-confirm",
         status: TICKET_STATUS.PROCESSING,
         businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
-        payload: { packages: originalPackages },
-        sourcePayload: { packages: originalPackages },
+        payload: { bdCity: { text: "上海" }, packages: originalPackages },
+        sourcePayload: { bdCity: { text: "上海" }, packages: originalPackages },
         createdAt: new Date("2026-06-24T10:00:00.000Z"),
         updatedAt: new Date("2026-06-24T10:00:00.000Z"),
       },
@@ -2105,7 +2154,12 @@ describe("server app", () => {
     const app = createServerApp({
       ticketRepository: repository,
       linKeDraftQueue: queue,
-      linKeRoutesOptions: { repository: null },
+      linKeRoutesOptions: {
+        repository: createMemoryLinKeRepository(),
+        async checkCookie() {
+          return { ok: true, cookieValid: true };
+        },
+      },
     });
 
     const response = await app.request("/api/tickets/944-info-confirm/info-optimization/confirm", {
@@ -2134,6 +2188,111 @@ describe("server app", () => {
     expect(storedPackages.viewList[0].list[0].price).toBe("12.00");
     expect(storedPackages.viewList[0].list[0].num).toBe("1");
     expect(actionRecords[0]?.action).toBe("info_optimization_generated");
+  });
+
+  test("Given Lin-Ke cookie is invalid, When confirming info optimization, Then draft job is not enqueued and failure is recorded", async () => {
+    const originalPackages = JSON.stringify({
+      viewList: [
+        {
+          groupName: "原始组",
+          list: [{ title: "原始菜", price: "12.00", num: "1" }],
+        },
+      ],
+    });
+    const { repository, actionRecords } = createMemoryTicketRepository([
+      {
+        id: 11,
+        supplyGoodsId: "944-info-cookie-failed",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: { bdCity: { text: "上海" }, packages: originalPackages },
+        sourcePayload: { bdCity: { text: "上海" }, packages: originalPackages },
+        createdAt: new Date("2026-06-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-06-24T10:00:00.000Z"),
+      },
+    ]);
+    const queue = createMemoryLinKeDraftQueue();
+    const app = createServerApp({
+      ticketRepository: repository,
+      linKeDraftQueue: queue,
+      linKeRoutesOptions: {
+        repository: createMemoryLinKeRepository(),
+        async checkCookie() {
+          return { ok: false, cookieValid: false, error: "csrf failed" };
+        },
+      },
+    });
+
+    const response = await app.request("/api/tickets/944-info-cookie-failed/info-optimization/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+      body: JSON.stringify({
+        optimizedPackages: {
+          viewList: [
+            {
+              groupName: "优化组",
+              list: [{ title: "优化菜", price: "99.00", num: "9" }],
+            },
+          ],
+        },
+      }),
+    });
+    const body = await response.json() as { message: string };
+
+    expect(response.status).toBe(400);
+    expect(body.message).toContain("林客 Cookie 无效");
+    expect(queue.jobs).toEqual([]);
+    expect(actionRecords.map((record) => record.action)).toEqual([
+      "info_optimization_generated",
+      "lin_ke_draft_failed",
+    ]);
+    expect(actionRecords[1]?.current.linkeDraftState).toBe("failed");
+    expect(actionRecords[1]?.current.linkeDraftError).toContain("csrf failed");
+  });
+
+  test("Given Lin-Ke cookie is invalid, When retrying draft creation, Then draft job is not enqueued and failure is recorded", async () => {
+    const { repository, actionRecords } = createMemoryTicketRepository([
+      {
+        id: 12,
+        supplyGoodsId: "944-draft-retry-cookie-failed",
+        status: TICKET_STATUS.PROCESSING,
+        businessStatus: TICKET_BUSINESS_STATUS.INFO_OPTIMIZATION_PENDING,
+        payload: {
+          bdCity: { text: "上海" },
+          packages: { viewList: [{ groupName: "优化组", list: [] }] },
+          linkeDraftState: "failed",
+          linkeDraftError: "previous error",
+        },
+        sourcePayload: { bdCity: { text: "上海" } },
+        createdAt: new Date("2026-06-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-06-24T10:00:00.000Z"),
+      },
+    ]);
+    const queue = createMemoryLinKeDraftQueue();
+    const app = createServerApp({
+      ticketRepository: repository,
+      linKeDraftQueue: queue,
+      linKeRoutesOptions: {
+        repository: createMemoryLinKeRepository(),
+        async checkCookie() {
+          return { ok: false, cookieValid: false, error: "expired cookie" };
+        },
+      },
+    });
+
+    const response = await app.request("/api/tickets/944-draft-retry-cookie-failed/lin-ke-draft/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...await createAuthHeaders(app) },
+      body: JSON.stringify({}),
+    });
+    const body = await response.json() as { message: string };
+
+    expect(response.status).toBe(400);
+    expect(body.message).toContain("expired cookie");
+    expect(queue.jobs).toEqual([]);
+    expect(actionRecords.map((record) => record.action)).toEqual(["lin_ke_draft_failed"]);
+    expect(actionRecords[0]?.origin.linkeDraftError).toBe("previous error");
+    expect(actionRecords[0]?.current.linkeDraftError).toContain("expired cookie");
   });
 
   test("Given a shelf confirmation action record, When creating it, Then the ticket moves to commission setup", async () => {

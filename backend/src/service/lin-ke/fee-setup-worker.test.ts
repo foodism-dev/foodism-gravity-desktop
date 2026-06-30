@@ -1,6 +1,3 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import {
@@ -27,13 +24,13 @@ import type {
 } from "../../tickets.ts";
 import { TICKET_BUSINESS_STATUS, TICKET_STATUS } from "../../ticket-status.ts";
 
-function createAccountConfig(cookieFilePath: string): LinKeAccountConfig {
+function createAccountConfig(cookie: string): LinKeAccountConfig {
   const now = new Date("2026-06-24T10:00:00.000Z");
   return {
     id: 1,
     name: "上海林客账号",
     bdCityTexts: ["上海"],
-    cookieFilePath,
+    cookie,
     groupId: "",
     rootLifeAccountId: "",
     accountId: "account-1",
@@ -159,10 +156,8 @@ function createQueueClient(): {
 
 describe("Lin-Ke fee setup worker", () => {
   test("Given Lin-Ke save succeeds, When processing fee setup job, Then it records real save marker", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "lin-ke-fee-worker-"));
-    const cookieFilePath = join(tempDir, "cookie.txt");
-    writeFileSync(cookieFilePath, "sessionid=test", "utf-8");
-    try {
+    const cookie = "sessionid=test";
+    {
       const ticket: TicketWithSupplyGoods = {
         id: 1,
         supplyGoodsId: "944-fee-worker",
@@ -179,7 +174,7 @@ describe("Lin-Ke fee setup worker", () => {
         updatedAt: new Date("2026-06-24T10:00:00.000Z"),
       };
       const { repository: ticketRepository, actionRecords } = createTicketRepository(ticket);
-      const accountConfig = createAccountConfig(cookieFilePath);
+      const accountConfig = createAccountConfig(cookie);
       const client: LinKeFeeSetupClient = {
         async setupFee() {
           return {
@@ -215,16 +210,12 @@ describe("Lin-Ke fee setup worker", () => {
       expect(actionRecords[0]?.current.linkeFeeSetupSaveVersion).toBe(LIN_KE_FEE_SETUP_SAVE_VERSION);
       expect(ticket.payload.linkeFeeSetupSaveSubmitted).toBe(true);
       expect(ticket.payload.linkeFeeSetupSaveVersion).toBe(LIN_KE_FEE_SETUP_SAVE_VERSION);
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
   test("Given product status is not ready, When tracking job runs, Then it records status and schedules next check", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "lin-ke-tracking-worker-"));
-    const cookieFilePath = join(tempDir, "cookie.txt");
-    writeFileSync(cookieFilePath, "sessionid=test", "utf-8");
-    try {
+    const cookie = "sessionid=test";
+    {
       const ticket: TicketWithSupplyGoods = {
         id: 2,
         supplyGoodsId: "944-tracking-waiting",
@@ -240,7 +231,7 @@ describe("Lin-Ke fee setup worker", () => {
         updatedAt: new Date(),
       };
       const { repository: ticketRepository, actionRecords } = createTicketRepository(ticket);
-      const accountConfig = createAccountConfig(cookieFilePath);
+      const accountConfig = createAccountConfig(cookie);
       const { queueClient, trackingJobs } = createQueueClient();
       const client: LinKeFeeSetupClient = {
         async setupFee() {
@@ -294,16 +285,12 @@ describe("Lin-Ke fee setup worker", () => {
           delayMs: LIN_KE_PRODUCT_TRACKING_POLL_INTERVAL_MS,
         },
       ]);
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
   test("Given product status is ready, When tracking job runs, Then it records final status without next check", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "lin-ke-tracking-ready-"));
-    const cookieFilePath = join(tempDir, "cookie.txt");
-    writeFileSync(cookieFilePath, "sessionid=test", "utf-8");
-    try {
+    const cookie = "sessionid=test";
+    {
       const ticket: TicketWithSupplyGoods = {
         id: 3,
         supplyGoodsId: "944-tracking-ready",
@@ -319,7 +306,7 @@ describe("Lin-Ke fee setup worker", () => {
         updatedAt: new Date(),
       };
       const { repository: ticketRepository, actionRecords } = createTicketRepository(ticket);
-      const accountConfig = createAccountConfig(cookieFilePath);
+      const accountConfig = createAccountConfig(cookie);
       const { queueClient, trackingJobs } = createQueueClient();
       const client: LinKeFeeSetupClient = {
         async setupFee() {
@@ -357,8 +344,6 @@ describe("Lin-Ke fee setup worker", () => {
       expect(actionRecords[0]?.current.linkeProductTrackingLastCheckCount).toBe(4);
       expect(actionRecords[0]?.current.linkeProductTrackingNextCheckCount).toBe(0);
       expect(trackingJobs).toEqual([]);
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 });

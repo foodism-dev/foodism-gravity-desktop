@@ -1,7 +1,3 @@
-import { fileURLToPath } from "node:url";
-
-export const BACKEND_DIR = fileURLToPath(new URL("../../../", import.meta.url));
-
 export interface LinKeSettings {
   databaseUrl: string | null;
   openaiApiKey: string;

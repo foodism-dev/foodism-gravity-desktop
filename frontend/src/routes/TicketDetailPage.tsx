@@ -518,7 +518,9 @@ function LoadedTicketDetail({
       setRecords((currentRecords) => [result.record, ...currentRecords]);
       setDraftJobId(result.jobId);
     } catch (error) {
-      setActionErrorMessage(error instanceof Error ? error.message : "确认信息优化失败");
+      const message = error instanceof Error ? error.message : "确认信息优化失败";
+      await refreshTicketAndRecords().catch(() => {});
+      setActionErrorMessage(message);
     } finally {
       setIsActionSubmitting(false);
     }
@@ -531,7 +533,9 @@ function LoadedTicketDetail({
       const result = await retryLinKeDraftJob(ticket.supplyGoodsId);
       setDraftJobId(result.jobId);
     } catch (error) {
-      setActionErrorMessage(error instanceof Error ? error.message : "重试创建林客草稿失败");
+      const message = error instanceof Error ? error.message : "重试创建林客草稿失败";
+      await refreshTicketAndRecords().catch(() => {});
+      setActionErrorMessage(message);
     } finally {
       setIsActionSubmitting(false);
     }

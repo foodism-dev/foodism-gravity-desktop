@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
-import { BACKEND_DIR, type LinKeSettings } from "./config.ts";
-import { LifePartnerSession, loadCookieFile } from "./auth.ts";
+import type { LinKeSettings } from "./config.ts";
+import { LifePartnerSession, cookieConfigToHeader } from "./auth.ts";
 import { ProductMappingError, resolveLinKeMapping } from "./mapping.ts";
 import { bdCityText, normalizeSupplyGoodsForLinKe } from "./supply-goods.ts";
 import {
@@ -89,24 +87,11 @@ function makeDraftArgs(settings: LinKeSettings, linKeMapping: JsonRecord, poiId 
   };
 }
 
-export function resolveCookieFilePath(cookieFilePath: string): string {
-  const path = cleanString(cookieFilePath).replace(/^~/, Bun.env.HOME || "~");
-  if (isAbsolute(path)) return path;
-  return resolve(BACKEND_DIR, path);
-}
-
 function makeSession(settings: LinKeSettings, accountConfig: LinKeAccountConfig): LifePartnerSession {
-  const cookiePath = resolveCookieFilePath(accountConfig.cookieFilePath);
-  if (!existsSync(cookiePath)) {
-    throw new LinKeServiceError(
-      { ok: false, stage: "cookie", reason: "cookie_file_not_found", cookieFilePath: cookiePath },
-      400,
-    );
-  }
-  const cookie = loadCookieFile(cookiePath);
+  const cookie = cookieConfigToHeader(accountConfig.cookie);
   if (!cookie) {
     throw new LinKeServiceError(
-      { ok: false, stage: "cookie", reason: "empty_cookie", cookieFilePath: cookiePath },
+      { ok: false, stage: "cookie", reason: "empty_cookie" },
       400,
     );
   }

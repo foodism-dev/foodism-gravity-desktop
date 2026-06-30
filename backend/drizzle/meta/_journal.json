@@ -50,6 +50,13 @@
       "when": 1782380371930,
       "tag": "0006_faithful_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782787161169,
+      "tag": "0007_lin_ke_cookie",
+      "breakpoints": true
     }
   ]
 }

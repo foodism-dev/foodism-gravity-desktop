@@ -50,12 +50,18 @@ import { getDefaultSkillPublisher, sha256Bytes, type SkillPublisher } from "./sk
 import { getDefaultSkillRepository, type MarketSkill, type SkillRepository } from "./skills.ts";
 import { getDefaultUserRepository, type UserRepository } from "./users.ts";
 import { createLinKeRoutes, type LinKeRoutesOptions } from "./service/lin-ke/routes.ts";
-import { getLinKeSettings } from "./service/lin-ke/config.ts";
+import { getLinKeSettings, type LinKeSettings } from "./service/lin-ke/config.ts";
 import { optimizePayloadWithRetries } from "./service/lin-ke/optimizer.ts";
 import {
   applyEditablePackages,
+  bdCityText,
   displaySupplyGoodsPackages,
 } from "./service/lin-ke/supply-goods.ts";
+import {
+  getDefaultLinKeRepository,
+  type LinKeRepository,
+} from "./service/lin-ke/repository.ts";
+import { checkCookie } from "./service/lin-ke/service.ts";
 import {
   getDefaultLinKeDraftQueue,
   type LinKeDraftQueueClient,
@@ -437,6 +443,73 @@ function createTicketOperatorSnapshot(user: ApiUser): Record<string, unknown> {
   };
 }
 
+function readLinKeCookieCheckMessage(result: Record<string, unknown>): string {
+  return String(result.error ?? result.reason ?? result.message ?? "").trim();
+}
+
+async function validateLinKeDraftCookie(input: {
+  linKeRepository: LinKeRepository | null;
+  settings: LinKeSettings;
+  payload: Record<string, unknown>;
+  checkCookieFn: typeof checkCookie;
+}): Promise<{ ok: true } | { ok: false; status: 400 | 503; message: string }> {
+  if (!input.linKeRepository) {
+    return { ok: false, status: 503, message: "DATABASE_URL 未配置，Lin-Ke repository 不可用" };
+  }
+  const cityText = bdCityText(input.payload);
+  if (!cityText) {
+    return { ok: false, status: 400, message: "payload.bdCity.text is required" };
+  }
+  const accountConfig = await input.linKeRepository.findAccountConfigByCity(cityText);
+  if (!accountConfig) {
+    return { ok: false, status: 400, message: `lin_ke_account_config_not_found_for_city:${cityText}` };
+  }
+
+  try {
+    const result = await input.checkCookieFn(input.settings, accountConfig);
+    if (result.ok === true && result.cookieValid !== false) {
+      return { ok: true };
+    }
+    const checkMessage = readLinKeCookieCheckMessage(result);
+    return {
+      ok: false,
+      status: 400,
+      message: checkMessage ? `林客 Cookie 无效：${checkMessage}` : "林客 Cookie 无效，请更新后重试",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 400,
+      message: `林客 Cookie 校验失败：${getBriefErrorMessage(error)}`,
+    };
+  }
+}
+
+async function recordLinKeDraftFailure(input: {
+  ticketRepository: TicketRepository;
+  supplyGoodsId: string;
+  payload: Record<string, unknown>;
+  operator: Record<string, unknown>;
+  message: string;
+}): Promise<void> {
+  await input.ticketRepository.createActionRecord({
+    supplyGoodsId: input.supplyGoodsId,
+    action: "lin_ke_draft_failed",
+    origin: {
+      linkeDraftState: readRecordValue(input.payload, "linkeDraftState"),
+      linkeDraftJobId: readRecordValue(input.payload, "linkeDraftJobId"),
+      linkeDraftError: readRecordValue(input.payload, "linkeDraftError"),
+    },
+    current: {
+      linkeDraftState: "failed",
+      linkeDraftError: input.message,
+      linkeDraftFailedAt: new Date().toISOString(),
+    },
+    operator: input.operator,
+    remark: `林客草稿创建失败：${input.message}`,
+  });
+}
+
 function getFormString(formData: FormData, key: string): string | null {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() || null : null;
@@ -572,6 +645,11 @@ export function createServerApp(options: ServerAppOptions = {}) {
   };
   const linKeSettings = options.linKeRoutesOptions?.settings ?? getLinKeSettings();
   const optimizeLinKePayload = options.linKeRoutesOptions?.optimizePayload ?? optimizePayloadWithRetries;
+  const checkLinKeCookie = options.linKeRoutesOptions?.checkCookie ?? checkCookie;
+  const configuredLinKeRepository = options.linKeRoutesOptions?.repository;
+  const resolveLinKeRepository = () => (
+    configuredLinKeRepository !== undefined ? configuredLinKeRepository : getDefaultLinKeRepository()
+  );
   const configuredLinKeDraftQueue = options.linKeDraftQueue;
   const resolveLinKeDraftQueue = () => (
     configuredLinKeDraftQueue !== undefined ? configuredLinKeDraftQueue : getDefaultLinKeDraftQueue()
@@ -1111,6 +1189,31 @@ export function createServerApp(options: ServerAppOptions = {}) {
       return context.json({ error: "Not Found", message: "工单不存在" }, 404);
     }
 
+    const draftCookieValidation = await validateLinKeDraftCookie({
+      linKeRepository: resolveLinKeRepository(),
+      settings: linKeSettings,
+      payload: actionResult.ticket.payload,
+      checkCookieFn: checkLinKeCookie,
+    });
+    if (!draftCookieValidation.ok) {
+      await recordLinKeDraftFailure({
+        ticketRepository,
+        supplyGoodsId,
+        payload: actionResult.ticket.payload,
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        message: draftCookieValidation.message,
+      }).catch((recordError) => {
+        console.warn(`[Lin-Ke] 写入草稿 Cookie 校验失败日志失败: ${getBriefErrorMessage(recordError)}`);
+      });
+      return context.json(
+        {
+          error: draftCookieValidation.status === 503 ? "Service Unavailable" : "Bad Request",
+          message: draftCookieValidation.message,
+        },
+        draftCookieValidation.status,
+      );
+    }
+
     try {
       const jobId = await linKeDraftQueue.addCreateDraftJob(supplyGoodsId);
       const startedActionResult = await ticketRepository.createActionRecord({
@@ -1192,6 +1295,31 @@ export function createServerApp(options: ServerAppOptions = {}) {
     }
     if (!readRecordValue(ticket.payload, "packages")) {
       return context.json({ error: "Bad Request", message: "请先确认信息优化内容" }, 400);
+    }
+
+    const draftCookieValidation = await validateLinKeDraftCookie({
+      linKeRepository: resolveLinKeRepository(),
+      settings: linKeSettings,
+      payload: ticket.payload,
+      checkCookieFn: checkLinKeCookie,
+    });
+    if (!draftCookieValidation.ok) {
+      await recordLinKeDraftFailure({
+        ticketRepository,
+        supplyGoodsId,
+        payload: ticket.payload,
+        operator: createTicketOperatorSnapshot(context.get("apiUser")),
+        message: draftCookieValidation.message,
+      }).catch((recordError) => {
+        console.warn(`[Lin-Ke] 写入草稿重试 Cookie 校验失败日志失败: ${getBriefErrorMessage(recordError)}`);
+      });
+      return context.json(
+        {
+          error: draftCookieValidation.status === 503 ? "Service Unavailable" : "Bad Request",
+          message: draftCookieValidation.message,
+        },
+        draftCookieValidation.status,
+      );
     }
 
     try {

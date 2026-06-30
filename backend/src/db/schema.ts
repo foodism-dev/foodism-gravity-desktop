@@ -191,7 +191,7 @@ export const linKeAccountConfigs = pgTable(
     id: bigserial("id", { mode: "number" }).primaryKey(),
     name: text("name").notNull(),
     bdCityTexts: jsonb("bd_city_texts").$type<string[]>().notNull(),
-    cookieFilePath: text("cookie_file_path").notNull(),
+    cookie: text("cookie").notNull(),
     groupId: text("group_id").default("").notNull(),
     rootLifeAccountId: text("root_life_account_id").default("").notNull(),
     accountId: text("account_id").default("").notNull(),

@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
 import { Worker, type Job } from "bullmq";
-import { BACKEND_DIR, getLinKeSettings, type LinKeSettings } from "./config.ts";
+import { getLinKeSettings, type LinKeSettings } from "./config.ts";
 import {
   LIN_KE_FEE_SETUP_SAVE_VERSION,
   createDefaultLinKeFeeSetupClient,
@@ -27,7 +25,7 @@ import {
   type LinKeRepository,
 } from "./repository.ts";
 import { bdCityText } from "./supply-goods.ts";
-import { LifePartnerSession, loadCookieFile } from "./auth.ts";
+import { LifePartnerSession, cookieConfigToHeader } from "./auth.ts";
 import { cleanString, conciseError, type JsonRecord } from "./utils.ts";
 import { getDefaultTicketRepository, type TicketRepository, type TicketWithSupplyGoods } from "../../tickets.ts";
 
@@ -58,20 +56,10 @@ function readPayloadValue(payload: Record<string, unknown>, key: string): unknow
   return Object.hasOwn(payload, key) ? payload[key] : null;
 }
 
-function resolveCookieFilePath(cookieFilePath: string): string {
-  const path = cleanString(cookieFilePath).replace(/^~/, Bun.env.HOME || "~");
-  if (isAbsolute(path)) return path;
-  return resolve(BACKEND_DIR, path);
-}
-
 function makeSession(settings: LinKeSettings, accountConfig: LinKeAccountConfig): LifePartnerSession {
-  const cookiePath = resolveCookieFilePath(accountConfig.cookieFilePath);
-  if (!existsSync(cookiePath)) {
-    throw new Error(`cookie_file_not_found:${cookiePath}`);
-  }
-  const cookie = loadCookieFile(cookiePath);
+  const cookie = cookieConfigToHeader(accountConfig.cookie);
   if (!cookie) {
-    throw new Error(`empty_cookie:${cookiePath}`);
+    throw new Error("empty_cookie");
   }
   const baseUrl = settings.lifePartnerBaseUrl.replace(/\/+$/, "");
   return new LifePartnerSession({

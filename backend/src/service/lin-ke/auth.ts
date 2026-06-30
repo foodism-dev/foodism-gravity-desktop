@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { cleanString, type JsonRecord } from "./utils.ts";
 
@@ -152,8 +151,8 @@ export class LifePartnerSession {
   }
 }
 
-export function loadCookieFile(path: string): string {
-  const text = readFileSync(path, "utf-8").trim();
+export function cookieConfigToHeader(rawCookie: string): string {
+  const text = cleanString(rawCookie);
   if (!text) return "";
   try {
     return cookieDataToHeader(JSON.parse(text) as unknown);
