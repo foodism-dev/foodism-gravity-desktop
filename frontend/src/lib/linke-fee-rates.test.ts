@@ -95,6 +95,41 @@ describe("林客费用比例表单逻辑", () => {
       },
     });
   });
+
+  test("Given legacy fee keys exist in local values, When default fill is normalized, Then only current traffic source keys are submitted", () => {
+    const values = applyDefaultCommissionRate(commissionValues({
+      values: {
+        onlineOperation: "8.00",
+        acquisitionCard: "8.00",
+        offlineQrScan: "8.00",
+        "线上经营": "8.00",
+        "获客卡": "8.00",
+      },
+    }), "12");
+
+    const normalized = normalizeLinkeCommission(values);
+
+    expect(Object.keys(normalized.values).sort()).toEqual([
+      "1000",
+      "2000",
+      "3000",
+      "4000",
+      "5000",
+      "7000",
+      "7100",
+    ]);
+    expect(normalized.values).toEqual({
+      "1000": 12,
+      "2000": 12,
+      "3000": 12,
+      "4000": 12,
+      "5000": 12,
+      "7000": 12,
+      "7100": 12,
+    });
+    expect(Object.hasOwn(normalized.values, "onlineOperation")).toBe(false);
+    expect(Object.hasOwn(normalized.values, "线上经营")).toBe(false);
+  });
 });
 
 function commissionValues(patch: {

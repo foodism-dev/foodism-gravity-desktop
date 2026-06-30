@@ -71,6 +71,22 @@ describe("Lin-Ke fee setup helpers", () => {
     })).toBe("职人视频费用比例最多支持两位小数");
   });
 
+  test("Given only legacy fee keys, When validating, Then current traffic source fields drive the error", () => {
+    const message = validateLinKeFeeRates({
+      values: {
+        onlineOperation: 12,
+        acquisitionCard: 12,
+        offlineQrScan: 12,
+        "线上经营": "12.00",
+        "获客卡": "12.00",
+      },
+      singleSettings: {},
+    });
+
+    expect(message).toBe("请填写视频费用比例");
+    expect(message).not.toContain("线上经营");
+  });
+
   test("Given numeric Lin-Ke statuses, When interpreting product state, Then ready and terminal states are mapped", () => {
     expect(interpretLinKeProductStatus({
       commission_status: 2,
