@@ -57,6 +57,7 @@ import {
   type TicketMetadata,
   type TicketRecord,
 } from "@/lib/api.ts";
+import { shouldWaitForHandoff } from "@/lib/auth.ts";
 import { getPayloadDisplayText, type FieldDisplayContext } from "@/lib/field-display.ts";
 import {
   isElectronEmbedded,
@@ -259,9 +260,10 @@ const SUPPLY_HOST_REPORT_FIELDS: ReportReferenceField[] = [
   { label: "行业许可证", fields: ["certification"], kindHint: "image" },
 ];
 
-export function TicketDetailPage({ ticketId, isLinKeTestSkipVisible, skipLinKeExternal }: TicketDetailPageProps) {
+export function TicketDetailPage({ authState, ticketId, isLinKeTestSkipVisible, skipLinKeExternal }: TicketDetailPageProps) {
   const metadataState = useAtomValue(ticketMetadataStateAtom);
   const ensureTicketMetadata = useSetAtom(ensureTicketMetadataAtom);
+  const shouldDelayAuthRequests = shouldWaitForHandoff(authState);
   const [ticket, setTicket] = useState<TicketRecord | null>(null);
   const [records, setRecords] = useState<TicketActionRecord[]>([]);
   const [isLoadingRecords, setIsLoadingRecords] = useState(true);
@@ -270,14 +272,17 @@ export function TicketDetailPage({ ticketId, isLinKeTestSkipVisible, skipLinKeEx
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
+    if (shouldDelayAuthRequests) return;
     void refreshTicket(ticketId);
-  }, [ticketId]);
+  }, [ticketId, authState.token, shouldDelayAuthRequests]);
 
   useEffect(() => {
+    if (shouldDelayAuthRequests) return;
     void ensureTicketMetadata();
-  }, [ensureTicketMetadata]);
+  }, [ensureTicketMetadata, shouldDelayAuthRequests]);
 
   useEffect(() => {
+    if (shouldDelayAuthRequests) return;
     let isMounted = true;
     setIsLoadingRecords(true);
     setRecordErrorMessage("");
@@ -295,7 +300,7 @@ export function TicketDetailPage({ ticketId, isLinKeTestSkipVisible, skipLinKeEx
     return () => {
       isMounted = false;
     };
-  }, [ticketId]);
+  }, [ticketId, authState.token, shouldDelayAuthRequests]);
 
   async function refreshTicket(nextTicketId = ticketId) {
     setIsLoading(true);

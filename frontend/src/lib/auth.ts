@@ -14,6 +14,11 @@ export interface AuthSession {
   user: FrontendUser;
 }
 
+interface HandoffLoadState {
+  token: string | null;
+  isHandoffLoading: boolean;
+}
+
 interface HandoffExchangeResponse {
   token: string;
   user: FrontendUser;
@@ -49,6 +54,10 @@ export function storeSession(session: AuthSession) {
 export function clearSession() {
   removeStorageValue(TOKEN_KEY);
   removeStorageValue(USER_KEY);
+}
+
+export function shouldWaitForHandoff(state: HandoffLoadState): boolean {
+  return state.isHandoffLoading && !state.token;
 }
 
 export function removeHandoffFromUrl(value: string): string {

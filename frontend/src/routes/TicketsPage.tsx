@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { getPayloadText, listAllTickets, type TicketRecord } from "@/lib/api.ts";
+import { shouldWaitForHandoff } from "@/lib/auth.ts";
 import { isElectronEmbedded, reloadWorkOrdersInElectron } from "@/lib/electron-bridge.ts";
 import {
   getBusinessStatusPillClassName,
@@ -30,23 +31,27 @@ interface TicketsPageProps {
 
 export function TicketsPage(props: TicketsPageProps) {
   const ensureTicketMetadata = useSetAtom(ensureTicketMetadataAtom);
+  const shouldDelayAuthRequests = shouldWaitForHandoff(props.authState);
   const [columns, setColumns] = useState<TicketStatusColumn[]>(() => createEmptyTicketStatusColumns());
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [query, setQuery] = useState("");
 
   useEffect(() => {
+    if (shouldDelayAuthRequests) return;
     void ensureTicketMetadata();
-  }, [ensureTicketMetadata]);
+  }, [ensureTicketMetadata, shouldDelayAuthRequests]);
 
   useEffect(() => {
+    if (shouldDelayAuthRequests) return;
     const timeoutId = window.setTimeout(() => {
       void refreshTickets();
     }, 250);
     return () => window.clearTimeout(timeoutId);
-  }, [query]);
+  }, [query, props.authState.token, shouldDelayAuthRequests]);
 
   async function refreshTickets() {
+    if (shouldDelayAuthRequests) return;
     setIsLoading(true);
     setErrorMessage("");
     try {

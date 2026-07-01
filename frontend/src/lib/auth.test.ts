@@ -5,6 +5,7 @@ import {
   clearSession,
   getStoredToken,
   getStoredUser,
+  shouldWaitForHandoff,
   storeSession,
 } from "./auth.ts";
 
@@ -86,6 +87,12 @@ describe("前端登录持久化", () => {
     clearHandoffFromCurrentUrl();
 
     expect(globalThis.window.location.href).toBe("http://localhost:5174/tickets?embedded=electron&tab=workbench");
+  });
+
+  test("Given handoff exchange is loading, When authenticated data wants to load, Then it waits for handoff first", () => {
+    expect(shouldWaitForHandoff({ token: null, isHandoffLoading: true })).toBe(true);
+    expect(shouldWaitForHandoff({ token: "pc-token", isHandoffLoading: false })).toBe(false);
+    expect(shouldWaitForHandoff({ token: null, isHandoffLoading: false })).toBe(false);
   });
 
   test("Given stored session, When clearing session, Then both persistent and session caches are removed", () => {
