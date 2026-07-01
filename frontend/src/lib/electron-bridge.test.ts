@@ -18,6 +18,7 @@ describe("Electron 嵌入桥接消息", () => {
       type: "proma:open-rebuild-approval",
       supplyGoodsId: "F00-838",
       productName: "招牌双人餐",
+      title: "rb 审核-招牌双人餐",
     });
   });
 
@@ -58,7 +59,7 @@ describe("Electron 嵌入桥接消息", () => {
   });
 
   test("Given page is inside Electron webview, When opening RB approval, Then it asks host to open a desktop tab", () => {
-    const hostMessages: Array<{ supplyGoodsId: string; productName?: string }> = [];
+    const hostMessages: Array<{ supplyGoodsId: string; productName?: string; title?: string }> = [];
     const parentMessages: unknown[] = [];
     const currentWindow = {
       parent: {
@@ -68,15 +69,19 @@ describe("Electron 嵌入桥接消息", () => {
       },
       location: { search: "?embedded=electron" },
       promaElectronWebview: {
-        openRebuildApproval(supplyGoodsId: string, productName?: string) {
-          hostMessages.push({ supplyGoodsId, productName });
+        openRebuildApproval(supplyGoodsId: string, productName?: string, title?: string) {
+          hostMessages.push({ supplyGoodsId, productName, title });
         },
       },
     } as unknown as Window;
 
     expect(openRebuildApprovalInElectron("944-019efa94400a73d9", "招牌双人餐", { currentWindow })).toBe(true);
 
-    expect(hostMessages).toEqual([{ supplyGoodsId: "944-019efa94400a73d9", productName: "招牌双人餐" }]);
+    expect(hostMessages).toEqual([{
+      supplyGoodsId: "944-019efa94400a73d9",
+      productName: "招牌双人餐",
+      title: "rb 审核-招牌双人餐",
+    }]);
     expect(parentMessages).toEqual([]);
   });
 

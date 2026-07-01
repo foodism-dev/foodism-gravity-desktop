@@ -376,12 +376,14 @@ export function openTab(
 
   const sessionTabs = getSessionTabs(tabs)
   const existingTab = sessionTabs.find((t) => t.sessionId === item.sessionId && t.type === item.type)
-  const sessionTab: TabItem = existingTab ?? {
-    id: item.type === 'web' ? createWebTabId(item.sessionId) : item.sessionId,
-    type: item.type,
-    sessionId: item.sessionId,
-    title: item.title,
-  }
+  const sessionTab: TabItem = existingTab
+    ? { ...existingTab, title: item.title }
+    : {
+        id: item.type === 'web' ? createWebTabId(item.sessionId) : item.sessionId,
+        type: item.type,
+        sessionId: item.sessionId,
+        title: item.title,
+      }
 
   // 切回带预览的会话：重建该会话的预览 Tab，并按 lastView 决定激活哪个。
   if (restore?.previewTabOpen) {
@@ -398,7 +400,7 @@ export function openTab(
   }
 
   return {
-    tabs: existingTab ? sessionTabs : [...sessionTabs, sessionTab],
+    tabs: existingTab ? sessionTabs.map((tab) => (tab.id === sessionTab.id ? sessionTab : tab)) : [...sessionTabs, sessionTab],
     activeTabId: sessionTab.id,
   }
 }

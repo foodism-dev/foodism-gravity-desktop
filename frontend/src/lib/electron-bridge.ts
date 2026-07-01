@@ -2,6 +2,7 @@ export interface OpenRebuildApprovalMessage {
   type: "proma:open-rebuild-approval";
   supplyGoodsId: string;
   productName?: string;
+  title?: string;
 }
 
 export interface ReloadWorkOrdersMessage {
@@ -20,7 +21,7 @@ export interface OpenBrowserTabMessage {
 
 interface PromaElectronWebviewBridge {
   startSsoLogin?: () => void;
-  openRebuildApproval?: (supplyGoodsId: string, productName?: string) => void;
+  openRebuildApproval?: (supplyGoodsId: string, productName?: string, title?: string) => void;
   reloadWorkOrders?: () => void;
   openBrowserTab?: (url: string) => void;
 }
@@ -29,10 +30,16 @@ interface ElectronBridgeWindow extends Window {
   promaElectronWebview?: PromaElectronWebviewBridge;
 }
 
+function buildRebuildApprovalTitle(supplyGoodsId: string, productName?: string): string {
+  const titleTarget = productName?.trim() || supplyGoodsId.trim();
+  return `rb 审核-${titleTarget}`;
+}
+
 export function buildOpenRebuildApprovalMessage(supplyGoodsId: string, productName?: string): OpenRebuildApprovalMessage {
   const message: OpenRebuildApprovalMessage = {
     type: "proma:open-rebuild-approval",
     supplyGoodsId,
+    title: buildRebuildApprovalTitle(supplyGoodsId, productName),
   };
   const normalizedProductName = productName?.trim();
   if (normalizedProductName) {
@@ -108,8 +115,9 @@ export function openRebuildApprovalInElectron(
   const options = typeof productNameOrInput === "string" ? input : productNameOrInput;
   const currentWindow = (options.currentWindow ?? window) as ElectronBridgeWindow;
   const webviewBridge = currentWindow.promaElectronWebview;
+  const title = buildRebuildApprovalTitle(supplyGoodsId, productName);
   if (webviewBridge?.openRebuildApproval) {
-    webviewBridge.openRebuildApproval(supplyGoodsId, productName);
+    webviewBridge.openRebuildApproval(supplyGoodsId, productName, title);
     return true;
   }
 

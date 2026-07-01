@@ -9,6 +9,13 @@ describe('业务浏览器页面容器', () => {
     expect(workOrdersSource).toContain('showToolbar={false}')
   })
 
+  test('Given RB 审核消息携带标题 When 宿主打开标签 Then 优先使用消息标题', async () => {
+    const workOrdersSource = await Bun.file('apps/electron/src/renderer/components/work-orders/WorkOrdersWebView.tsx').text()
+
+    expect(workOrdersSource).toContain('title?: string')
+    expect(workOrdersSource).toContain("openSession(tab.type, tab.sessionId, message.title?.trim() || tab.title)")
+  })
+
   test('Given 设置浮窗打开 When BrowserPageView 存在 Then 原生业务页面会临时隐藏', async () => {
     const browserPageSource = await Bun.file('apps/electron/src/renderer/components/tabs/BrowserPageView.tsx').text()
 

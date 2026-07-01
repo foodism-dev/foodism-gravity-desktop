@@ -23,6 +23,7 @@ interface OpenRebuildApprovalMessage {
   type: 'proma:open-rebuild-approval'
   supplyGoodsId: string
   productName?: string
+  title?: string
 }
 
 const pendingTicketRefreshIdsAtom = atom<Set<string>>(new Set<string>())
@@ -46,6 +47,11 @@ function isOpenRebuildApprovalMessage(value: unknown): value is OpenRebuildAppro
       !('productName' in value)
       || typeof value.productName === 'string'
       || typeof value.productName === 'undefined'
+    )
+    && (
+      !('title' in value)
+      || typeof value.title === 'string'
+      || typeof value.title === 'undefined'
     )
 }
 
@@ -81,7 +87,7 @@ export function WorkOrdersWebView(): React.ReactElement {
     const supplyGoodsId = message.supplyGoodsId.trim()
     setPendingTicketRefreshIds((current) => new Set(current).add(supplyGoodsId))
     const tab = buildRebuildApprovalTab(supplyGoodsId, message.productName)
-    openSession(tab.type, tab.sessionId, tab.title)
+    openSession(tab.type, tab.sessionId, message.title?.trim() || tab.title)
   }, [openSession, setPendingTicketRefreshIds])
 
   React.useEffect(() => {

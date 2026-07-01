@@ -79,6 +79,34 @@ describe('顶部标签页不常驻草稿页', () => {
     expect(result.tabs).toHaveLength(2)
   })
 
+  test('Given RB 审核标签曾用 id 标题打开 When 再次携带商品名打开同一地址 Then 更新为商品名标题', () => {
+    const result = openTab(
+      [
+        {
+          id: 'web:https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods/F00-838',
+          type: 'web',
+          sessionId: 'https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods/F00-838',
+          title: 'rb 审核-F00-838',
+        },
+      ],
+      {
+        type: 'web',
+        sessionId: 'https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods/F00-838',
+        title: 'rb 审核-招牌双人餐',
+      },
+    )
+
+    expect(result.activeTabId).toBe('web:https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods/F00-838')
+    expect(result.tabs).toEqual([
+      {
+        id: 'web:https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods/F00-838',
+        type: 'web',
+        sessionId: 'https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods/F00-838',
+        title: 'rb 审核-招牌双人餐',
+      },
+    ])
+  })
+
   test('Given 持久化了我的工单和 Web 标签 When 启动恢复 Then 保留完整标签并激活工单', () => {
     const result = normalizePersistedTabState(
       {
