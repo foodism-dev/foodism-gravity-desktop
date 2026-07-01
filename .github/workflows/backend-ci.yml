@@ -134,7 +134,7 @@ jobs:
       - name: 触发 Dokploy 部署
         if: ${{ github.ref_type == 'branch' && github.ref_name == 'test' }}
         run: |
-          curl -fsSL -X POST "https://deploy.foodism.pro/api/deploy/compose/RahfRujrjXLlDwfJ39BxU"
+          curl -fsSL -X POST "https://deploy.foodism.pro/api/deploy/compose/Y89Qhlh2Hj2rr-JDyyKe8"
 
       - name: 输出发包结果
         run: |
