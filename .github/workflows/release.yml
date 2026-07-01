@@ -13,6 +13,14 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      work_orders_url:
+        description: '打包内置的工单系统地址'
+        required: false
+        default: 'https://testpc.foodism.pro/tickets'
+
+env:
+  VITE_PROMA_WORK_ORDERS_URL: ${{ github.event.inputs.work_orders_url || 'https://testpc.foodism.pro/tickets' }}
 
 permissions:
   contents: write
