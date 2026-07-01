@@ -1,7 +1,7 @@
 {
   "name": "@proma/electron",
   "productName": "foodism-gravity",
-  "version": "0.12.95",
+  "version": "0.12.96",
   "description": "foodism-gravity desktop client",
   "main": "dist/main.cjs",
   "author": {
@@ -30,11 +30,11 @@
     "start": "bun run build && bunx electron .",
     "typecheck": "tsc --noEmit",
     "generate:icons": "cd resources && ./generate-icons.sh",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux",
+    "pack": "bun run build && electron-builder --dir",
+    "dist": "bun run build && electron-builder",
+    "dist:mac": "bun run build && electron-builder --mac",
+    "dist:win": "bun run build && electron-builder --win",
+    "dist:linux": "bun run build && electron-builder --linux",
     "dist:visual": "bun run scripts/dist.ts",
     "dist:fast": "bun run scripts/dist.ts --current-arch --dmg",
     "dist:debug": "bun run scripts/dist.ts --current-arch --verbose"
