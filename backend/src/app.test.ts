@@ -3770,6 +3770,72 @@ describe("server app", () => {
     expect(options.map((option) => option.optionLabel)).toEqual(["餐饮商户", "堂食"]);
   });
 
+  test("Given REBUILD metadata client, When syncing SupplyHost fields, Then it reuses entity metadata sync", async () => {
+    const { repository, fields, options } = createMemoryFieldRepository();
+    const metadataClient: RebuildMetadataClient = {
+      async listFields(entityName: string): Promise<RebuildFieldMetadata[]> {
+        return [
+          {
+            entityName,
+            fieldName: "hostPic",
+            label: "商户头图",
+            fieldType: "IMAGE",
+            raw: {
+              name: "hostPic",
+              label: "商户头图",
+              displayType: "IMAGE",
+            },
+          },
+          {
+            entityName,
+            fieldName: "hostType",
+            label: "商户类型",
+            fieldType: "PICKLIST",
+            raw: {
+              name: "hostType",
+              label: "商户类型",
+              displayType: "PICKLIST",
+            },
+          },
+        ];
+      },
+
+      async listPicklistOptions(entityName: string, fieldName: string): Promise<RebuildFieldOptionMetadata[]> {
+        if (fieldName !== "hostType") return [];
+        return normalizeRebuildFieldOptions(entityName, fieldName, [{ id: "restaurant", text: "餐饮门店" }]);
+      },
+
+      async listMultiselectOptions(): Promise<RebuildFieldOptionMetadata[]> {
+        return [];
+      },
+
+      async listClassificationOptions(): Promise<RebuildFieldOptionMetadata[]> {
+        return [];
+      },
+    };
+    const app = createServerApp({
+      rebuildMetadataClient: metadataClient,
+      rebuildFieldMetadataRepository: repository,
+    });
+
+    const response = await app.request("/api/rebuild/supplyhost/fields/sync", {
+      method: "POST",
+      headers: await createAuthHeaders(app),
+    });
+    const body = (await response.json()) as RebuildFieldSyncResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.entity).toBe("SupplyHost");
+    expect(body.fields).toBe(2);
+    expect(body.options).toBe(1);
+    expect(fields.map((field) => `${field.entityName}.${field.fieldName}`)).toEqual([
+      "SupplyHost.hostPic",
+      "SupplyHost.hostType",
+    ]);
+    expect(options.map((option) => option.optionLabel)).toEqual(["餐饮门店"]);
+  });
+
   test("Given stored field options, When options API is requested, Then it returns option values", async () => {
     const { repository } = createMemoryFieldRepository([
       {

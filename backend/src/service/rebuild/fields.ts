@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createDatabase, getDatabaseUrl, type ServerDatabase } from "../../db/client.ts";
 import { rebuildFieldOptions, rebuildFields } from "../../db/schema.ts";
 import { buildRebuildOpenApiUrl, readJsonResponse } from "./openapi.ts";
-import { SUPPLY_COMPANY_ENTITY, SUPPLY_GOODS_ENTITY } from "./supplygoods.ts";
+import { SUPPLY_COMPANY_ENTITY, SUPPLY_GOODS_ENTITY, SUPPLY_HOST_ENTITY } from "./supplygoods.ts";
 
 export interface RebuildFieldMetadata {
   entityName: string;
@@ -72,6 +72,9 @@ const SUPPLY_GOODS_CLASSIFICATION_FIELDS = [
 const SUPPLY_COMPANY_PICKLIST_FIELDS: string[] = [];
 const SUPPLY_COMPANY_MULTISELECT_FIELDS: string[] = [];
 const SUPPLY_COMPANY_CLASSIFICATION_FIELDS: string[] = [];
+const SUPPLY_HOST_PICKLIST_FIELDS: string[] = [];
+const SUPPLY_HOST_MULTISELECT_FIELDS: string[] = [];
+const SUPPLY_HOST_CLASSIFICATION_FIELDS: string[] = [];
 
 let defaultRepository: RebuildFieldMetadataRepository | null | undefined;
 const FIELD_OPTION_UPSERT_BATCH_SIZE = 1000;
@@ -407,6 +410,19 @@ export async function syncSupplyCompanyFieldMetadata(input: {
     picklistFields: SUPPLY_COMPANY_PICKLIST_FIELDS,
     multiselectFields: SUPPLY_COMPANY_MULTISELECT_FIELDS,
     classificationFields: SUPPLY_COMPANY_CLASSIFICATION_FIELDS,
+  });
+}
+
+export async function syncSupplyHostFieldMetadata(input: {
+  metadataClient: RebuildMetadataClient;
+  repository: RebuildFieldMetadataRepository;
+}): Promise<RebuildMetadataSyncResult> {
+  return syncRebuildFieldMetadata({
+    ...input,
+    entityName: SUPPLY_HOST_ENTITY,
+    picklistFields: SUPPLY_HOST_PICKLIST_FIELDS,
+    multiselectFields: SUPPLY_HOST_MULTISELECT_FIELDS,
+    classificationFields: SUPPLY_HOST_CLASSIFICATION_FIELDS,
   });
 }
 

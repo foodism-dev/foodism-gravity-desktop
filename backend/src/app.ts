@@ -39,6 +39,7 @@ import {
   getSupplyGoodsOptionFieldNames,
   syncSupplyCompanyFieldMetadata,
   syncSupplyGoodsFieldMetadata,
+  syncSupplyHostFieldMetadata,
   type RebuildFieldMetadata,
   type RebuildFieldMetadataRepository,
   type RebuildMetadataSyncResult,
@@ -992,6 +993,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
   app.use("/api/tickets/*", jwtMiddleware, requireApiUser);
   app.use("/api/rebuild/supplygoods/fields/sync", jwtMiddleware, requireApiUser);
   app.use("/api/rebuild/supplycompany/fields/sync", jwtMiddleware, requireApiUser);
+  app.use("/api/rebuild/supplyhost/fields/sync", jwtMiddleware, requireApiUser);
   app.use("/api/rebuild/fields/options", jwtMiddleware, requireApiUser);
   app.use("/api/rebuild/references/*", jwtMiddleware, requireApiUser);
 
@@ -1281,6 +1283,19 @@ export function createServerApp(options: ServerAppOptions = {}) {
       }),
       afterSuccess: () => {
         listSupplyCompanyFields.clearCache();
+      },
+    });
+  });
+
+  app.post("/api/rebuild/supplyhost/fields/sync", async (context) => {
+    return handleFieldMetadataSync(context, {
+      label: "SupplyHost",
+      sync: () => syncSupplyHostFieldMetadata({
+        metadataClient: rebuildMetadataClient,
+        repository: rebuildFieldMetadataRepository!,
+      }),
+      afterSuccess: () => {
+        listSupplyHostFields.clearCache();
       },
     });
   });
