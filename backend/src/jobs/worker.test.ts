@@ -5,7 +5,7 @@ import {
   REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME,
   REBUILD_SUPPLIER_SYNC_JOB_NAME,
 } from "./queue.ts";
-import { processGravityJob } from "./worker.ts";
+import { processGravityJob, resolveGravityJobsRuntimeMode } from "./worker.ts";
 import type { LinKeSettings } from "../service/lin-ke/config.ts";
 import type { LinKeAccountConfig, LinKeRepository } from "../service/lin-ke/repository.ts";
 import type { JsonRecord } from "../service/lin-ke/utils.ts";
@@ -183,6 +183,14 @@ function supplierRepository(): {
 }
 
 describe("Gravity jobs worker", () => {
+  test("Given runtime flags, When resolving worker runtime mode, Then scheduler and worker can run separately", () => {
+    expect(resolveGravityJobsRuntimeMode(["--scheduler"], {})).toBe("scheduler");
+    expect(resolveGravityJobsRuntimeMode(["--worker"], {})).toBe("worker");
+    expect(resolveGravityJobsRuntimeMode(["--all"], {})).toBe("all");
+    expect(resolveGravityJobsRuntimeMode([], { GRAVITY_JOBS_RUNTIME_MODE: "worker" })).toBe("worker");
+    expect(resolveGravityJobsRuntimeMode([], {})).toBe("all");
+  });
+
   test("Given import-from-supplygoods job, When processing gravity job, Then it dispatches to SupplyGoods importer", async () => {
     const saved: SupplyGoodsRecordUpsertInput[] = [];
     const callbackRecords: SupplyGoodsCallbackRecordInput[] = [];

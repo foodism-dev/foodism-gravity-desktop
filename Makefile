@@ -1,7 +1,8 @@
 SERVER_ENV ?= backend/.env
 BACKEND_COMPOSE = docker compose -f docker-compose.backend.yml
 SERVER_API = ( cd backend && exec bun run src/index.ts )
-JOBS_WORKER = ( cd backend && exec bun run src/jobs/worker.ts )
+JOBS_SCHEDULER = ( cd backend && exec bun run src/jobs/worker.ts --scheduler )
+JOBS_WORKER = ( cd backend && exec bun run src/jobs/worker.ts --worker )
 FRONTEND_DEV = ( cd frontend && exec bun run dev )
 DESKTOP_DEV = bun run electron:dev
 LOAD_SERVER_ENV = set -a; [ ! -f "$(SERVER_ENV)" ] || . "$(SERVER_ENV)"; : "$${REDIS_URL:=redis://127.0.0.1:$${REDIS_PORT:-6379}}"; : "$${POSTGRES_DATA_DIR:=$(CURDIR)/.local/postgres-data}"; export REDIS_URL POSTGRES_DATA_DIR; set +a;
@@ -18,7 +19,7 @@ run-worker:
 	@$(LOAD_SERVER_ENV) $(JOBS_WORKER)
 
 run-jobs:
-	@$(LOAD_SERVER_ENV) $(JOBS_WORKER)
+	@$(LOAD_SERVER_ENV) $(JOBS_SCHEDULER)
 
 run-frontend:
 	$(FRONTEND_DEV)

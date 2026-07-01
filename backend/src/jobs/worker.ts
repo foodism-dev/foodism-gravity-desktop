@@ -54,6 +54,8 @@ export interface GravityJobProcessorOptions extends ImportFromSupplyGoodsWorkerO
   saveDraft?: typeof saveSupplyGoodsDraft;
 }
 
+export type GravityJobsRuntimeMode = "all" | "scheduler" | "worker";
+
 function readRedisUrl(): string {
   const redisUrl = Bun.env.REDIS_URL?.trim() || "";
   if (!redisUrl) {
@@ -65,6 +67,18 @@ function readRedisUrl(): string {
 function readPositiveInteger(name: string, fallback: number): number {
   const value = Number.parseInt(Bun.env[name]?.trim() ?? "", 10);
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+export function resolveGravityJobsRuntimeMode(
+  args: string[] = process.argv.slice(2),
+  env: Record<string, string | undefined> = Bun.env,
+): GravityJobsRuntimeMode {
+  const modeArg = args.find((arg) => arg.startsWith("--mode="));
+  const modeValue = modeArg?.slice("--mode=".length) || env.GRAVITY_JOBS_RUNTIME_MODE?.trim() || "";
+  if (args.includes("--scheduler") || modeValue === "scheduler") return "scheduler";
+  if (args.includes("--worker") || modeValue === "worker") return "worker";
+  if (args.includes("--all") || modeValue === "all") return "all";
+  return "all";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -274,21 +288,7 @@ export function createGravityJobsWorker(options: GravityJobProcessorOptions = {}
   );
 }
 
-async function main() {
-  installConsoleTimestamp();
-
-  const queue = getDefaultGravityJobsQueue();
-  if (!queue) {
-    throw new Error("REDIS_URL 未配置，无法启动 Gravity jobs 队列");
-  }
-  const jobsQueue = queue;
-
-  const scheduledJobIds = await jobsQueue.schedulePeriodicJobs();
-  console.log(`[JOBS] Gravity jobs 定时任务已注册: jobs=${scheduledJobIds.join(",")}`);
-
-  const worker = createGravityJobsWorker();
-  const feeSetupWorker = createLinKeFeeSetupWorker();
-
+function bindGravityWorkerLogs(worker: ReturnType<typeof createGravityJobsWorker>): void {
   worker.on("completed", (job, result) => {
     if (job.name === REBUILD_IMPORT_FROM_SUPPLY_GOODS_JOB_NAME) {
       const importResult = result as Awaited<ReturnType<typeof processImportFromSupplyGoodsJob>>;
@@ -313,32 +313,68 @@ async function main() {
   worker.on("failed", (job, error) => {
     console.warn(`[JOBS] 任务失败: name=${job?.name ?? "<unknown>"} job=${job?.id ?? "<unknown>"} error=${conciseError(error)}`);
   });
+}
 
-  feeSetupWorker.on("completed", (job) => {
+function bindLinKeWorkerLogs(worker: ReturnType<typeof createLinKeFeeSetupWorker>): void {
+  worker.on("completed", (job) => {
     console.log(`[JOBS] 林客费用设置/商品追踪任务完成: job=${job.id}`);
   });
 
-  feeSetupWorker.on("failed", (job, error) => {
+  worker.on("failed", (job, error) => {
     console.warn(`[JOBS] 林客费用设置/商品追踪任务失败: job=${job?.id ?? "<unknown>"} error=${conciseError(error)}`);
   });
+}
 
-  console.log(`[JOBS] Gravity jobs worker 已启动: queue=${GRAVITY_JOBS_QUEUE_NAME}`);
-  console.log("[JOBS] 林客费用设置/商品追踪 worker 已启动");
+async function waitForShutdown(close: () => Promise<void>): Promise<void> {
+  let closing = false;
+  await new Promise<void>((resolve) => {
+    const shutdown = () => {
+      if (closing) return;
+      closing = true;
+      void close().finally(resolve);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  });
+}
 
-  async function shutdown() {
-    await Promise.all([
-      worker.close(),
-      feeSetupWorker.close(),
-      jobsQueue.close?.(),
-    ]);
-    process.exit(0);
+async function main() {
+  installConsoleTimestamp();
+
+  const mode = resolveGravityJobsRuntimeMode();
+  const closeHandlers: Array<() => Promise<void> | void> = [];
+
+  if (mode === "scheduler" || mode === "all") {
+    const queue = getDefaultGravityJobsQueue();
+    if (!queue) {
+      throw new Error("REDIS_URL 未配置，无法启动 Gravity jobs 队列");
+    }
+    const jobsQueue = queue;
+    const scheduledJobIds = await jobsQueue.schedulePeriodicJobs();
+    console.log(`[JOBS] Gravity jobs 定时任务已注册: jobs=${scheduledJobIds.join(",")}`);
+    closeHandlers.push(() => jobsQueue.close?.());
   }
 
-  process.on("SIGINT", () => {
-    void shutdown();
-  });
-  process.on("SIGTERM", () => {
-    void shutdown();
+  if (mode === "worker" || mode === "all") {
+    const worker = createGravityJobsWorker();
+    const feeSetupWorker = createLinKeFeeSetupWorker();
+    bindGravityWorkerLogs(worker);
+    bindLinKeWorkerLogs(feeSetupWorker);
+    closeHandlers.push(() => worker.close(), () => feeSetupWorker.close());
+    console.log(`[JOBS] Gravity jobs worker 已启动: queue=${GRAVITY_JOBS_QUEUE_NAME}`);
+    console.log("[JOBS] 林客费用设置/商品追踪 worker 已启动");
+  }
+
+  if (mode === "scheduler") {
+    const keepAlive = setInterval(() => undefined, 60 * 60 * 1000);
+    closeHandlers.push(() => {
+      clearInterval(keepAlive);
+    });
+    console.log(`[JOBS] Gravity jobs scheduler 已启动: queue=${GRAVITY_JOBS_QUEUE_NAME}`);
+  }
+
+  await waitForShutdown(async () => {
+    await Promise.all(closeHandlers.map((close) => close()));
   });
 }
 

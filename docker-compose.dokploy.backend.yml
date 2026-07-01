@@ -83,7 +83,7 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *backend-env
-    command: ["bun", "run", "/app/backend/src/jobs/worker.ts"]
+    command: ["bun", "run", "/app/backend/src/jobs/worker.ts", "--scheduler"]
     networks:
       - dokploy-network
 
@@ -96,7 +96,7 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *backend-env
-    command: ["bun", "run", "/app/backend/src/jobs/worker.ts"]
+    command: ["bun", "run", "/app/backend/src/jobs/worker.ts", "--worker"]
     networks:
       - dokploy-network
 

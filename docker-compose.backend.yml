@@ -102,4 +102,4 @@ services:
       LIN_KE_TIMEOUT: ${LIN_KE_TIMEOUT:-60}
       LIN_KE_DRAFT_WORKER_CONCURRENCY: ${LIN_KE_DRAFT_WORKER_CONCURRENCY:-1}
       RB_IMAGE_BASE_URL: ${RB_IMAGE_BASE_URL:-}
-    command: ["bun", "run", "worker:jobs"]
+    command: ["bun", "run", "worker:all"]
