@@ -1,5 +1,19 @@
 export const SSO_LOGIN_CLOSE_URL = 'foodism-gravity://sso-login/close'
 
+export interface SsoLoginWindowBounds {
+  width: number
+  height: number
+  minWidth: number
+  minHeight: number
+}
+
+export const SSO_LOGIN_WINDOW_BOUNDS: SsoLoginWindowBounds = {
+  width: 560,
+  height: 760,
+  minWidth: 480,
+  minHeight: 620,
+}
+
 export function isSsoLoginCloseUrl(url: string): boolean {
   return url === SSO_LOGIN_CLOSE_URL
 }
@@ -10,6 +24,7 @@ export function buildSsoLoginCloseButtonScript(): string {
   const closeUrl = ${JSON.stringify(SSO_LOGIN_CLOSE_URL)};
   const buttonId = 'proma-sso-close-button';
   const styleId = 'proma-sso-close-button-style';
+  const desktopStyleId = 'proma-sso-desktop-style';
 
   if (!document.getElementById(styleId)) {
     const style = document.createElement('style');
@@ -44,6 +59,34 @@ export function buildSsoLoginCloseButtonScript(): string {
       '@media (max-width: 420px) { #' + buttonId + ' { top: 10px; right: 10px; } }',
     ].join('\\n');
     document.documentElement.appendChild(style);
+  }
+
+  if (!document.getElementById(desktopStyleId)) {
+    const desktopStyle = document.createElement('style');
+    desktopStyle.id = desktopStyleId;
+    desktopStyle.textContent = [
+      'html, body {',
+      '  width: 100% !important;',
+      '  min-width: 0 !important;',
+      '  overflow-x: hidden !important;',
+      '  background: #f7fbf9 !important;',
+      '}',
+      'body {',
+      '  margin: 0 !important;',
+      '}',
+      '#root, #app, main, body > div:first-child {',
+      '  max-width: min(100vw, 560px) !important;',
+      '  margin-left: auto !important;',
+      '  margin-right: auto !important;',
+      '}',
+      '@media (min-width: 481px) {',
+      '  body {',
+      '    display: flex !important;',
+      '    justify-content: center !important;',
+      '  }',
+      '}',
+    ].join('\\n');
+    document.documentElement.appendChild(desktopStyle);
   }
 
   const existingButton = document.getElementById(buttonId);

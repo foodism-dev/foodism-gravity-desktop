@@ -157,7 +157,7 @@ import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getAuthSession, login, logout, saveAuthSession } from './lib/auth-service'
 import { createSsoOidcService, getDefaultSsoOidcConfig } from './lib/auth/sso-oidc-service'
 import type { SsoOidcService } from './lib/auth/sso-oidc-service'
-import { buildSsoLoginCloseButtonScript, isSsoLoginCloseUrl } from './lib/auth/sso-login-window'
+import { SSO_LOGIN_WINDOW_BOUNDS, buildSsoLoginCloseButtonScript, isSsoLoginCloseUrl } from './lib/auth/sso-login-window'
 import { getSupplyGoods, getSupplyGoodsApprovalStateOptions, listSupplyGoods } from './lib/rebuild-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
@@ -328,10 +328,10 @@ async function openSsoLoginWindow(url: string): Promise<void> {
   }
 
   const loginWindow = new BrowserWindow({
-    width: 880,
-    height: 760,
-    minWidth: 760,
-    minHeight: 640,
+    width: SSO_LOGIN_WINDOW_BOUNDS.width,
+    height: SSO_LOGIN_WINDOW_BOUNDS.height,
+    minWidth: SSO_LOGIN_WINDOW_BOUNDS.minWidth,
+    minHeight: SSO_LOGIN_WINDOW_BOUNDS.minHeight,
     title: 'Gravity SSO 登录',
     parent: parentWindow ?? undefined,
     modal: Boolean(parentWindow),
