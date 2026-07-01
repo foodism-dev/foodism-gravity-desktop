@@ -65,11 +65,11 @@ import {
   shouldRefreshTicketFromMessage,
 } from "@/lib/electron-bridge.ts";
 import {
-  COMMISSION_CHILD_OPEN_MAX,
   COMMISSION_TRAFFIC_ROWS,
   allCommissionTrafficSources,
   applyDefaultCommissionRate,
   formatCommissionRateInput,
+  getCommissionChildMax,
   getCommissionInputError,
   normalizeLinkeCommission,
   sanitizeCommissionRateInput,
@@ -388,6 +388,7 @@ function LoadedTicketDetail({
   const [isRatingComparisonOpen, setIsRatingComparisonOpen] = useState(false);
   const [isActionSidebarCollapsed, setIsActionSidebarCollapsed] = useState(false);
   const canConfirmOptimization = Boolean(editedOptimizedPackages && hasPackageContent(editedOptimizedPackages));
+  const linkeCommissionValidationMessage = validateLinkeCommission(linkeCommission);
   const isLinKeFeeSetupCurrent = useMemo(
     () => isCurrentLinKeFeeSetup(ticket.payload, linkeCommission),
     [ticket.payload, linkeCommission],
@@ -858,6 +859,7 @@ function LoadedTicketDetail({
           skipLinKeExternal={skipLinKeExternal}
           canConfirmOptimization={canConfirmOptimization}
           canRetryDraftCreation={hasPackageContent(readPackagesFromPayload(ticket.payload))}
+          canSyncLinKeFeeSetup={!linkeCommissionValidationMessage}
           linkeGoodsId={linkeGoodsId}
           linkeDraftUrl={readPayloadText(ticket.payload, "linkeDraftUrl")}
           feeSettingUrl={readPayloadText(ticket.payload, "linkeFeeSettingUrl")}
@@ -1680,26 +1682,32 @@ function CommissionSetupPanel({
                       <span className="ml-1 text-red-500">*</span>
                     </TableCell>
                     <TableCell className="w-[190px] border-r">
-                      <Button
+                      <button
                         type="button"
-                        variant="outline"
-                        size="sm"
                         role="switch"
                         aria-checked={singleEnabled}
                         disabled={!row.singleSettingEnabled}
                         className={cn(
-                          "h-7 rounded-full px-3 text-xs",
+                          "relative inline-flex h-7 w-[52px] items-center rounded-full border-0 px-0 text-xs font-semibold transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
                           singleEnabled
-                            ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                            : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
+                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                            : "bg-slate-300 text-transparent hover:bg-slate-300",
                           !row.singleSettingEnabled && "cursor-not-allowed opacity-50",
                         )}
                         onClick={() => {
                           if (row.singleSettingEnabled) handleSingleSettingChange(row.source, !singleEnabled);
                         }}
                       >
-                        {singleEnabled ? "是" : "否"}
-                      </Button>
+                        <span className={cn("absolute left-2.5 leading-none transition-opacity", singleEnabled ? "opacity-100" : "opacity-0")}>
+                          是
+                        </span>
+                        <span
+                          className={cn(
+                            "absolute left-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200",
+                            singleEnabled && "translate-x-6",
+                          )}
+                        />
+                      </button>
                     </TableCell>
                     <TableCell>
                       {singleEnabled ? (
@@ -1709,7 +1717,7 @@ function CommissionSetupPanel({
                               key={child.source}
                               label={child.label}
                               value={values.values[child.source] ?? "0.00"}
-                              max={COMMISSION_CHILD_OPEN_MAX}
+                              max={getCommissionChildMax(child)}
                               onChange={(value) => handleRateChange(child.source, value)}
                             />
                           ))}
@@ -1855,6 +1863,7 @@ function TicketActionSidebar({
   skipLinKeExternal,
   canConfirmOptimization,
   canRetryDraftCreation,
+  canSyncLinKeFeeSetup,
   linkeGoodsId,
   linkeDraftUrl,
   feeSettingUrl,
@@ -1882,6 +1891,7 @@ function TicketActionSidebar({
   skipLinKeExternal: boolean;
   canConfirmOptimization: boolean;
   canRetryDraftCreation: boolean;
+  canSyncLinKeFeeSetup: boolean;
   linkeGoodsId: string;
   linkeDraftUrl: string;
   feeSettingUrl: string;
@@ -2079,6 +2089,7 @@ function TicketActionSidebar({
               disabled={isActionDisabled(actionButton.label, {
                 canConfirmOptimization,
                 canRetryDraftCreation,
+                canSyncLinKeFeeSetup,
                 isBusy,
                 linkeGoodsId,
               })}
@@ -2208,13 +2219,19 @@ function formatTrackingCheckCount(input: {
 
 function isActionDisabled(
   label: string,
-  state: { canConfirmOptimization: boolean; canRetryDraftCreation: boolean; isBusy: boolean; linkeGoodsId: string },
+  state: {
+    canConfirmOptimization: boolean;
+    canRetryDraftCreation: boolean;
+    canSyncLinKeFeeSetup: boolean;
+    isBusy: boolean;
+    linkeGoodsId: string;
+  },
 ): boolean {
   if (state.isBusy) return true;
   if (label === "确认采用优化") return !state.canConfirmOptimization;
   if (label === "重试创建草稿") return !state.canRetryDraftCreation;
   if (label === "确认已上架") return state.linkeGoodsId.trim().length === 0;
-  if (label === "确认同步") return state.linkeGoodsId.trim().length === 0;
+  if (label === "确认同步") return state.linkeGoodsId.trim().length === 0 || !state.canSyncLinKeFeeSetup;
   if (label === "同步中") return true;
   if (label === "自动追踪中") return true;
   if (label === "查看上线任务") return true;

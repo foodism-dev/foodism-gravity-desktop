@@ -62,6 +62,31 @@ describe("工单详情页布局", () => {
     expect(source).toContain("onLinkeGoodsIdChange={(value) => {\n            setActionErrorMessage(\"\");");
   });
 
+  test("Given commission setup switch is rendered, When single setting changes, Then it uses the green and gray graphic toggle", async () => {
+    const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
+    const switchSource = source.slice(
+      source.indexOf('role="switch"'),
+      source.indexOf("<TableCell>", source.indexOf('role="switch"')),
+    );
+
+    expect(switchSource).toContain('className={cn(\n                          "relative inline-flex h-7 w-[52px]');
+    expect(switchSource).toContain("bg-emerald-600 text-white hover:bg-emerald-700");
+    expect(switchSource).toContain("bg-slate-300 text-transparent hover:bg-slate-300");
+    expect(switchSource).toContain("translate-x-6");
+    expect(switchSource).toContain("是");
+    expect(switchSource).not.toContain("否");
+    expect(source).not.toContain('{singleEnabled ? "是" : "否"}');
+  });
+
+  test("Given commission setup rates are invalid, When rendering action sidebar, Then confirm sync is disabled", async () => {
+    const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
+
+    expect(source).toContain("const linkeCommissionValidationMessage = validateLinkeCommission(linkeCommission);");
+    expect(source).toContain("canSyncLinKeFeeSetup={!linkeCommissionValidationMessage}");
+    expect(source).toContain("canSyncLinKeFeeSetup: boolean;");
+    expect(source).toContain('if (label === "确认同步") return state.linkeGoodsId.trim().length === 0 || !state.canSyncLinKeFeeSetup;');
+  });
+
   test("Given access review page, When rendering detail content, Then product operation rating entry is present", async () => {
     const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
 
