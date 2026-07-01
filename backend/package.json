@@ -1,6 +1,6 @@
 {
   "name": "@proma/server",
-  "version": "0.1.66",
+  "version": "0.1.67",
   "license": "AGPL-3.0-only",
   "description": "Standalone Hono server for Proma",
   "private": true,
@@ -10,6 +10,7 @@
   "scripts": {
     "build": "bun run typecheck",
     "db:check-local": "bun run src/db/check-local-database.ts",
+    "db:configure-local": "bun run src/db/configure-local-database.ts",
     "db:create-local": "bun run src/db/create-local-database.ts",
     "db:seed-local": "bun run src/db/seed-local-admin.ts",
     "db:generate": "drizzle-kit generate",

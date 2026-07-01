@@ -1,4 +1,7 @@
 x-backend-env: &backend-env
+  TZ: ${TZ:-Asia/Shanghai}
+  PGTZ: ${PGTZ:-Asia/Shanghai}
+  DATABASE_TIMEZONE: ${DATABASE_TIMEZONE:-Asia/Shanghai}
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
   REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
   PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-dokploy}
@@ -45,7 +48,7 @@ services:
     restart: "no"
     environment:
       <<: *backend-env
-    command: ["sh", "-lc", "bun run db:create-local && bun run db:migrate && bun run db:seed-local"]
+    command: ["sh", "-lc", "bun run db:create-local && bun run db:configure-local && bun run db:migrate && bun run db:seed-local"]
     networks:
       - dokploy-network
 

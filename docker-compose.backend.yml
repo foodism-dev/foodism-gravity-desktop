@@ -6,9 +6,13 @@ services:
     container_name: foodism-gravity-postgres
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATABASE_TIMEZONE: ${DATABASE_TIMEZONE:-Asia/Shanghai}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-proma}
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---encoding=UTF8 --locale=C.UTF-8}
+    command: ["postgres", "-c", "timezone=${DATABASE_TIMEZONE:-Asia/Shanghai}", "-c", "log_timezone=${DATABASE_TIMEZONE:-Asia/Shanghai}"]
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -44,6 +48,9 @@ services:
       redis:
         condition: service_healthy
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      PGTZ: ${PGTZ:-Asia/Shanghai}
+      DATABASE_TIMEZONE: ${DATABASE_TIMEZONE:-Asia/Shanghai}
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-self-hosted-ci}
@@ -76,6 +83,9 @@ services:
       redis:
         condition: service_healthy
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      PGTZ: ${PGTZ:-Asia/Shanghai}
+      DATABASE_TIMEZONE: ${DATABASE_TIMEZONE:-Asia/Shanghai}
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-self-hosted-ci}
