@@ -3,6 +3,7 @@ import type { LinKeFeeRates } from "./api.ts";
 export interface CommissionTrafficChild {
   source: string;
   label: string;
+  max?: number;
 }
 
 export interface CommissionTrafficRow {
@@ -29,7 +30,7 @@ export const COMMISSION_TRAFFIC_ROWS: CommissionTrafficRow[] = [
     children: [
       { source: "1001", label: "商家视频" },
       { source: "1002", label: "达人视频" },
-      { source: "1003", label: "职人视频" },
+      { source: "1003", label: "职人视频", max: 20 },
     ],
   },
   {
@@ -41,7 +42,7 @@ export const COMMISSION_TRAFFIC_ROWS: CommissionTrafficRow[] = [
     children: [
       { source: "2001", label: "商家直播" },
       { source: "2002", label: "达人直播" },
-      { source: "2003", label: "职人直播" },
+      { source: "2003", label: "职人直播", max: 20 },
     ],
   },
   {
@@ -52,7 +53,7 @@ export const COMMISSION_TRAFFIC_ROWS: CommissionTrafficRow[] = [
     singleSettingEnabled: true,
     children: [
       { source: "3001", label: "直接下单" },
-      { source: "3002", label: "职人码" },
+      { source: "3002", label: "职人码", max: 20 },
     ],
   },
   {
@@ -67,7 +68,7 @@ export const COMMISSION_TRAFFIC_ROWS: CommissionTrafficRow[] = [
     group: "常规成交",
     source: "5000",
     label: "获客卡",
-    closedMax: 20,
+    closedMax: 80,
     singleSettingEnabled: true,
     children: [
       { source: "5001", label: "门店卡/到店卡" },
@@ -83,7 +84,7 @@ export const COMMISSION_TRAFFIC_ROWS: CommissionTrafficRow[] = [
     children: [
       { source: "7001", label: "商家内容" },
       { source: "7002", label: "达人内容" },
-      { source: "7003", label: "职人内容" },
+      { source: "7003", label: "职人内容", max: 20 },
     ],
   },
   {
@@ -97,6 +98,10 @@ export const COMMISSION_TRAFFIC_ROWS: CommissionTrafficRow[] = [
 ];
 
 export const COMMISSION_CHILD_OPEN_MAX = 80;
+
+export function getCommissionChildMax(child: CommissionTrafficChild): number {
+  return child.max ?? COMMISSION_CHILD_OPEN_MAX;
+}
 
 export function sanitizeCommissionRateInput(value: string): string {
   const normalized = value.replace(/[^\d.]/g, "");
@@ -152,7 +157,7 @@ export function applyDefaultCommissionRate(values: CommissionRateValues, rawValu
 export function allCommissionTrafficSources(): Array<{ source: string; label: string; max: number }> {
   return COMMISSION_TRAFFIC_ROWS.flatMap((row) => [
     { source: row.source, label: row.label, max: row.closedMax },
-    ...row.children.map((child) => ({ source: child.source, label: child.label, max: COMMISSION_CHILD_OPEN_MAX })),
+    ...row.children.map((child) => ({ source: child.source, label: child.label, max: getCommissionChildMax(child) })),
   ]);
 }
 
@@ -162,7 +167,7 @@ export function activeCommissionTrafficFields(values: CommissionRateValues): Arr
       return row.children.map((child) => ({
         source: child.source,
         label: child.label,
-        max: COMMISSION_CHILD_OPEN_MAX,
+        max: getCommissionChildMax(child),
       }));
     }
     return [{ source: row.source, label: row.label, max: row.closedMax }];

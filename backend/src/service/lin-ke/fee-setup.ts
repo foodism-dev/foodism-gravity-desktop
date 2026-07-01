@@ -46,6 +46,7 @@ type LinKeFeeLookupInput = Pick<LinKeFeeSetupInput, "session" | "accountConfig" 
 interface LinKeFeeTrafficChild {
   source: string;
   label: string;
+  max?: number;
 }
 
 interface LinKeFeeTrafficRow {
@@ -82,7 +83,7 @@ export const LIN_KE_FEE_TRAFFIC_ROWS: LinKeFeeTrafficRow[] = [
     children: [
       { source: "1001", label: "商家视频" },
       { source: "1002", label: "达人视频" },
-      { source: "1003", label: "职人视频" },
+      { source: "1003", label: "职人视频", max: 20 },
     ],
   },
   {
@@ -94,7 +95,7 @@ export const LIN_KE_FEE_TRAFFIC_ROWS: LinKeFeeTrafficRow[] = [
     children: [
       { source: "2001", label: "商家直播" },
       { source: "2002", label: "达人直播" },
-      { source: "2003", label: "职人直播" },
+      { source: "2003", label: "职人直播", max: 20 },
     ],
   },
   {
@@ -105,7 +106,7 @@ export const LIN_KE_FEE_TRAFFIC_ROWS: LinKeFeeTrafficRow[] = [
     singleSettingEnabled: true,
     children: [
       { source: "3001", label: "直接下单" },
-      { source: "3002", label: "职人码" },
+      { source: "3002", label: "职人码", max: 20 },
     ],
   },
   {
@@ -120,7 +121,7 @@ export const LIN_KE_FEE_TRAFFIC_ROWS: LinKeFeeTrafficRow[] = [
     group: "常规成交",
     source: "5000",
     label: "获客卡",
-    closedMax: 20,
+    closedMax: 80,
     singleSettingEnabled: true,
     children: [
       { source: "5001", label: "门店卡/到店卡" },
@@ -136,7 +137,7 @@ export const LIN_KE_FEE_TRAFFIC_ROWS: LinKeFeeTrafficRow[] = [
     children: [
       { source: "7001", label: "商家内容" },
       { source: "7002", label: "达人内容" },
-      { source: "7003", label: "职人内容" },
+      { source: "7003", label: "职人内容", max: 20 },
     ],
   },
   {
@@ -537,7 +538,7 @@ function getActiveTrafficFields(rates: Pick<LinKeFeeRates, "singleSettings">): L
       const fields: LinKeActiveFeeTrafficField[] = row.children.map((child) => ({
         source: child.source,
         label: child.label,
-        max: CHILD_OPEN_MAX,
+        max: getChildOpenMax(child),
         parentSource: row.source,
         parentLabel: row.label,
         isChild: true,
@@ -554,6 +555,10 @@ function getActiveTrafficFields(rates: Pick<LinKeFeeRates, "singleSettings">): L
     }];
     return fields;
   });
+}
+
+function getChildOpenMax(child: LinKeFeeTrafficChild): number {
+  return child.max ?? CHILD_OPEN_MAX;
 }
 
 function resolveActiveTrafficFields(response: unknown, linkeGoodsId: string, rates: LinKeFeeRates): LinKeActiveFeeTrafficField[] {
@@ -853,12 +858,19 @@ function getTrafficSourceRange(
   field: LinKeActiveFeeTrafficField,
 ): { min: number; max: number; source: "linke" | "local" } {
   const range = rangeMap[field.source];
+  const localMax = field.max * 100;
   if (isRecord(range)) {
     const min = parseBoundary(range.lower_boundary ?? range.lowerBoundary ?? range.min ?? range.minimum);
     const max = parseBoundary(range.upper_boundary ?? range.upperBoundary ?? range.max ?? range.maximum);
-    if (max !== null) return { min: min ?? 0, max, source: "linke" };
+    if (max !== null) {
+      return {
+        min: min ?? 0,
+        max: Math.min(max, localMax),
+        source: max <= localMax ? "linke" : "local",
+      };
+    }
   }
-  return { min: 0, max: field.max * 100, source: "local" };
+  return { min: 0, max: localMax, source: "local" };
 }
 
 function parseBoundary(value: unknown): number | null {

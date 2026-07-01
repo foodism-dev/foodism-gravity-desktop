@@ -24,6 +24,62 @@ describe("林客费用比例表单逻辑", () => {
     }))).toBe("请填写达人视频费用比例");
   });
 
+  test("Given professional child fields are opened, When values are within 20 percent, Then validation passes", () => {
+    expect(validateLinkeCommission(commissionValues({
+      singleSettings: { "1000": true, "2000": true, "3000": true, "7000": true },
+      values: {
+        "1003": "20.00",
+        "2003": "20.00",
+        "3002": "20.00",
+        "7003": "20.00",
+      },
+    }))).toBe("");
+  });
+
+  test("Given professional child fields are opened, When values exceed 20 percent, Then validation blocks them", () => {
+    expect(validateLinkeCommission(commissionValues({
+      singleSettings: { "1000": true },
+      values: { "1001": "1.00", "1002": "2.00", "1003": "20.01" },
+    }))).toBe("职人视频费用比例不能超过 20.00%");
+    expect(validateLinkeCommission(commissionValues({
+      singleSettings: { "2000": true },
+      values: { "2001": "1.00", "2002": "2.00", "2003": "21" },
+    }))).toBe("职人直播费用比例不能超过 20.00%");
+    expect(validateLinkeCommission(commissionValues({
+      singleSettings: { "3000": true },
+      values: { "3001": "1.00", "3002": "21" },
+    }))).toBe("职人码费用比例不能超过 20.00%");
+    expect(validateLinkeCommission(commissionValues({
+      singleSettings: { "7000": true },
+      values: { "7001": "1.00", "7002": "2.00", "7003": "21" },
+    }))).toBe("职人内容费用比例不能超过 20.00%");
+  });
+
+  test("Given non-professional child fields are opened, When values are 80 percent, Then validation keeps the original range", () => {
+    expect(validateLinkeCommission(commissionValues({
+      singleSettings: { "1000": true, "7000": true },
+      values: {
+        "1001": "80.00",
+        "1002": "80.00",
+        "1003": "20.00",
+        "7001": "80.00",
+        "7002": "80.00",
+        "7003": "20.00",
+      },
+    }))).toBe("");
+  });
+
+  test("Given acquisition card is not opened, When value is 80 percent, Then validation keeps the closed row range", () => {
+    expect(validateLinkeCommission(commissionValues({
+      singleSettings: { "5000": false },
+      values: { "5000": "80.00" },
+    }))).toBe("");
+    expect(validateLinkeCommission(commissionValues({
+      singleSettings: { "5000": false },
+      values: { "5000": "80.01" },
+    }))).toBe("获客卡费用比例不能超过 80.00%");
+  });
+
   test("Given default fill is used, When rows have single setting enabled, Then opened children are not overwritten", () => {
     const values = commissionValues({
       singleSettings: { "1000": true, "7000": true },

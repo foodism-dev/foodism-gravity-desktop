@@ -37,6 +37,7 @@ describe("Lin-Ke fee setup helpers", () => {
         ...feeRates().values,
         "1000": "4.00",
         "4000": "80",
+        "5000": "80",
       },
     };
 
@@ -46,6 +47,7 @@ describe("Lin-Ke fee setup helpers", () => {
       values: {
         "1000": 4,
         "4000": 80,
+        "5000": 80,
       },
       singleSettings: {
         "1000": false,
@@ -65,6 +67,27 @@ describe("Lin-Ke fee setup helpers", () => {
       singleSettings: {},
     })).toBeNull();
     expect(validateLinKeFeeRates(feeRates({ values: { "1000": 21 } }))).toBe("视频费用比例不能超过 20.00%");
+    expect(validateLinKeFeeRates(feeRates({ values: { "5000": 81 } }))).toBe("获客卡费用比例不能超过 80.00%");
+    expect(validateLinKeFeeRates(feeRates({
+      singleSettings: { "1000": true },
+      values: { "1001": 80, "1002": 80, "1003": 21 },
+    }))).toBe("职人视频费用比例不能超过 20.00%");
+    expect(validateLinKeFeeRates(feeRates({
+      singleSettings: { "2000": true },
+      values: { "2001": 80, "2002": 80, "2003": 21 },
+    }))).toBe("职人直播费用比例不能超过 20.00%");
+    expect(validateLinKeFeeRates(feeRates({
+      singleSettings: { "3000": true },
+      values: { "3001": 80, "3002": 21 },
+    }))).toBe("职人码费用比例不能超过 20.00%");
+    expect(validateLinKeFeeRates(feeRates({
+      singleSettings: { "7000": true },
+      values: { "7001": 80, "7002": 80, "7003": 21 },
+    }))).toBe("职人内容费用比例不能超过 20.00%");
+    expect(normalizeLinKeFeeRates(feeRates({
+      singleSettings: { "1000": true },
+      values: { "1001": 80, "1002": 80, "1003": 21 },
+    }))).toBeNull();
     expect(validateLinKeFeeRates({
       ...feeRates({ singleSettings: { "1000": true } }),
       values: { ...feeRates().values, "1001": 80, "1002": 80, "1003": "80.001" },
@@ -178,7 +201,7 @@ describe("Lin-Ke fee setup helpers", () => {
           "2000": 2,
           "3000": 3,
           "4000": 4,
-          "5000": 5,
+          "5000": 80,
           "7000": 6,
           "7100": 7,
         },
@@ -243,7 +266,7 @@ describe("Lin-Ke fee setup helpers", () => {
           "2000": { commission_ratio: "200", commission_mode: 0 },
           "3000": { commission_ratio: "300", commission_mode: 0 },
           "4000": { commission_ratio: "400", commission_mode: 0 },
-          "5000": { commission_ratio: "500", commission_mode: 0 },
+          "5000": { commission_ratio: "8000", commission_mode: 0 },
           "7000": { commission_ratio: "600", commission_mode: 0 },
           "7100": { commission_ratio: "700", commission_mode: 0 },
         },
@@ -287,7 +310,7 @@ describe("Lin-Ke fee setup helpers", () => {
           "1003": 13,
           "2000": 0,
           "3001": 31,
-          "3002": 32,
+          "3002": 13,
           "4000": 0,
           "5000": 0,
           "7000": 0,
@@ -305,7 +328,7 @@ describe("Lin-Ke fee setup helpers", () => {
           "1003": { commission_ratio: "1300", commission_mode: 0 },
           "2000": { commission_ratio: "0", commission_mode: 0 },
           "3001": { commission_ratio: "3100", commission_mode: 0 },
-          "3002": { commission_ratio: "3200", commission_mode: 0 },
+          "3002": { commission_ratio: "1300", commission_mode: 0 },
           "4000": { commission_ratio: "0", commission_mode: 0 },
           "5000": { commission_ratio: "0", commission_mode: 0 },
           "7000": { commission_ratio: "0", commission_mode: 0 },
@@ -1075,7 +1098,7 @@ describe("Lin-Ke fee setup helpers", () => {
         data: { product_item_list: [{ product_id: "1839261398040620" }] },
       },
       saveInfo: saveInfoResponse("1839261398040620", {
-        "1003": { upper_boundary: 2000, lower_boundary: 0 },
+        "1003": { upper_boundary: 1500, lower_boundary: 0 },
       }),
     });
 
@@ -1086,9 +1109,32 @@ describe("Lin-Ke fee setup helpers", () => {
       linkeGoodsId: "1839261398040620",
       rates: feeRates({
         singleSettings: { "1000": true },
-        values: { "1001": 1, "1002": 2, "1003": 21 },
+        values: { "1001": 1, "1002": 2, "1003": 16 },
       }),
-    })).rejects.toThrow("职人视频费用比例超出林客范围 0.00% ~ 20.00%");
+    })).rejects.toThrow("职人视频费用比例超出林客范围 0.00% ~ 15.00%");
+  });
+
+  test("Given Lin-Ke child range is wider than local professional limit, When opened professional row exceeds 20 percent, Then local range wins", async () => {
+    const session = mockSession([], {
+      orderList: signedOrderListResponse(),
+      orderDetail: signedOrderDetailResponse(),
+      productList: {
+        status_code: 0,
+        data: { product_item_list: [{ product_id: "1839261398040620" }] },
+      },
+      saveInfo: saveInfoResponse("1839261398040620"),
+    });
+
+    await expect(createDefaultLinKeFeeSetupClient().setupFee({
+      session,
+      accountConfig: accountConfig(),
+      merchantId: "7533179826136549428",
+      linkeGoodsId: "1839261398040620",
+      rates: feeRates({
+        singleSettings: { "1000": true },
+        values: { "1001": 80, "1002": 80, "1003": 21 },
+      }),
+    })).rejects.toThrow("职人视频费用比例超出允许范围 0.00% ~ 20.00%");
   });
 });
 
@@ -1291,7 +1337,7 @@ function saveInfoResponse(
     "3001": { upper_boundary: 8000, lower_boundary: 0 },
     "3002": { upper_boundary: 8000, lower_boundary: 0 },
     "4000": { upper_boundary: 8000, lower_boundary: 0 },
-    "5000": { upper_boundary: 2000, lower_boundary: 0 },
+    "5000": { upper_boundary: 8000, lower_boundary: 0 },
     "5001": { upper_boundary: 8000, lower_boundary: 0 },
     "5002": { upper_boundary: 8000, lower_boundary: 0 },
     "7000": { upper_boundary: 2000, lower_boundary: 0 },
@@ -1325,7 +1371,7 @@ function parentOnlySaveInfoResponse(productId: string) {
             "2000": { upper_boundary: 2000, lower_boundary: 0 },
             "3000": { upper_boundary: 2000, lower_boundary: 0 },
             "4000": { upper_boundary: 8000, lower_boundary: 0 },
-            "5000": { upper_boundary: 2000, lower_boundary: 0 },
+            "5000": { upper_boundary: 8000, lower_boundary: 0 },
             "7000": { upper_boundary: 2000, lower_boundary: 0 },
             "7100": { upper_boundary: 8000, lower_boundary: 0 },
           },
