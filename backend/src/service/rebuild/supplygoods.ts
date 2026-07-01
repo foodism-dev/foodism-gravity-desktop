@@ -4,6 +4,7 @@ import {
   rebuildSupplyCompany,
   rebuildSupplyGoods,
   rebuildSupplyGoodsCallbackRecords,
+  rebuildSupplyHost,
   ticketActionRecords,
   tickets,
 } from "../../db/schema.ts";
@@ -26,11 +27,18 @@ export interface SupplyGoodsRecordUpsertInput {
   payload: Record<string, unknown>;
   normalizedPayload: Record<string, unknown>;
   supplyCompany?: SupplyCompanyRecordUpsertInput | null;
+  supplyHost?: SupplyHostRecordUpsertInput | null;
   updatedAt: Date;
 }
 
 export interface SupplyCompanyRecordUpsertInput {
   supplyCompanyId: string;
+  payload: Record<string, unknown>;
+  updatedAt: Date;
+}
+
+export interface SupplyHostRecordUpsertInput {
+  supplyHostId: string;
   payload: Record<string, unknown>;
   updatedAt: Date;
 }
@@ -569,6 +577,23 @@ export function createDrizzleSupplyGoodsRecordRepository(db: ServerDatabase): Su
           });
       }
 
+      if (input.supplyHost) {
+        await db
+          .insert(rebuildSupplyHost)
+          .values({
+            supplyHostId: input.supplyHost.supplyHostId,
+            payload: input.supplyHost.payload,
+            updatedAt: input.supplyHost.updatedAt,
+          })
+          .onConflictDoUpdate({
+            target: rebuildSupplyHost.supplyHostId,
+            set: {
+              payload: input.supplyHost.payload,
+              updatedAt: input.supplyHost.updatedAt,
+            },
+          });
+      }
+
       if (!canEnterTicketFromSupplyGoodsPayload(input.normalizedPayload)) {
         return;
       }
@@ -652,6 +677,8 @@ export async function syncSupplyGoodsFromCallback(input: {
   repository: SupplyGoodsRecordRepository;
   assetUploader?: RebuildAssetUploader | null;
   listFields?: () => Promise<RebuildFieldMetadata[]>;
+  listSupplyCompanyFields?: () => Promise<RebuildFieldMetadata[]>;
+  listSupplyHostFields?: () => Promise<RebuildFieldMetadata[]>;
 }): Promise<SupplyGoodsCallbackResult> {
   const updatedAt = new Date();
   let payload: Record<string, unknown> = {};
@@ -668,11 +695,21 @@ export async function syncSupplyGoodsFromCallback(input: {
       payload: normalizedPayload,
       rebuildClient: input.rebuildClient,
     });
+    const linkedRecords = await loadLinkedSupplyGoodsRecords({
+      payload: normalizedPayload,
+      rebuildClient: input.rebuildClient,
+      assetUploader: input.assetUploader,
+      listSupplyCompanyFields: input.listSupplyCompanyFields,
+      listSupplyHostFields: input.listSupplyHostFields,
+      updatedAt,
+    });
     await input.repository.upsertRecord({
       supplyGoodsId: input.supplyGoodsId,
       rawPayload: input.rawPayload,
       payload,
       normalizedPayload,
+      supplyCompany: linkedRecords.supplyCompany ?? undefined,
+      supplyHost: linkedRecords.supplyHost ?? undefined,
       updatedAt,
     });
     await input.repository.createCallbackRecord({
@@ -867,6 +904,68 @@ async function hydrateSupplyGoodsReferenceStatus(input: {
   return hydratedPayload;
 }
 
+async function loadLinkedSupplyGoodsRecords(input: {
+  payload: Record<string, unknown>;
+  rebuildClient: RebuildSupplyGoodsClient;
+  assetUploader?: RebuildAssetUploader | null;
+  listSupplyCompanyFields?: () => Promise<RebuildFieldMetadata[]>;
+  listSupplyHostFields?: () => Promise<RebuildFieldMetadata[]>;
+  updatedAt: Date;
+}): Promise<{
+  supplyCompany: SupplyCompanyRecordUpsertInput | null;
+  supplyHost: SupplyHostRecordUpsertInput | null;
+}> {
+  const supplyCompany = await loadLinkedSupplyCompanyRecord(input);
+  const supplyHost = await loadLinkedSupplyHostRecord(input);
+  return { supplyCompany, supplyHost };
+}
+
+async function loadLinkedSupplyCompanyRecord(input: {
+  payload: Record<string, unknown>;
+  rebuildClient: RebuildSupplyGoodsClient;
+  assetUploader?: RebuildAssetUploader | null;
+  listSupplyCompanyFields?: () => Promise<RebuildFieldMetadata[]>;
+  updatedAt: Date;
+}): Promise<SupplyCompanyRecordUpsertInput | null> {
+  const supplyCompanyId = extractSupplyCompanyId(input.payload);
+  if (!supplyCompanyId || !input.rebuildClient.getSupplyCompany) return null;
+  const payload = await input.rebuildClient.getSupplyCompany(supplyCompanyId);
+  const normalizedPayload = await normalizeSupplyCompanyPayload({
+    supplyCompanyId,
+    payload,
+    assetUploader: input.assetUploader,
+    fields: input.listSupplyCompanyFields ? await input.listSupplyCompanyFields() : [],
+  });
+  return {
+    supplyCompanyId,
+    payload: normalizedPayload,
+    updatedAt: input.updatedAt,
+  };
+}
+
+async function loadLinkedSupplyHostRecord(input: {
+  payload: Record<string, unknown>;
+  rebuildClient: RebuildSupplyGoodsClient;
+  assetUploader?: RebuildAssetUploader | null;
+  listSupplyHostFields?: () => Promise<RebuildFieldMetadata[]>;
+  updatedAt: Date;
+}): Promise<SupplyHostRecordUpsertInput | null> {
+  const supplyHostId = extractSupplyHostId(input.payload);
+  if (!supplyHostId || !input.rebuildClient.getSupplyHost) return null;
+  const payload = await input.rebuildClient.getSupplyHost(supplyHostId);
+  const normalizedPayload = await normalizeSupplyHostPayload({
+    supplyHostId,
+    payload,
+    assetUploader: input.assetUploader,
+    fields: input.listSupplyHostFields ? await input.listSupplyHostFields() : [],
+  });
+  return {
+    supplyHostId,
+    payload: normalizedPayload,
+    updatedAt: input.updatedAt,
+  };
+}
+
 export async function normalizeSupplyGoodsPayload(input: {
   supplyGoodsId: string;
   payload: Record<string, unknown>;
@@ -895,6 +994,21 @@ export async function normalizeSupplyCompanyPayload(input: {
   return normalizeRebuildPayload({
     entityName: SUPPLY_COMPANY_ENTITY,
     recordId: input.supplyCompanyId,
+    payload: input.payload,
+    assetUploader: input.assetUploader,
+    fields: input.fields,
+  });
+}
+
+export async function normalizeSupplyHostPayload(input: {
+  supplyHostId: string;
+  payload: Record<string, unknown>;
+  assetUploader?: RebuildAssetUploader | null;
+  fields: RebuildFieldMetadata[];
+}): Promise<Record<string, unknown>> {
+  return normalizeRebuildPayload({
+    entityName: SUPPLY_HOST_ENTITY,
+    recordId: input.supplyHostId,
     payload: input.payload,
     assetUploader: input.assetUploader,
     fields: input.fields,

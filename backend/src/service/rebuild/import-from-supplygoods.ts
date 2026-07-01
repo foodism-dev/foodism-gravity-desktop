@@ -22,6 +22,8 @@ export interface ImportFromSupplyGoodsInput {
   repository: SupplyGoodsRecordRepository;
   assetUploader?: RebuildAssetUploader | null;
   listFields?: () => Promise<RebuildFieldMetadata[]>;
+  listSupplyCompanyFields?: () => Promise<RebuildFieldMetadata[]>;
+  listSupplyHostFields?: () => Promise<RebuildFieldMetadata[]>;
   pageNo?: number;
   pageSize?: number;
 }
@@ -53,6 +55,8 @@ export async function importFromSupplyGoods(input: ImportFromSupplyGoodsInput): 
         repository: input.repository,
         assetUploader: input.assetUploader,
         listFields: input.listFields,
+        listSupplyCompanyFields: input.listSupplyCompanyFields,
+        listSupplyHostFields: input.listSupplyHostFields,
       });
       synced += 1;
     } catch (error) {

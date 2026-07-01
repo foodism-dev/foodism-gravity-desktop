@@ -45,6 +45,12 @@ export async function processImportFromSupplyGoodsJob(input: {
       listFields: input.fieldMetadataRepository
         ? () => input.fieldMetadataRepository!.listFieldsByEntity("SupplyGoods")
         : undefined,
+      listSupplyCompanyFields: input.fieldMetadataRepository
+        ? () => input.fieldMetadataRepository!.listFieldsByEntity("SupplyCompany")
+        : undefined,
+      listSupplyHostFields: input.fieldMetadataRepository
+        ? () => input.fieldMetadataRepository!.listFieldsByEntity("SupplyHost")
+        : undefined,
       pageNo: pageNo + offset,
       pageSize,
     });

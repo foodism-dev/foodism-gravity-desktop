@@ -10,9 +10,16 @@ import {
   isSupplyGoodsApprovalPassed,
   normalizeSupplyCompanyPayload,
   normalizeSupplyGoodsPayload,
+  syncSupplyGoodsFromCallback,
 } from "./supplygoods.ts";
 import type { RebuildAssetUploader } from "./assets.ts";
 import { TICKET_BUSINESS_STATUS, TICKET_STATUS } from "../../ticket-status.ts";
+import type {
+  RebuildSupplyGoodsClient,
+  SupplyGoodsCallbackRecordInput,
+  SupplyGoodsRecordRepository,
+  SupplyGoodsRecordUpsertInput,
+} from "./supplygoods.ts";
 
 describe("SupplyGoods 工单 payload 初始化", () => {
   test("Given Rebuild approvalState value is passed, When building ticket payload, Then it copies Rebuild data", () => {
@@ -262,5 +269,73 @@ describe("SupplyGoods 工单 payload 初始化", () => {
       companyName: "测试公司",
       businessLicensePicture: ["https://cdn.example.com/SupplyCompany/945-company/businessLicensePicture/license.jpg"],
     });
+  });
+
+  test("Given SupplyGoods links company and host, When syncing callback, Then linked details are included in the upsert", async () => {
+    const saved: SupplyGoodsRecordUpsertInput[] = [];
+    const callbackRecords: SupplyGoodsCallbackRecordInput[] = [];
+    const repository: SupplyGoodsRecordRepository = {
+      async upsertRecord(input): Promise<void> {
+        saved.push(input);
+      },
+      async createCallbackRecord(input): Promise<void> {
+        callbackRecords.push(input);
+      },
+    };
+    const rebuildClient: RebuildSupplyGoodsClient = {
+      async getSupplyGoods(supplyGoodsId): Promise<Record<string, unknown>> {
+        return {
+          SupplyGoodsId: supplyGoodsId,
+          company: {
+            id: "945-company",
+            text: "测试公司",
+            entity: "SupplyCompany",
+          },
+          rbhost: {
+            id: "946-host",
+            text: "测试商户",
+            entity: "SupplyHost",
+          },
+        };
+      },
+      async getSupplyCompany(supplyCompanyId): Promise<Record<string, unknown>> {
+        return {
+          SupplyCompanyId: supplyCompanyId,
+          companyName: "测试公司",
+          guestId: "guest-001",
+        };
+      },
+      async getSupplyHost(supplyHostId): Promise<Record<string, unknown>> {
+        return {
+          SupplyHostId: supplyHostId,
+          hostName: "测试商户",
+        };
+      },
+    };
+
+    await syncSupplyGoodsFromCallback({
+      supplyGoodsId: "944-linked",
+      rawPayload: { primaryId: "944-linked" },
+      rebuildClient,
+      repository,
+      assetUploader: null,
+    });
+
+    expect(saved[0]?.supplyCompany).toMatchObject({
+      supplyCompanyId: "945-company",
+      payload: {
+        SupplyCompanyId: "945-company",
+        companyName: "测试公司",
+        guestId: "guest-001",
+      },
+    });
+    expect(saved[0]?.supplyHost).toMatchObject({
+      supplyHostId: "946-host",
+      payload: {
+        SupplyHostId: "946-host",
+        hostName: "测试商户",
+      },
+    });
+    expect(callbackRecords[0]?.status).toBe("success");
   });
 });

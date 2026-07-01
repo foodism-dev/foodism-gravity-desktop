@@ -68,6 +68,19 @@ describe("从 SupplyGoods 主动导入", () => {
           },
         };
       },
+      async getSupplyCompany(supplyCompanyId: string): Promise<Record<string, unknown>> {
+        return {
+          SupplyCompanyId: supplyCompanyId,
+          companyName: "导入公司",
+          guestId: "guest-import",
+        };
+      },
+      async getSupplyHost(supplyHostId: string): Promise<Record<string, unknown>> {
+        return {
+          SupplyHostId: supplyHostId,
+          hostName: "导入商户",
+        };
+      },
     };
 
     const result = await importFromSupplyGoods({
@@ -89,6 +102,8 @@ describe("从 SupplyGoods 主动导入", () => {
       failures: [],
     });
     expect(saved.map((record) => record.supplyGoodsId)).toEqual(["944-missing-a", "944-missing-b"]);
+    expect(saved.map((record) => record.supplyCompany?.payload.companyName)).toEqual(["导入公司", "导入公司"]);
+    expect(saved.map((record) => record.supplyHost?.payload.hostName)).toEqual(["导入商户", "导入商户"]);
     expect(callbackRecords.map((record) => record.rawPayload)).toEqual([{}, {}]);
     expect(callbackRecords.every((record) => record.status === "success")).toBe(true);
   });

@@ -1021,6 +1021,8 @@ export function createServerApp(options: ServerAppOptions = {}) {
         repository: supplyGoodsRecordRepository,
         assetUploader: rebuildAssetUploader,
         listFields: listSupplyGoodsFields,
+        listSupplyCompanyFields,
+        listSupplyHostFields,
       });
       await enqueueLinkedSupplierSyncJobs({
         queue: gravityJobsQueue,
