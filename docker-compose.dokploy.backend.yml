@@ -41,6 +41,7 @@ x-backend-env: &backend-env
 services:
   backend-migrate:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    pull_policy: always
     restart: "no"
     environment:
       <<: *backend-env
@@ -50,6 +51,7 @@ services:
 
   backend:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       backend-migrate:
@@ -71,30 +73,33 @@ services:
 
   job:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
     environment:
       <<: *backend-env
-    command: ["sh", "-lc", "cd /app/backend && exec bun run src/jobs/worker.ts"]
+    command: ["bun", "run", "/app/backend/src/jobs/worker.ts"]
     networks:
       - dokploy-network
 
   worker:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
     environment:
       <<: *backend-env
-    command: ["sh", "-lc", "cd /app/backend && exec bun run src/jobs/worker.ts"]
+    command: ["bun", "run", "/app/backend/src/jobs/worker.ts"]
     networks:
       - dokploy-network
 
   frontend:
     image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       backend:
