@@ -90,6 +90,12 @@ interface FetchCall {
   init?: RequestInit;
 }
 
+interface MemoryKeyValueCache {
+  get: (key: string) => Promise<string | null>;
+  set: (key: string, value: string, ttlSeconds: number) => Promise<void>;
+  del: (key: string) => Promise<void>;
+}
+
 interface MeResponse {
   user: {
     id: string;
@@ -304,6 +310,29 @@ function createMemoryUserRepository(user: UserWithPasswordHash): UserRepository 
         username: storedUser.username,
         displayName: storedUser.displayName,
       };
+    },
+  };
+}
+
+function createMemoryKeyValueCache(): MemoryKeyValueCache {
+  const values = new Map<string, { value: string; expiresAt: number }>();
+  return {
+    async get(key: string): Promise<string | null> {
+      const entry = values.get(key);
+      if (!entry) return null;
+      if (entry.expiresAt <= Date.now()) {
+        values.delete(key);
+        return null;
+      }
+      return entry.value;
+    },
+
+    async set(key: string, value: string, ttlSeconds: number): Promise<void> {
+      values.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+    },
+
+    async del(key: string): Promise<void> {
+      values.delete(key);
     },
   };
 }
@@ -1417,6 +1446,62 @@ describe("server app", () => {
 
     expect(exchangeResponse.status).toBe(200);
     expect(typeof session.token).toBe("string");
+    expect(session.user).toEqual({
+      id: "sso-user-1",
+      username: "zhangsan",
+      displayName: "张三",
+    });
+    expect(calls.map((call) => call.url.pathname)).toEqual(["/oauth2/token", "/oauth2/account"]);
+  });
+
+  test("Given SSO moves across server instances, When shared session cache is configured, Then callback and exchange still work", async () => {
+    const webSsoSessionCache = createMemoryKeyValueCache();
+    const calls: FetchCall[] = [];
+    const fetchImpl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      calls.push({ url, init });
+      if (url.pathname === "/oauth2/token") {
+        return Response.json({ access_token: "access-token", token_type: "Bearer", expires_in: 1800 });
+      }
+      if (url.pathname === "/oauth2/account") {
+        return Response.json({
+          account: {
+            account: {
+              sub: "sso-user-1",
+              preferred_username: "zhangsan",
+              display_name: "张三",
+            },
+          },
+        });
+      }
+      return Response.json({ message: "unexpected url" }, { status: 500 });
+    };
+    const appOptions = { userRepository: null, fetchImpl, webSsoSessionCache };
+    const loginApp = createServerApp(appOptions);
+    const callbackApp = createServerApp(appOptions);
+    const exchangeApp = createServerApp(appOptions);
+
+    const loginResponse = await loginApp.request(
+      "/sso_login?returnTo=http%3A%2F%2Flocalhost%3A5174%2Ftickets",
+    );
+    const authorizeUrl = new URL(loginResponse.headers.get("Location") ?? "");
+    const state = authorizeUrl.searchParams.get("state");
+
+    const callbackResponse = await callbackApp.request(`/sso/callback?code=auth-code&state=${state}`);
+    expect(callbackResponse.status).toBe(302);
+    const callbackLocation = new URL(callbackResponse.headers.get("Location") ?? "");
+    const handoffToken = callbackLocation.searchParams.get("handoff");
+
+    expect(handoffToken).toBeTruthy();
+
+    const exchangeResponse = await exchangeApp.request("/api/auth/handoff/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handoffToken }),
+    });
+    const session = (await exchangeResponse.json()) as LoginResponse;
+
+    expect(exchangeResponse.status).toBe(200);
     expect(session.user).toEqual({
       id: "sso-user-1",
       username: "zhangsan",

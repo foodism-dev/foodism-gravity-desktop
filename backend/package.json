@@ -1,6 +1,6 @@
 {
   "name": "@proma/server",
-  "version": "0.1.70",
+  "version": "0.1.71",
   "license": "AGPL-3.0-only",
   "description": "Standalone Hono server for Proma",
   "private": true,

@@ -96,6 +96,8 @@ import {
   resolveLinKeMerchantId,
   validateLinKeFeeRates,
 } from "./service/lin-ke/fee-setup.ts";
+import { getRedisKeyValueCache } from "./cache/redis.ts";
+import type { KeyValueCache } from "./cache/key-value.ts";
 
 interface ServerStatus {
   name: string;
@@ -128,6 +130,7 @@ interface ServerAppOptions {
   linKeRoutesOptions?: LinKeRoutesOptions;
   linKeDraftQueue?: LinKeDraftQueueClient | null;
   linKeFeeSetupQueue?: LinKeFeeSetupQueueClient | null;
+  webSsoSessionCache?: KeyValueCache | null;
 }
 
 const DEFAULT_GRAVITY_SSO_ISSUER = "https://fawos.online";
@@ -136,6 +139,8 @@ export const DEFAULT_WEB_SSO_REDIRECT_URI = "http://127.0.0.1:8787/sso/callback"
 const DEFAULT_WEB_SSO_SCOPE = "openid profile email offline_access";
 const WEB_SSO_STATE_TTL_MS = 10 * 60 * 1000;
 const HANDOFF_TOKEN_TTL_MS = 5 * 60 * 1000;
+const WEB_SSO_STATE_CACHE_PREFIX = "web-sso:state:";
+const WEB_SSO_HANDOFF_CACHE_PREFIX = "web-sso:handoff:";
 
 const SENSITIVE_LOG_KEYS = new Set([
   "accessToken",
@@ -336,6 +341,13 @@ interface HandoffSession {
   expiresAt: number;
 }
 
+interface WebSsoSessionStore {
+  setState: (stateToken: string, state: WebSsoState, ttlMs: number) => Promise<void>;
+  takeState: (stateToken: string) => Promise<WebSsoState | null>;
+  setHandoff: (handoffToken: string, handoff: HandoffSession, ttlMs: number) => Promise<void>;
+  takeHandoff: (handoffToken: string) => Promise<HandoffSession | null>;
+}
+
 interface WebSsoConfig {
   issuer: string;
   clientId: string;
@@ -355,6 +367,131 @@ interface SsoTokenSet {
   expires_in?: number;
   refresh_token?: string;
   id_token?: string;
+}
+
+function isWebSsoState(value: unknown): value is WebSsoState {
+  return isRecord(value)
+    && typeof value.verifier === "string"
+    && typeof value.returnTo === "string"
+    && typeof value.redirectUri === "string"
+    && typeof value.expiresAt === "number";
+}
+
+function isLoginResponsePayload(value: unknown): value is LoginResponse {
+  const user = isRecord(value) ? value.user : null;
+  return isRecord(value)
+    && typeof value.token === "string"
+    && isRecord(user)
+    && typeof user.id === "string"
+    && typeof user.username === "string"
+    && typeof user.displayName === "string";
+}
+
+function isHandoffSession(value: unknown): value is HandoffSession {
+  return isRecord(value)
+    && isLoginResponsePayload(value.session)
+    && typeof value.expiresAt === "number";
+}
+
+function parseCachedWebSsoState(value: string): WebSsoState | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isWebSsoState(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseCachedHandoffSession(value: string): HandoffSession | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isHandoffSession(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function createMemoryWebSsoSessionStore(): WebSsoSessionStore {
+  const states = new Map<string, WebSsoState>();
+  const handoffs = new Map<string, HandoffSession>();
+  return {
+    async setState(stateToken: string, state: WebSsoState): Promise<void> {
+      states.set(stateToken, state);
+    },
+
+    async takeState(stateToken: string): Promise<WebSsoState | null> {
+      const state = states.get(stateToken) ?? null;
+      states.delete(stateToken);
+      return state;
+    },
+
+    async setHandoff(handoffToken: string, handoff: HandoffSession): Promise<void> {
+      handoffs.set(handoffToken, handoff);
+    },
+
+    async takeHandoff(handoffToken: string): Promise<HandoffSession | null> {
+      const handoff = handoffs.get(handoffToken) ?? null;
+      handoffs.delete(handoffToken);
+      return handoff;
+    },
+  };
+}
+
+function createCachedWebSsoSessionStore(cache: KeyValueCache): WebSsoSessionStore {
+  const ttlSeconds = (ttlMs: number) => Math.max(1, Math.ceil(ttlMs / 1000));
+  return {
+    async setState(stateToken: string, state: WebSsoState, ttlMs: number): Promise<void> {
+      await cache.set(`${WEB_SSO_STATE_CACHE_PREFIX}${stateToken}`, JSON.stringify(state), ttlSeconds(ttlMs));
+    },
+
+    async takeState(stateToken: string): Promise<WebSsoState | null> {
+      const key = `${WEB_SSO_STATE_CACHE_PREFIX}${stateToken}`;
+      const value = await cache.get(key);
+      await cache.del(key);
+      return value ? parseCachedWebSsoState(value) : null;
+    },
+
+    async setHandoff(handoffToken: string, handoff: HandoffSession, ttlMs: number): Promise<void> {
+      await cache.set(`${WEB_SSO_HANDOFF_CACHE_PREFIX}${handoffToken}`, JSON.stringify(handoff), ttlSeconds(ttlMs));
+    },
+
+    async takeHandoff(handoffToken: string): Promise<HandoffSession | null> {
+      const key = `${WEB_SSO_HANDOFF_CACHE_PREFIX}${handoffToken}`;
+      const value = await cache.get(key);
+      await cache.del(key);
+      return value ? parseCachedHandoffSession(value) : null;
+    },
+  };
+}
+
+function createWebSsoSessionStore(cache: KeyValueCache | null): WebSsoSessionStore {
+  const memoryStore = createMemoryWebSsoSessionStore();
+  if (!cache) return memoryStore;
+
+  const cachedStore = createCachedWebSsoSessionStore(cache);
+  return {
+    async setState(stateToken: string, state: WebSsoState, ttlMs: number): Promise<void> {
+      await memoryStore.setState(stateToken, state, ttlMs);
+      await cachedStore.setState(stateToken, state, ttlMs);
+    },
+
+    async takeState(stateToken: string): Promise<WebSsoState | null> {
+      const cachedState = await cachedStore.takeState(stateToken);
+      const memoryState = await memoryStore.takeState(stateToken);
+      return cachedState ?? memoryState;
+    },
+
+    async setHandoff(handoffToken: string, handoff: HandoffSession, ttlMs: number): Promise<void> {
+      await memoryStore.setHandoff(handoffToken, handoff, ttlMs);
+      await cachedStore.setHandoff(handoffToken, handoff, ttlMs);
+    },
+
+    async takeHandoff(handoffToken: string): Promise<HandoffSession | null> {
+      const cachedHandoff = await cachedStore.takeHandoff(handoffToken);
+      const memoryHandoff = await memoryStore.takeHandoff(handoffToken);
+      return cachedHandoff ?? memoryHandoff;
+    },
+  };
 }
 
 function createWebSsoPkce(): WebSsoPkce {
@@ -791,8 +928,10 @@ export function createServerApp(options: ServerAppOptions = {}) {
   const ticketRepository = options.ticketRepository ?? getDefaultTicketRepository();
   const gravityJobsQueue = options.gravityJobsQueue !== undefined ? options.gravityJobsQueue : getDefaultGravityJobsQueue();
   const fetchImpl = options.fetchImpl ?? fetch;
-  const webSsoStates = new Map<string, WebSsoState>();
-  const handoffSessions = new Map<string, HandoffSession>();
+  const webSsoSessionCache = options.webSsoSessionCache !== undefined
+    ? options.webSsoSessionCache
+    : getRedisKeyValueCache();
+  const webSsoSessionStore = createWebSsoSessionStore(webSsoSessionCache);
   const jwtMiddleware = jwt({
     secret: jwtSecret,
     alg: "HS256",
@@ -897,7 +1036,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
   }
 
   app.post("/create_user", (context) => handleSsoInternalAuth(context, "create_user"));
-  app.get("/sso_login", (context) => {
+  app.get("/sso_login", async (context) => {
     const configuredLoginUrl = resolveConfiguredWebSsoLoginUrl();
     if (configuredLoginUrl) {
       const redirectUrl = buildConfiguredWebSsoRedirectUrl(context, configuredLoginUrl);
@@ -907,12 +1046,12 @@ export function createServerApp(options: ServerAppOptions = {}) {
 
     const pkce = createWebSsoPkce();
     const redirectUri = resolveWebSsoRedirectUri(context);
-    webSsoStates.set(pkce.state, {
+    await webSsoSessionStore.setState(pkce.state, {
       verifier: pkce.verifier,
       returnTo: resolveWebSsoReturnTo(context),
       redirectUri,
       expiresAt: Date.now() + WEB_SSO_STATE_TTL_MS,
-    });
+    }, WEB_SSO_STATE_TTL_MS);
 
     const redirectUrl = buildOidcAuthorizeUrl(resolveWebSsoConfig(), pkce, redirectUri);
     console.log(`[认证] Web SSO OIDC 登录跳转: ${redirectUrl}`);
@@ -927,8 +1066,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
       return context.text("SSO 回调缺少 code 或 state", 400);
     }
 
-    const state = webSsoStates.get(stateValue);
-    webSsoStates.delete(stateValue);
+    const state = await webSsoSessionStore.takeState(stateValue);
     if (!state || state.expiresAt < Date.now()) {
       return context.text("SSO 登录状态已失效，请重新登录", 400);
     }
@@ -951,10 +1089,10 @@ export function createServerApp(options: ServerAppOptions = {}) {
         : ssoUser;
       const session = await createLoginResponse(user, jwtSecret);
       const handoffToken = randomUUID();
-      handoffSessions.set(handoffToken, {
+      await webSsoSessionStore.setHandoff(handoffToken, {
         session,
         expiresAt: Date.now() + HANDOFF_TOKEN_TTL_MS,
-      });
+      }, HANDOFF_TOKEN_TTL_MS);
 
       const returnTo = new URL(state.returnTo, getRequestOrigin(context));
       returnTo.searchParams.set("handoff", handoffToken);
@@ -978,8 +1116,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
       return context.json({ error: "Bad Request", message: "handoffToken 不能为空" }, 400);
     }
 
-    const handoff = handoffSessions.get(handoffToken);
-    handoffSessions.delete(handoffToken);
+    const handoff = await webSsoSessionStore.takeHandoff(handoffToken);
     if (!handoff || handoff.expiresAt < Date.now()) {
       return context.json({ error: "Unauthorized", message: "登录态桥接已失效，请重新登录" }, 401);
     }
