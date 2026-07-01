@@ -1,46 +1,50 @@
+x-backend-env: &backend-env
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+  PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-dokploy}
+  PORT: ${PORT:-8787}
+  GRAVITY_SSO_ISSUER: ${GRAVITY_SSO_ISSUER:-}
+  GRAVITY_WEB_REDIRECT_URI: ${GRAVITY_WEB_REDIRECT_URI:-}
+  GRAVITY_WEB_SSO_LOGIN_URL: ${GRAVITY_WEB_SSO_LOGIN_URL:-}
+  GRAVITY_WEB_CLIENT_ID: ${GRAVITY_WEB_CLIENT_ID:-}
+  GRAVITY_WEB_SCOPE: ${GRAVITY_WEB_SCOPE:-}
+  GRAVITY_WEB_DEFAULT_RETURN_TO: ${GRAVITY_WEB_DEFAULT_RETURN_TO:-}
+  REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
+  REBUILD_APP_ID: ${REBUILD_APP_ID:-}
+  REBUILD_APP_SECRET: ${REBUILD_APP_SECRET:-}
+  REBUILD_LOGIN_USER: ${REBUILD_LOGIN_USER:-}
+  REBUILD_LOGIN_PASSWORD: ${REBUILD_LOGIN_PASSWORD:-}
+  REBUILD_LOGIN_COOKIE_TTL_SECONDS: ${REBUILD_LOGIN_COOKIE_TTL_SECONDS:-1800}
+  REBUILD_ASSET_R2_PREFIX: ${REBUILD_ASSET_R2_PREFIX:-rebuild-assets}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  OPTIMIZE_MODEL: ${OPTIMIZE_MODEL:-gpt-4o-mini}
+  OPTIMIZE_CONCURRENCY: ${OPTIMIZE_CONCURRENCY:-5}
+  OPTIMIZE_MAX_BATCH_SIZE: ${OPTIMIZE_MAX_BATCH_SIZE:-20}
+  OPTIMIZE_RETRIES: ${OPTIMIZE_RETRIES:-3}
+  LIN_KE_BASE_URL: ${LIN_KE_BASE_URL:-https://www.life-partner.cn}
+  LIN_KE_TIMEOUT: ${LIN_KE_TIMEOUT:-60}
+  LIN_KE_DRAFT_WORKER_CONCURRENCY: ${LIN_KE_DRAFT_WORKER_CONCURRENCY:-1}
+  LIN_KE_TEST_SKIP_ENABLED: ${LIN_KE_TEST_SKIP_ENABLED:-false}
+  RB_IMAGE_BASE_URL: ${RB_IMAGE_BASE_URL:-}
+  IMPORT_FROM_SUPPLYGOODS_INTERVAL_MS: ${IMPORT_FROM_SUPPLYGOODS_INTERVAL_MS:-300000}
+  IMPORT_FROM_SUPPLYGOODS_PAGES: ${IMPORT_FROM_SUPPLYGOODS_PAGES:-1}
+  GRAVITY_JOBS_WORKER_CONCURRENCY: ${GRAVITY_JOBS_WORKER_CONCURRENCY:-1}
+  CLOUDFLARE_R2_ENDPOINT_URL: ${CLOUDFLARE_R2_ENDPOINT_URL:-}
+  CLOUDFLARE_R2_ACCESS_KEY_ID: ${CLOUDFLARE_R2_ACCESS_KEY_ID:-}
+  CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${CLOUDFLARE_R2_SECRET_ACCESS_KEY:-}
+  CLOUDFLARE_R2_BUCKET: ${CLOUDFLARE_R2_BUCKET:-}
+  CLOUDFLARE_R2_PUBLIC_BASE_URL: ${CLOUDFLARE_R2_PUBLIC_BASE_URL:-}
+  CLOUDFLARE_R2_PREFIX: ${CLOUDFLARE_R2_PREFIX:-upload_file}
+  CLOUDFLARE_R2_REGION: ${CLOUDFLARE_R2_REGION:-auto}
+
 services:
-  postgres:
-    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-proma}
-    volumes:
-      - ${POSTGRES_DATA_DIR:-/home/jik1992/projects/foodism-worker/postgres-data}:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - dokploy-network
-
-  redis:
-    image: ${REDIS_IMAGE:-redis:7-alpine}
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - dokploy-network
-
   backend-migrate:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
     restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-dokploy}
-      REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
-      REBUILD_APP_ID: ${REBUILD_APP_ID:-}
-      REBUILD_APP_SECRET: ${REBUILD_APP_SECRET:-}
-    command: sh -lc "bun run db:create-local && bun run db:migrate && bun run db:seed-local"
+      <<: *backend-env
+    command: ["sh", "-lc", "bun run db:create-local && bun run db:migrate && bun run db:seed-local"]
     networks:
       - dokploy-network
 
@@ -50,25 +54,8 @@ services:
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-dokploy}
-      PORT: ${PORT:-8787}
-      REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
-      REBUILD_APP_ID: ${REBUILD_APP_ID:-}
-      REBUILD_APP_SECRET: ${REBUILD_APP_SECRET:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPTIMIZE_MODEL: ${OPTIMIZE_MODEL:-gpt-4o-mini}
-      OPTIMIZE_CONCURRENCY: ${OPTIMIZE_CONCURRENCY:-5}
-      OPTIMIZE_MAX_BATCH_SIZE: ${OPTIMIZE_MAX_BATCH_SIZE:-20}
-      OPTIMIZE_RETRIES: ${OPTIMIZE_RETRIES:-3}
-      LIN_KE_BASE_URL: ${LIN_KE_BASE_URL:-https://www.life-partner.cn}
-      LIN_KE_TIMEOUT: ${LIN_KE_TIMEOUT:-60}
-      RB_IMAGE_BASE_URL: ${RB_IMAGE_BASE_URL:-}
+      <<: *backend-env
     networks:
       - dokploy-network
     labels:
@@ -82,34 +69,53 @@ services:
       - traefik.http.routers.foodism-gravity-api-websecure.tls.certresolver=letsencrypt
       - traefik.http.services.foodism-gravity-api.loadbalancer.server.port=8787
 
-  backend-worker:
+  job:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
     restart: unless-stopped
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/proma}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      PROMA_SERVER_JWT_SECRET: ${PROMA_SERVER_JWT_SECRET:-change-me-dokploy}
-      REBUILD_BASE_URL: ${REBUILD_BASE_URL:-}
-      REBUILD_APP_ID: ${REBUILD_APP_ID:-}
-      REBUILD_APP_SECRET: ${REBUILD_APP_SECRET:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPTIMIZE_MODEL: ${OPTIMIZE_MODEL:-gpt-4o-mini}
-      OPTIMIZE_CONCURRENCY: ${OPTIMIZE_CONCURRENCY:-5}
-      OPTIMIZE_MAX_BATCH_SIZE: ${OPTIMIZE_MAX_BATCH_SIZE:-20}
-      OPTIMIZE_RETRIES: ${OPTIMIZE_RETRIES:-3}
-      LIN_KE_BASE_URL: ${LIN_KE_BASE_URL:-https://www.life-partner.cn}
-      LIN_KE_TIMEOUT: ${LIN_KE_TIMEOUT:-60}
-      LIN_KE_DRAFT_WORKER_CONCURRENCY: ${LIN_KE_DRAFT_WORKER_CONCURRENCY:-1}
-      RB_IMAGE_BASE_URL: ${RB_IMAGE_BASE_URL:-}
-    command: ["bun", "run", "worker:jobs"]
+      <<: *backend-env
+    command: ["sh", "-lc", "cd /app/backend && exec bun run src/jobs/worker.ts"]
     networks:
       - dokploy-network
+
+  worker:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    restart: unless-stopped
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *backend-env
+    command: ["sh", "-lc", "cd /app/backend && exec bun run src/jobs/worker.ts"]
+    networks:
+      - dokploy-network
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      PORT: ${FRONTEND_PORT:-4173}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:?VITE_API_BASE_URL is required}
+      VITE_SSO_LOGIN_URL: ${VITE_SSO_LOGIN_URL:-}
+      VITE_LIN_KE_TEST_SKIP_ENABLED: ${VITE_LIN_KE_TEST_SKIP_ENABLED:-false}
+    networks:
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.foodism-gravity-frontend-web.rule=Host(`${FRONTEND_HOST}`)
+      - traefik.http.routers.foodism-gravity-frontend-web.entrypoints=web
+      - traefik.http.routers.foodism-gravity-frontend-websecure.rule=Host(`${FRONTEND_HOST}`)
+      - traefik.http.routers.foodism-gravity-frontend-websecure.entrypoints=websecure
+      - traefik.http.routers.foodism-gravity-frontend-websecure.tls=true
+      - traefik.http.routers.foodism-gravity-frontend-websecure.tls.certresolver=letsencrypt
+      - traefik.http.services.foodism-gravity-frontend.loadbalancer.server.port=4173
 
 networks:
   dokploy-network:

@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/AppShell.tsx";
+import { isLinKeTestSkipEnabled } from "@/lib/config.ts";
 import {
   clearSession,
   exchangeHandoffToken,
@@ -43,10 +44,6 @@ const emptyAuthState: AuthState = {
 };
 
 const LIN_KE_TEST_SKIP_STORAGE_KEY = "proma_lin_ke_test_skip_enabled";
-
-function isLinKeTestSkipVisible(): boolean {
-  return import.meta.env.VITE_LIN_KE_TEST_SKIP_ENABLED === "true";
-}
 
 function readStoredLinKeTestSkip(): boolean {
   if (typeof window === "undefined") return false;
@@ -110,7 +107,7 @@ export function App() {
   const [user, setUser] = useState(() => getStoredUser());
   const [isHandoffLoading, setIsHandoffLoading] = useState(false);
   const [handoffError, setHandoffError] = useState<string | null>(null);
-  const linKeTestSkipVisible = isLinKeTestSkipVisible();
+  const linKeTestSkipVisible = isLinKeTestSkipEnabled();
   const [skipLinKeExternal, setSkipLinKeExternal] = useState(() => linKeTestSkipVisible && readStoredLinKeTestSkip());
 
   useEffect(() => {

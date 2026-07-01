@@ -62,6 +62,7 @@ jobs:
           fi
 
           echo "backend_image=ghcr.io/${owner}/foodism-gravity-backend" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=ghcr.io/${owner}/foodism-gravity-frontend" >> "$GITHUB_OUTPUT"
           echo "postgres_image=ghcr.io/${owner}/foodism-gravity-postgres" >> "$GITHUB_OUTPUT"
           echo "sha_tag=${short_sha}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
@@ -91,6 +92,25 @@ jobs:
           push: true
           tags: ${{ steps.backend-meta.outputs.tags }}
           labels: ${{ steps.backend-meta.outputs.labels }}
+
+      - name: 提取 frontend 镜像元数据
+        id: frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.frontend_image }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref_type == 'branch' && github.ref_name == 'test' }}
+            type=raw,value=${{ steps.image.outputs.release_tag }}
+            type=raw,value=${{ steps.image.outputs.sha_tag }}
+
+      - name: 构建并推送 frontend 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
 
       - name: 提取 pg 镜像元数据
         id: postgres-meta
@@ -122,6 +142,9 @@ jobs:
             echo "Backend Docker 镜像已发布"
             echo "- ${{ steps.image.outputs.backend_image }}:${{ steps.image.outputs.sha_tag }}"
             echo "- ${{ steps.image.outputs.backend_image }}:${{ steps.image.outputs.release_tag }}"
+            echo "Frontend Docker 镜像已发布"
+            echo "- ${{ steps.image.outputs.frontend_image }}:${{ steps.image.outputs.sha_tag }}"
+            echo "- ${{ steps.image.outputs.frontend_image }}:${{ steps.image.outputs.release_tag }}"
             echo "- ${{ steps.image.outputs.postgres_image }}:17-alpine-${{ steps.image.outputs.sha_tag }}"
             echo "- ${{ steps.image.outputs.postgres_image }}:17-alpine-${{ steps.image.outputs.release_tag }}"
             if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_REF_NAME}" = "test" ]; then
