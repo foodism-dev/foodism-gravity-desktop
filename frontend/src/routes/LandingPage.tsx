@@ -21,14 +21,14 @@ export function LandingPage({ authState }: LandingPageProps) {
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="default">Web 工单入口</Badge>
             <Badge variant={authState.token ? "success" : "muted"}>
-              {authState.token ? "已接入 PC 登录态" : "等待 PC 登录态桥接"}
+              {authState.token ? "已接入 PC 登录态" : "等待 Web 登录会话"}
             </Badge>
           </div>
           <div className="mt-8 max-w-3xl">
             <h1 className="text-3xl font-semibold tracking-normal text-foreground sm:text-4xl">Proma 工单台</h1>
             <p className="mt-4 text-base leading-7 text-muted-foreground">
-              面向 SupplyGoods 回调、审核状态、附件下载和补查落库链路的工作台。PC 端负责产生一次性
-              handoff token，Web 端交换后进入工单列表和详情。
+              面向 SupplyGoods 回调、审核状态、附件下载和补查落库链路的工作台。Web SSO 登录完成后，
+              后端通过 HttpOnly Cookie 维持浏览器会话。
             </p>
           </div>
           <div className="mt-8 flex flex-wrap gap-3">
@@ -50,21 +50,17 @@ export function LandingPage({ authState }: LandingPageProps) {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Link2 className="h-4 w-4 text-primary" />
-              登录态桥接
+              Web 登录会话
             </CardTitle>
-            <CardDescription>PC 端打开 Web 页面时追加 handoff 参数。</CardDescription>
+            <CardDescription>浏览器会话由后端安全 Cookie 维护。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div className="rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
-              /tickets?handoff=one-time-token
+              Set-Cookie: proma_web_session=...; HttpOnly
             </div>
-            {authState.handoffError ? (
-              <div className="rounded-md bg-destructive/10 p-3 text-destructive">{authState.handoffError}</div>
-            ) : (
-              <div className="rounded-md bg-accent p-3 text-accent-foreground">
-                Web 端只保存短期 token，不直接读取 PC 端本地存储。
-              </div>
-            )}
+            <div className="rounded-md bg-accent p-3 text-accent-foreground">
+              Web 端不读取 Cookie 内容，请求接口时由浏览器自动携带会话。
+            </div>
           </CardContent>
         </Card>
       </section>

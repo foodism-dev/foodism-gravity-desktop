@@ -644,6 +644,24 @@ describe("前端 API", () => {
     expect(globalThis.window.location.href).toBe("http://localhost:5174/tickets?embedded=electron");
   });
 
+  test("Given browser session is stored in HttpOnly cookie, When loading ticket data, Then request includes credentials without bearer auth", async () => {
+    installSessionStorage();
+    const calls = installFetchMock(() => ({
+      tickets: [],
+      pagination: {
+        pageNo: 1,
+        pageSize: 80,
+        total: 0,
+        totalPages: 0,
+      },
+    }));
+
+    await listTickets();
+
+    expect(calls[0]?.init?.credentials).toBe("include");
+    expect(new Headers(calls[0]?.init?.headers).get("Authorization")).toBeNull();
+  });
+
   test("Given API returns 401 in web, When loading ticket data, Then it clears session and redirects to SSO", async () => {
     const sessionStorage = installSessionStorage();
     storeSession({

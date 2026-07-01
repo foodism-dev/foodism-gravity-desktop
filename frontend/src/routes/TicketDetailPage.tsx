@@ -57,7 +57,6 @@ import {
   type TicketMetadata,
   type TicketRecord,
 } from "@/lib/api.ts";
-import { shouldWaitForHandoff } from "@/lib/auth.ts";
 import { getPayloadDisplayText, type FieldDisplayContext } from "@/lib/field-display.ts";
 import {
   isElectronEmbedded,
@@ -263,7 +262,6 @@ const SUPPLY_HOST_REPORT_FIELDS: ReportReferenceField[] = [
 export function TicketDetailPage({ authState, ticketId, isLinKeTestSkipVisible, skipLinKeExternal }: TicketDetailPageProps) {
   const metadataState = useAtomValue(ticketMetadataStateAtom);
   const ensureTicketMetadata = useSetAtom(ensureTicketMetadataAtom);
-  const shouldDelayAuthRequests = shouldWaitForHandoff(authState);
   const [ticket, setTicket] = useState<TicketRecord | null>(null);
   const [records, setRecords] = useState<TicketActionRecord[]>([]);
   const [isLoadingRecords, setIsLoadingRecords] = useState(true);
@@ -272,17 +270,14 @@ export function TicketDetailPage({ authState, ticketId, isLinKeTestSkipVisible, 
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    if (shouldDelayAuthRequests) return;
     void refreshTicket(ticketId);
-  }, [ticketId, authState.token, shouldDelayAuthRequests]);
+  }, [ticketId, authState.token]);
 
   useEffect(() => {
-    if (shouldDelayAuthRequests) return;
     void ensureTicketMetadata();
-  }, [ensureTicketMetadata, shouldDelayAuthRequests]);
+  }, [ensureTicketMetadata]);
 
   useEffect(() => {
-    if (shouldDelayAuthRequests) return;
     let isMounted = true;
     setIsLoadingRecords(true);
     setRecordErrorMessage("");
@@ -300,7 +295,7 @@ export function TicketDetailPage({ authState, ticketId, isLinKeTestSkipVisible, 
     return () => {
       isMounted = false;
     };
-  }, [ticketId, authState.token, shouldDelayAuthRequests]);
+  }, [ticketId, authState.token]);
 
   async function refreshTicket(nextTicketId = ticketId) {
     setIsLoading(true);

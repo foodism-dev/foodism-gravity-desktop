@@ -85,6 +85,8 @@ interface LoginResponse {
   };
 }
 
+const WEB_SESSION_COOKIE_NAME = "proma_web_session";
+
 interface FetchCall {
   url: URL;
   init?: RequestInit;
@@ -335,6 +337,11 @@ function createMemoryKeyValueCache(): MemoryKeyValueCache {
       values.delete(key);
     },
   };
+}
+
+function readCookiePair(setCookie: string | null, name: string): string {
+  const cookiePair = setCookie?.split(";")[0] ?? "";
+  return cookiePair.startsWith(`${name}=`) ? cookiePair : "";
 }
 
 function createMemorySkillRepository(initialSkills: MemoryMarketSkill[]) {
@@ -1230,6 +1237,27 @@ describe("server app", () => {
     expect(response.status).toBe(401);
   });
 
+  test("Given browser session cookie exists, When logout is requested, Then it clears the web session cookie", async () => {
+    const app = createServerApp();
+
+    const loginResponse = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: "foodism123" }),
+    });
+    const cookiePair = readCookiePair(loginResponse.headers.get("Set-Cookie"), WEB_SESSION_COOKIE_NAME);
+
+    const logoutResponse = await app.request("/api/auth/logout", {
+      method: "POST",
+      headers: { Cookie: cookiePair },
+    });
+    const setCookie = logoutResponse.headers.get("Set-Cookie");
+
+    expect(logoutResponse.status).toBe(200);
+    expect(setCookie).toContain(`${WEB_SESSION_COOKIE_NAME}=`);
+    expect(setCookie?.toLowerCase()).toContain("max-age=0");
+  });
+
   test("Given a valid token, When user info is requested, Then it returns current user info", async () => {
     const app = createServerApp();
 
@@ -1392,7 +1420,7 @@ describe("server app", () => {
     expect(url.searchParams.get("code_challenge")).toBeTruthy();
   });
 
-  test("Given SSO callback succeeds, When frontend exchanges handoff token, Then it receives the jwt session", async () => {
+  test("Given SSO callback succeeds, When browser returns to frontend, Then it receives an HttpOnly session cookie", async () => {
     const calls: FetchCall[] = [];
     const fetchImpl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
@@ -1429,24 +1457,23 @@ describe("server app", () => {
 
     const callbackResponse = await app.request(`/sso/callback?code=auth-code&state=${state}`);
     const callbackLocation = new URL(callbackResponse.headers.get("Location") ?? "");
-    const handoffToken = callbackLocation.searchParams.get("handoff");
+    const cookiePair = readCookiePair(callbackResponse.headers.get("Set-Cookie"), WEB_SESSION_COOKIE_NAME);
 
     expect(callbackResponse.status).toBe(302);
     expect(callbackLocation.origin).toBe("http://localhost:5174");
     expect(callbackLocation.pathname).toBe("/tickets");
     expect(callbackLocation.searchParams.get("tab")).toBe("workbench");
-    expect(handoffToken).toBeTruthy();
+    expect(callbackLocation.searchParams.get("handoff")).toBeNull();
+    expect(callbackResponse.headers.get("Set-Cookie")).toContain("HttpOnly");
+    expect(cookiePair).toStartWith(`${WEB_SESSION_COOKIE_NAME}=`);
 
-    const exchangeResponse = await app.request("/api/auth/handoff/exchange", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handoffToken }),
+    const meResponse = await app.request("/api/me", {
+      headers: { Cookie: cookiePair },
     });
-    const session = (await exchangeResponse.json()) as LoginResponse;
+    const me = (await meResponse.json()) as MeResponse;
 
-    expect(exchangeResponse.status).toBe(200);
-    expect(typeof session.token).toBe("string");
-    expect(session.user).toEqual({
+    expect(meResponse.status).toBe(200);
+    expect(me.user).toEqual({
       id: "sso-user-1",
       username: "zhangsan",
       displayName: "张三",
@@ -1454,7 +1481,7 @@ describe("server app", () => {
     expect(calls.map((call) => call.url.pathname)).toEqual(["/oauth2/token", "/oauth2/account"]);
   });
 
-  test("Given SSO moves across server instances, When shared session cache is configured, Then callback and exchange still work", async () => {
+  test("Given SSO moves across server instances, When shared state cache is configured, Then callback still writes a usable session cookie", async () => {
     const webSsoSessionCache = createMemoryKeyValueCache();
     const calls: FetchCall[] = [];
     const fetchImpl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -1479,7 +1506,6 @@ describe("server app", () => {
     const appOptions = { userRepository: null, fetchImpl, webSsoSessionCache };
     const loginApp = createServerApp(appOptions);
     const callbackApp = createServerApp(appOptions);
-    const exchangeApp = createServerApp(appOptions);
 
     const loginResponse = await loginApp.request(
       "/sso_login?returnTo=http%3A%2F%2Flocalhost%3A5174%2Ftickets",
@@ -1490,19 +1516,18 @@ describe("server app", () => {
     const callbackResponse = await callbackApp.request(`/sso/callback?code=auth-code&state=${state}`);
     expect(callbackResponse.status).toBe(302);
     const callbackLocation = new URL(callbackResponse.headers.get("Location") ?? "");
-    const handoffToken = callbackLocation.searchParams.get("handoff");
+    const cookiePair = readCookiePair(callbackResponse.headers.get("Set-Cookie"), WEB_SESSION_COOKIE_NAME);
 
-    expect(handoffToken).toBeTruthy();
+    expect(callbackLocation.searchParams.get("handoff")).toBeNull();
+    expect(cookiePair).toStartWith(`${WEB_SESSION_COOKIE_NAME}=`);
 
-    const exchangeResponse = await exchangeApp.request("/api/auth/handoff/exchange", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handoffToken }),
+    const meResponse = await callbackApp.request("/api/me", {
+      headers: { Cookie: cookiePair },
     });
-    const session = (await exchangeResponse.json()) as LoginResponse;
+    const me = (await meResponse.json()) as MeResponse;
 
-    expect(exchangeResponse.status).toBe(200);
-    expect(session.user).toEqual({
+    expect(meResponse.status).toBe(200);
+    expect(me.user).toEqual({
       id: "sso-user-1",
       username: "zhangsan",
       displayName: "张三",

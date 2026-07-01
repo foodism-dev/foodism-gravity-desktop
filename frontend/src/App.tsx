@@ -12,8 +12,8 @@ import { AppShell } from "@/components/AppShell.tsx";
 import { isLinKeTestSkipEnabled } from "@/lib/config.ts";
 import {
   clearHandoffFromCurrentUrl,
+  clearServerSession,
   clearSession,
-  exchangeHandoffToken,
   getStoredToken,
   getStoredUser,
   type FrontendUser,
@@ -25,8 +25,6 @@ import { TicketsPage } from "@/routes/TicketsPage.tsx";
 export interface AuthState {
   token: string | null;
   user: FrontendUser | null;
-  isHandoffLoading: boolean;
-  handoffError: string | null;
 }
 
 interface RouterContext {
@@ -40,8 +38,6 @@ interface RouterContext {
 const emptyAuthState: AuthState = {
   token: null,
   user: null,
-  isHandoffLoading: false,
-  handoffError: null,
 };
 
 const LIN_KE_TEST_SKIP_STORAGE_KEY = "proma_lin_ke_test_skip_enabled";
@@ -106,8 +102,6 @@ declare module "@tanstack/react-router" {
 export function App() {
   const [token, setToken] = useState(() => getStoredToken());
   const [user, setUser] = useState(() => getStoredUser());
-  const [isHandoffLoading, setIsHandoffLoading] = useState(false);
-  const [handoffError, setHandoffError] = useState<string | null>(null);
   const linKeTestSkipVisible = isLinKeTestSkipEnabled();
   const [skipLinKeExternal, setSkipLinKeExternal] = useState(() => linKeTestSkipVisible && readStoredLinKeTestSkip());
 
@@ -118,35 +112,19 @@ export function App() {
       return;
     }
 
-    setIsHandoffLoading(true);
-    setHandoffError(null);
-    exchangeHandoffToken(handoffToken)
-      .then((session) => {
-        setToken(session.token);
-        setUser(session.user);
-        params.delete("handoff");
-        const nextSearch = params.toString();
-        const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`;
-        window.history.replaceState(null, "", nextUrl);
-      })
-      .catch((error: unknown) => {
-        clearHandoffFromCurrentUrl();
-        setHandoffError(error instanceof Error ? error.message : "PC 登录态桥接失败");
-      })
-      .finally(() => setIsHandoffLoading(false));
+    clearHandoffFromCurrentUrl();
   }, []);
 
   const authState = useMemo<AuthState>(
     () => ({
       token,
       user,
-      isHandoffLoading,
-      handoffError,
     }),
-    [handoffError, isHandoffLoading, token, user],
+    [token, user],
   );
 
   function handleSignOut() {
+    void clearServerSession();
     clearSession();
     setToken(null);
     setUser(null);

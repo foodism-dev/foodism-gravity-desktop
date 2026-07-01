@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  clearServerSession,
   clearHandoffFromCurrentUrl,
   clearSession,
   getStoredToken,
   getStoredUser,
-  shouldWaitForHandoff,
   storeSession,
 } from "./auth.ts";
+
+process.env.VITE_API_BASE_URL = "http://localhost:8787";
 
 interface StorageLike {
   getItem(key: string): string | null;
@@ -54,6 +56,15 @@ function installWindow(input: {
   return { sessionStorage, localStorage };
 }
 
+function installFetchMock() {
+  const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+  globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    calls.push({ url: String(input), init });
+    return Response.json({ ok: true });
+  };
+  return calls;
+}
+
 describe("前端登录持久化", () => {
   test("Given stored session, When sessionStorage is reset by reload, Then token and user are restored from localStorage", () => {
     const localStorage = createMemoryStorage();
@@ -89,12 +100,6 @@ describe("前端登录持久化", () => {
     expect(globalThis.window.location.href).toBe("http://localhost:5174/tickets?embedded=electron&tab=workbench");
   });
 
-  test("Given handoff exchange is loading, When authenticated data wants to load, Then it waits for handoff first", () => {
-    expect(shouldWaitForHandoff({ token: null, isHandoffLoading: true })).toBe(true);
-    expect(shouldWaitForHandoff({ token: "pc-token", isHandoffLoading: false })).toBe(false);
-    expect(shouldWaitForHandoff({ token: null, isHandoffLoading: false })).toBe(false);
-  });
-
   test("Given stored session, When clearing session, Then both persistent and session caches are removed", () => {
     const { localStorage, sessionStorage } = installWindow();
     storeSession({
@@ -108,5 +113,16 @@ describe("前端登录持久化", () => {
     expect(localStorage.getItem("proma_frontend_user")).toBeNull();
     expect(sessionStorage.getItem("proma_frontend_token")).toBeNull();
     expect(sessionStorage.getItem("proma_frontend_user")).toBeNull();
+  });
+
+  test("Given web session cookie may exist, When clearing server session, Then it asks backend to expire the cookie", async () => {
+    installWindow();
+    const calls = installFetchMock();
+
+    await clearServerSession();
+
+    expect(calls[0]?.url).toBe("http://localhost:8787/api/auth/logout");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.credentials).toBe("include");
   });
 });

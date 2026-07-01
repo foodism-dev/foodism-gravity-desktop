@@ -1,8 +1,10 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Hono } from "hono";
+import { deleteCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { jwt } from "hono/jwt";
 import type { Context } from "hono";
+import type { CookieOptions } from "hono/utils/cookie";
 import {
   authenticateLogin,
   createLoginResponse,
@@ -138,9 +140,15 @@ const DEFAULT_WEB_SSO_CLIENT_ID = "gravity-pc";
 export const DEFAULT_WEB_SSO_REDIRECT_URI = "http://127.0.0.1:8787/sso/callback";
 const DEFAULT_WEB_SSO_SCOPE = "openid profile email offline_access";
 const WEB_SSO_STATE_TTL_MS = 10 * 60 * 1000;
-const HANDOFF_TOKEN_TTL_MS = 5 * 60 * 1000;
 const WEB_SSO_STATE_CACHE_PREFIX = "web-sso:state:";
-const WEB_SSO_HANDOFF_CACHE_PREFIX = "web-sso:handoff:";
+const WEB_SESSION_COOKIE_NAME = "proma_web_session";
+const WEB_SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+const DEFAULT_WEB_CORS_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://testpc.foodism.pro",
+  "https://pc.foodism.pro",
+];
 
 const SENSITIVE_LOG_KEYS = new Set([
   "accessToken",
@@ -336,16 +344,9 @@ interface WebSsoState {
   expiresAt: number;
 }
 
-interface HandoffSession {
-  session: LoginResponse;
-  expiresAt: number;
-}
-
 interface WebSsoSessionStore {
   setState: (stateToken: string, state: WebSsoState, ttlMs: number) => Promise<void>;
   takeState: (stateToken: string) => Promise<WebSsoState | null>;
-  setHandoff: (handoffToken: string, handoff: HandoffSession, ttlMs: number) => Promise<void>;
-  takeHandoff: (handoffToken: string) => Promise<HandoffSession | null>;
 }
 
 interface WebSsoConfig {
@@ -377,22 +378,6 @@ function isWebSsoState(value: unknown): value is WebSsoState {
     && typeof value.expiresAt === "number";
 }
 
-function isLoginResponsePayload(value: unknown): value is LoginResponse {
-  const user = isRecord(value) ? value.user : null;
-  return isRecord(value)
-    && typeof value.token === "string"
-    && isRecord(user)
-    && typeof user.id === "string"
-    && typeof user.username === "string"
-    && typeof user.displayName === "string";
-}
-
-function isHandoffSession(value: unknown): value is HandoffSession {
-  return isRecord(value)
-    && isLoginResponsePayload(value.session)
-    && typeof value.expiresAt === "number";
-}
-
 function parseCachedWebSsoState(value: string): WebSsoState | null {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -402,18 +387,8 @@ function parseCachedWebSsoState(value: string): WebSsoState | null {
   }
 }
 
-function parseCachedHandoffSession(value: string): HandoffSession | null {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return isHandoffSession(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 function createMemoryWebSsoSessionStore(): WebSsoSessionStore {
   const states = new Map<string, WebSsoState>();
-  const handoffs = new Map<string, HandoffSession>();
   return {
     async setState(stateToken: string, state: WebSsoState): Promise<void> {
       states.set(stateToken, state);
@@ -423,16 +398,6 @@ function createMemoryWebSsoSessionStore(): WebSsoSessionStore {
       const state = states.get(stateToken) ?? null;
       states.delete(stateToken);
       return state;
-    },
-
-    async setHandoff(handoffToken: string, handoff: HandoffSession): Promise<void> {
-      handoffs.set(handoffToken, handoff);
-    },
-
-    async takeHandoff(handoffToken: string): Promise<HandoffSession | null> {
-      const handoff = handoffs.get(handoffToken) ?? null;
-      handoffs.delete(handoffToken);
-      return handoff;
     },
   };
 }
@@ -451,16 +416,6 @@ function createCachedWebSsoSessionStore(cache: KeyValueCache): WebSsoSessionStor
       return value ? parseCachedWebSsoState(value) : null;
     },
 
-    async setHandoff(handoffToken: string, handoff: HandoffSession, ttlMs: number): Promise<void> {
-      await cache.set(`${WEB_SSO_HANDOFF_CACHE_PREFIX}${handoffToken}`, JSON.stringify(handoff), ttlSeconds(ttlMs));
-    },
-
-    async takeHandoff(handoffToken: string): Promise<HandoffSession | null> {
-      const key = `${WEB_SSO_HANDOFF_CACHE_PREFIX}${handoffToken}`;
-      const value = await cache.get(key);
-      await cache.del(key);
-      return value ? parseCachedHandoffSession(value) : null;
-    },
   };
 }
 
@@ -481,16 +436,6 @@ function createWebSsoSessionStore(cache: KeyValueCache | null): WebSsoSessionSto
       return cachedState ?? memoryState;
     },
 
-    async setHandoff(handoffToken: string, handoff: HandoffSession, ttlMs: number): Promise<void> {
-      await memoryStore.setHandoff(handoffToken, handoff, ttlMs);
-      await cachedStore.setHandoff(handoffToken, handoff, ttlMs);
-    },
-
-    async takeHandoff(handoffToken: string): Promise<HandoffSession | null> {
-      const cachedHandoff = await cachedStore.takeHandoff(handoffToken);
-      const memoryHandoff = await memoryStore.takeHandoff(handoffToken);
-      return cachedHandoff ?? memoryHandoff;
-    },
   };
 }
 
@@ -544,6 +489,61 @@ function resolveWebSsoReturnTo(context: Context): string {
   return context.req.query("returnTo")?.trim()
     || Bun.env.GRAVITY_WEB_DEFAULT_RETURN_TO?.trim()
     || new URL("/", getRequestOrigin(context)).toString();
+}
+
+function parseOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function resolveAllowedWebOrigins(): string[] {
+  const configuredOrigins = Bun.env.GRAVITY_WEB_ALLOWED_ORIGINS?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean) ?? [];
+  const defaultReturnToOrigin = Bun.env.GRAVITY_WEB_DEFAULT_RETURN_TO
+    ? parseOrigin(Bun.env.GRAVITY_WEB_DEFAULT_RETURN_TO)
+    : null;
+  return [...new Set([
+    ...DEFAULT_WEB_CORS_ORIGINS,
+    ...configuredOrigins,
+    ...(defaultReturnToOrigin ? [defaultReturnToOrigin] : []),
+  ])];
+}
+
+function resolveCorsOrigin(origin: string): string | null {
+  if (!origin) return null;
+  return resolveAllowedWebOrigins().includes(origin) ? origin : null;
+}
+
+function isSecureRequest(context: Context): boolean {
+  const forwardedProto = context.req.header("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+  return new URL(context.req.url).protocol === "https:";
+}
+
+function getWebSessionCookieOptions(context: Context): CookieOptions {
+  return {
+    httpOnly: true,
+    maxAge: WEB_SESSION_COOKIE_MAX_AGE_SECONDS,
+    path: "/",
+    sameSite: "Lax",
+    secure: isSecureRequest(context),
+  };
+}
+
+function setWebSessionCookie(context: Context, session: LoginResponse): void {
+  setCookie(context, WEB_SESSION_COOKIE_NAME, session.token, getWebSessionCookieOptions(context));
+}
+
+function clearWebSessionCookie(context: Context): void {
+  deleteCookie(context, WEB_SESSION_COOKIE_NAME, {
+    path: "/",
+    sameSite: "Lax",
+    secure: isSecureRequest(context),
+  });
 }
 
 function buildOidcAuthorizeUrl(config: WebSsoConfig, pkce: WebSsoPkce, redirectUri: string): string {
@@ -935,6 +935,7 @@ export function createServerApp(options: ServerAppOptions = {}) {
   const jwtMiddleware = jwt({
     secret: jwtSecret,
     alg: "HS256",
+    cookie: WEB_SESSION_COOKIE_NAME,
   });
   const requireApiUser = async (
     context: Context<{ Variables: ServerVariables }>,
@@ -960,7 +961,10 @@ export function createServerApp(options: ServerAppOptions = {}) {
     configuredLinKeFeeSetupQueue !== undefined ? configuredLinKeFeeSetupQueue : getDefaultLinKeFeeSetupQueue()
   );
 
-  app.use("/api/*", cors());
+  app.use("/api/*", cors({
+    origin: (origin) => resolveCorsOrigin(origin),
+    credentials: true,
+  }));
   app.route("/", createLinKeRoutes(options.linKeRoutesOptions));
 
   app.get("/health", (context) => {
@@ -1007,7 +1011,14 @@ export function createServerApp(options: ServerAppOptions = {}) {
     }
 
     console.log(`[认证] 用户已登录: ${user.username}`);
-    return context.json(await createLoginResponse(user, jwtSecret));
+    const session = await createLoginResponse(user, jwtSecret);
+    setWebSessionCookie(context, session);
+    return context.json(session);
+  });
+
+  app.post("/api/auth/logout", (context) => {
+    clearWebSessionCookie(context);
+    return context.json({ ok: true });
   });
 
   async function handleSsoInternalAuth(
@@ -1032,7 +1043,9 @@ export function createServerApp(options: ServerAppOptions = {}) {
       : ssoUser;
 
     console.log(`[认证] SSO 用户已换取内部 JWT: ${user.username} (${authAction})`);
-    return context.json(await createLoginResponse(user, jwtSecret));
+    const session = await createLoginResponse(user, jwtSecret);
+    setWebSessionCookie(context, session);
+    return context.json(session);
   }
 
   app.post("/create_user", (context) => handleSsoInternalAuth(context, "create_user"));
@@ -1088,14 +1101,9 @@ export function createServerApp(options: ServerAppOptions = {}) {
         ? await userRepository.ensureSsoUser(ssoUser)
         : ssoUser;
       const session = await createLoginResponse(user, jwtSecret);
-      const handoffToken = randomUUID();
-      await webSsoSessionStore.setHandoff(handoffToken, {
-        session,
-        expiresAt: Date.now() + HANDOFF_TOKEN_TTL_MS,
-      }, HANDOFF_TOKEN_TTL_MS);
+      setWebSessionCookie(context, session);
 
       const returnTo = new URL(state.returnTo, getRequestOrigin(context));
-      returnTo.searchParams.set("handoff", handoffToken);
       console.log(`[认证] Web SSO 已完成，回跳前端: ${returnTo.origin}${returnTo.pathname}`);
       return context.redirect(returnTo.toString(), 302);
     } catch (error) {
@@ -1106,23 +1114,6 @@ export function createServerApp(options: ServerAppOptions = {}) {
 
   app.get("/callback", handleWebSsoCallback);
   app.get("/sso/callback", handleWebSsoCallback);
-
-  app.post("/api/auth/handoff/exchange", async (context) => {
-    const body = (await context.req.json().catch(() => null)) as unknown;
-    const handoffToken = isRecord(body) && typeof body.handoffToken === "string"
-      ? body.handoffToken.trim()
-      : "";
-    if (!handoffToken) {
-      return context.json({ error: "Bad Request", message: "handoffToken 不能为空" }, 400);
-    }
-
-    const handoff = await webSsoSessionStore.takeHandoff(handoffToken);
-    if (!handoff || handoff.expiresAt < Date.now()) {
-      return context.json({ error: "Unauthorized", message: "登录态桥接已失效，请重新登录" }, 401);
-    }
-
-    return context.json(handoff.session);
-  });
 
   // 用户态业务接口统一从 JWT 解析当前用户，避免信任前端传入的操作者信息。
   app.use("/api/me", jwtMiddleware, requireApiUser);

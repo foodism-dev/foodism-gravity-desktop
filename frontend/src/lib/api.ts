@@ -289,6 +289,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
+    credentials: "include",
     headers,
   });
 

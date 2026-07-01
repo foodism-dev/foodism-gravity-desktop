@@ -14,16 +14,6 @@ export interface AuthSession {
   user: FrontendUser;
 }
 
-interface HandoffLoadState {
-  token: string | null;
-  isHandoffLoading: boolean;
-}
-
-interface HandoffExchangeResponse {
-  token: string;
-  user: FrontendUser;
-}
-
 export function getStoredToken() {
   const token = readStorageValue(TOKEN_KEY);
   if (token) {
@@ -56,8 +46,13 @@ export function clearSession() {
   removeStorageValue(USER_KEY);
 }
 
-export function shouldWaitForHandoff(state: HandoffLoadState): boolean {
-  return state.isHandoffLoading && !state.token;
+export async function clearServerSession(): Promise<void> {
+  await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  }).catch((error: unknown) => {
+    console.warn("[认证] 清理 Web Cookie 会话失败:", error);
+  });
 }
 
 export function removeHandoffFromUrl(value: string): string {
@@ -146,22 +141,4 @@ function safeRemoveItem(storage: Storage | undefined, key: string) {
   } catch {
     // 浏览器隐私模式或嵌入环境禁用存储时忽略。
   }
-}
-
-export async function exchangeHandoffToken(handoffToken: string): Promise<AuthSession> {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/handoff/exchange`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ handoffToken }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`PC 登录态桥接失败：${response.status}`);
-  }
-
-  const session = (await response.json()) as HandoffExchangeResponse;
-  storeSession(session);
-  return session;
 }
