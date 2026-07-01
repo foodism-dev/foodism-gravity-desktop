@@ -11,6 +11,7 @@ import {
 import { AppShell } from "@/components/AppShell.tsx";
 import { isLinKeTestSkipEnabled } from "@/lib/config.ts";
 import {
+  clearHandoffFromCurrentUrl,
   clearSession,
   exchangeHandoffToken,
   getStoredToken,
@@ -129,6 +130,7 @@ export function App() {
         window.history.replaceState(null, "", nextUrl);
       })
       .catch((error: unknown) => {
+        clearHandoffFromCurrentUrl();
         setHandoffError(error instanceof Error ? error.message : "PC 登录态桥接失败");
       })
       .finally(() => setIsHandoffLoading(false));

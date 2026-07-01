@@ -51,6 +51,36 @@ export function clearSession() {
   removeStorageValue(USER_KEY);
 }
 
+export function removeHandoffFromUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (!url.searchParams.has("handoff")) {
+      return value;
+    }
+    url.searchParams.delete("handoff");
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
+export function clearHandoffFromCurrentUrl(): void {
+  if (typeof window === "undefined" || !window.location?.href) {
+    return;
+  }
+
+  const nextUrl = removeHandoffFromUrl(window.location.href);
+  if (nextUrl === window.location.href) {
+    return;
+  }
+
+  if (window.history?.replaceState) {
+    window.history.replaceState(null, "", nextUrl);
+    return;
+  }
+  window.location.href = nextUrl;
+}
+
 function consumeUrlApiToken(): string | null {
   if (!window.location?.href) {
     return null;

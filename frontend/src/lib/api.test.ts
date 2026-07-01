@@ -660,6 +660,19 @@ describe("前端 API", () => {
     );
   });
 
+  test("Given current web URL has stale handoff, When API returns 401, Then SSO returnTo excludes one-time handoff", async () => {
+    installSessionStorage({
+      href: "http://localhost:5173/tickets?tab=workbench&handoff=used-token",
+    });
+    installFetchMock(() => ({ message: "登录已过期" }), 401);
+
+    await expect(listTickets()).rejects.toThrow("登录已过期");
+
+    expect(globalThis.window.location.href).toBe(
+      "http://localhost:8787/sso_login?returnTo=http%3A%2F%2Flocalhost%3A5173%2Ftickets%3Ftab%3Dworkbench",
+    );
+  });
+
   test("Given API returns 401 inside Electron, When loading ticket data, Then it opens Electron SSO login", async () => {
     installSessionStorage();
     let ssoLoginStarts = 0;

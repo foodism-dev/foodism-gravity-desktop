@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { clearSession, getStoredToken, getStoredUser, storeSession } from "./auth.ts";
+import {
+  clearHandoffFromCurrentUrl,
+  clearSession,
+  getStoredToken,
+  getStoredUser,
+  storeSession,
+} from "./auth.ts";
 
 interface StorageLike {
   getItem(key: string): string | null;
@@ -30,19 +36,16 @@ function installWindow(input: {
 } = {}) {
   const sessionStorage = input.sessionStorage ?? createMemoryStorage();
   const localStorage = input.localStorage ?? createMemoryStorage();
+  const location = new URL(input.href ?? "http://localhost:5174/tickets?embedded=electron");
   Object.defineProperty(globalThis, "window", {
     value: {
       sessionStorage,
       localStorage,
-      location: {
-        href: input.href ?? "http://localhost:5174/tickets?embedded=electron",
-      },
+      location,
       history: {
         replaceState(_state: unknown, _title: string, nextUrl: string) {
-          this.lastUrl = nextUrl;
-          globalThis.window.location.href = nextUrl;
+          location.href = new URL(nextUrl, location.href).toString();
         },
-        lastUrl: "",
       },
     },
     configurable: true,
@@ -73,6 +76,16 @@ describe("前端登录持久化", () => {
     expect(getStoredToken()).toBe("pc-token");
     expect(localStorage.getItem("proma_frontend_token")).toBe("pc-token");
     expect(globalThis.window.location.href).toBe("http://localhost:5174/tickets?embedded=electron");
+  });
+
+  test("Given current URL has handoff, When clearing handoff, Then it preserves other search params", () => {
+    installWindow({
+      href: "http://localhost:5174/tickets?embedded=electron&handoff=used-token&tab=workbench",
+    });
+
+    clearHandoffFromCurrentUrl();
+
+    expect(globalThis.window.location.href).toBe("http://localhost:5174/tickets?embedded=electron&tab=workbench");
   });
 
   test("Given stored session, When clearing session, Then both persistent and session caches are removed", () => {

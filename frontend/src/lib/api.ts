@@ -1,5 +1,4 @@
-import { getStoredToken } from "./auth.ts";
-import { clearSession } from "./auth.ts";
+import { clearSession, getStoredToken, removeHandoffFromUrl } from "./auth.ts";
 import { getApiBaseUrl, getSsoLoginUrl } from "./config.ts";
 import {
   formatPayloadValue,
@@ -234,7 +233,7 @@ function buildSsoLoginRedirectUrl(returnTo: string): string {
 
 function getCurrentReturnToUrl(): string | null {
   if (typeof window === "undefined") return null;
-  return window.location.href;
+  return removeHandoffFromUrl(window.location.href);
 }
 
 function isElectronEmbeddedPage(): boolean {
