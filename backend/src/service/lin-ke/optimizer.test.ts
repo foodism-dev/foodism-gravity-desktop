@@ -39,14 +39,14 @@ function samplePayload() {
 }
 
 describe("Lin-Ke optimizer", () => {
-  test("Given system prompt, Then it keeps generic style and constraints", () => {
-    expect(SYSTEM_PROMPT).toContain("判断");
-    expect(SYSTEM_PROMPT).toContain("逐个检查每一个套餐组和每一个菜品名称");
-    expect(SYSTEM_PROMPT).toContain("整批原样返回");
-    expect(SYSTEM_PROMPT).toContain("单条原文已经清晰");
-    expect(SYSTEM_PROMPT).toContain("贴合餐厅风格");
+  test("Given system prompt, Then it guides marketing naming while keeping constraints", () => {
+    expect(SYSTEM_PROMPT).toContain("营销文案助手");
+    expect(SYSTEM_PROMPT).toContain("宣传效果");
+    expect(SYSTEM_PROMPT).toContain("风格统一、结构对称");
+    expect(SYSTEM_PROMPT).toContain("默认应进行优化");
+    expect(SYSTEM_PROMPT).toContain("食欲感");
     expect(SYSTEM_PROMPT).toContain("禁止虚构");
-    expect(SYSTEM_PROMPT).toContain("禁止改价格、数量、ID、套餐结构、选择规则");
+    expect(SYSTEM_PROMPT).toContain("不得修改价格、数量、ID、套餐结构、选择规则");
   });
 
   test("Given payload, When building prompt, Then context fields are included", () => {
