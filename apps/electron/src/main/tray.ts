@@ -1,10 +1,10 @@
 import { Tray, Menu, app, nativeImage, BrowserWindow } from 'electron'
 import { join } from 'path'
-import { existsSync } from 'fs'
 import { listAgentSessions } from './lib/agent-session-manager'
 import { listAgentWorkspaces } from './lib/agent-workspace-manager'
 import { isAgentSessionActive } from './lib/agent-service'
 import { createTrayMenuModel, type TrayRecentSessionItem } from './lib/tray-menu-model'
+import { resolveTrayIconPath } from './lib/tray-icon-path'
 
 let tray: Tray | null = null
 const APP_DISPLAY_NAME = 'foodism-gravity'
@@ -17,15 +17,14 @@ export interface TrayActions {
 
 /**
  * 获取托盘图标路径
- * 所有平台统一使用 Template 图标
  */
-function getTrayIconPath(): string {
+function getTrayIconPath(): string | null {
   // dev: __dirname/resources（build:resources 拷贝产物）
   // prod: process.resourcesPath（electron-builder extraResources 产物）
   const resourcesDir = app.isPackaged
-    ? join(process.resourcesPath, 'proma-logos')
-    : join(__dirname, 'resources/proma-logos')
-  return join(resourcesDir, 'iconTemplate.png')
+    ? process.resourcesPath
+    : join(__dirname, 'resources')
+  return resolveTrayIconPath(resourcesDir)
 }
 
 /** 显示主窗口 */
@@ -125,18 +124,16 @@ export function createTray(actionsInput?: Partial<TrayActions>): Tray | null {
   const iconPath = getTrayIconPath()
   const actions = { ...getDefaultTrayActions(), ...actionsInput }
 
-  if (!existsSync(iconPath)) {
-    console.warn('Tray icon not found at:', iconPath)
+  if (!iconPath) {
+    console.warn('Tray icon not found')
     return null
   }
 
   try {
     const image = nativeImage.createFromPath(iconPath)
 
-    // macOS: 标记为 Template 图像
-    // Template 图像必须是单色的，使用 alpha 通道定义形状
-    // 系统会自动根据菜单栏主题填充颜色
-    if (process.platform === 'darwin') {
+    // 旧版 Template 兜底图标仍交给 macOS 根据菜单栏主题自动填色。
+    if (process.platform === 'darwin' && iconPath.endsWith('iconTemplate.png')) {
       image.setTemplateImage(true)
     }
 

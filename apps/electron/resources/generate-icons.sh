@@ -37,8 +37,22 @@ echo "📦 Generating tray icons..."
 # - 标准尺寸: 22x22pt（点）
 # - @2x Retina: 44x44px
 # - @3x 高分辨率: 66x66px
-# 使用 "Template" 命名让 macOS 自动适配深色/浅色菜单栏
+# tray-logo 是默认彩色菜单栏图标；iconTemplate 保留为资源兜底。
+TRAY_LOGO="proma-logos/proma-foodism.png"
 TRAY_SVG="proma-logos/icon.svg"
+
+if [ ! -f "$TRAY_LOGO" ]; then
+  echo "⚠️  Tray logo not found at $TRAY_LOGO, skipping color tray logo generation"
+else
+  magick "$TRAY_LOGO" -resize 22x22 proma-logos/tray-logo.png
+  magick "$TRAY_LOGO" -resize 44x44 "proma-logos/tray-logo@2x.png"
+  magick "$TRAY_LOGO" -resize 66x66 "proma-logos/tray-logo@3x.png"
+
+  echo "✅ Color tray logos generated:"
+  echo "   - proma-logos/tray-logo.png (22x22 @1x)"
+  echo "   - proma-logos/tray-logo@2x.png (44x44 @2x Retina)"
+  echo "   - proma-logos/tray-logo@3x.png (66x66 @3x)"
+fi
 
 if [ ! -f "$TRAY_SVG" ]; then
   echo "⚠️  Tray icon SVG not found at $TRAY_SVG, skipping tray icon generation"
@@ -97,6 +111,9 @@ echo "Generated files:"
 echo "  - icon.png (1024x1024) - Linux & macOS Dock"
 echo "  - icon.icns - macOS app icon"
 echo "  - icon.ico - Windows app icon"
+echo "  - proma-logos/tray-logo.png - macOS tray color logo (22x22 @1x)"
+echo "  - proma-logos/tray-logo@2x.png - macOS tray color logo (44x44 @2x Retina)"
+echo "  - proma-logos/tray-logo@3x.png - macOS tray color logo (66x66 @3x)"
 echo "  - proma-logos/iconTemplate.png - macOS tray (22x22 @1x)"
 echo "  - proma-logos/iconTemplate@2x.png - macOS tray (44x44 @2x Retina)"
 echo "  - proma-logos/iconTemplate@3x.png - macOS tray (66x66 @3x)"
