@@ -16,9 +16,6 @@ import {
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Document, Page, pdfjs } from "react-pdf";
-import "react-pdf/dist/Page/AnnotationLayer.css";
-import "react-pdf/dist/Page/TextLayer.css";
 
 import type { AuthState } from "@/App.tsx";
 import { ensureTicketMetadataAtom, ticketMetadataStateAtom } from "@/atoms/ticket-metadata.ts";
@@ -99,15 +96,6 @@ import {
 } from "@/lib/ticket-detail-workbench.ts";
 import { cn } from "@/lib/utils.ts";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-
-const PDF_PREVIEW_OPTIONS = {
-  disableAutoFetch: true,
-  disableRange: true,
-  disableStream: true,
-};
-
-const PDF_PREVIEW_CACHE_BUST = "20260624-cors";
 const SUPPLY_GOODS_APPROVAL_BASE_URL = "https://sale.foodism.cc/app/SupplyGoods/list#!/View/SupplyGoods";
 
 interface TicketDetailPageProps {
@@ -2415,87 +2403,9 @@ function FilePreviewDialog({ item }: { item: MediaPreviewItem }) {
 }
 
 function PdfPreview({ item }: { item: MediaPreviewItem }) {
-  const [pageCount, setPageCount] = useState(0);
-  const [pageNumber, setPageNumber] = useState(1);
-  const pdfUrl = useMemo(() => buildPdfPreviewUrl(item.url), [item.url]);
-
   return (
-    <div className="mt-4 overflow-hidden rounded-md bg-slate-100 ring-1 ring-slate-200">
-      <div className="flex h-10 items-center justify-between border-b border-slate-200 bg-white px-3 text-sm">
-        <div className="font-medium text-slate-700">
-          {pageCount > 0 ? `第 ${pageNumber} / ${pageCount} 页` : "PDF 加载中"}
-        </div>
-        {pageCount > 1 ? (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={pageNumber <= 1}
-              onClick={() => setPageNumber((current) => Math.max(1, current - 1))}
-            >
-              上一页
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={pageNumber >= pageCount}
-              onClick={() => setPageNumber((current) => Math.min(pageCount, current + 1))}
-            >
-              下一页
-            </Button>
-          </div>
-        ) : null}
-      </div>
-      <div className="ticket-scrollbar h-[68vh] overflow-auto bg-slate-200 p-4">
-        <Document
-          file={pdfUrl}
-          options={PDF_PREVIEW_OPTIONS}
-          loading={<PdfLoading />}
-          error={<PdfError />}
-          onLoadSuccess={({ numPages }) => {
-            setPageCount(numPages);
-            setPageNumber(1);
-          }}
-        >
-          <Page
-            pageNumber={pageNumber}
-            width={840}
-            loading={<PdfLoading />}
-            className="mx-auto overflow-hidden rounded-md bg-white shadow-sm"
-          />
-        </Document>
-      </div>
-    </div>
-  );
-}
-
-function buildPdfPreviewUrl(url: string): string {
-  try {
-    const nextUrl = new URL(url);
-    nextUrl.searchParams.set("pdf_preview", PDF_PREVIEW_CACHE_BUST);
-    return nextUrl.toString();
-  } catch {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}pdf_preview=${PDF_PREVIEW_CACHE_BUST}`;
-  }
-}
-
-function PdfLoading() {
-  return (
-    <div className="flex h-64 items-center justify-center text-sm text-slate-500">
-      正在加载 PDF...
-    </div>
-  );
-}
-
-function PdfError() {
-  return (
-    <div className="flex h-64 flex-col items-center justify-center gap-2 text-center text-sm text-slate-600">
-      <FileText className="h-10 w-10 text-red-500" />
-      <div className="font-medium text-slate-900">PDF 加载失败</div>
-      <div className="text-slate-500">可以尝试用下方按钮在新窗口打开。</div>
+    <div className="mt-4 h-[72vh] overflow-hidden rounded-md bg-slate-100 ring-1 ring-slate-200">
+      <iframe src={item.url} title={item.fileName} className="h-full w-full bg-white" />
     </div>
   );
 }

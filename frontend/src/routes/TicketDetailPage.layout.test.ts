@@ -415,6 +415,19 @@ describe("工单详情页布局", () => {
     expect(previewSource).not.toContain('target="_blank"');
   });
 
+  test("Given PDF attachment preview, When rendering the preview dialog, Then it uses browser native PDF loading without JS fetch", async () => {
+    const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
+    const previewSource = source.slice(
+      source.indexOf("function PdfPreview"),
+      source.indexOf("function PreviewActions"),
+    );
+
+    expect(previewSource).toContain('<iframe src={item.url} title={item.fileName}');
+    expect(source).not.toContain('from "react-pdf"');
+    expect(source).not.toContain("pdfjs.GlobalWorkerOptions.workerSrc");
+    expect(source).not.toContain("buildPdfPreviewUrl");
+  });
+
   test("Given dense ticket detail fields, When rendering the page, Then field groups share one frame with responsive columns", async () => {
     const source = await Bun.file("frontend/src/routes/TicketDetailPage.tsx").text();
 

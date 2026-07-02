@@ -1,6 +1,6 @@
 {
   "name": "@proma/frontend",
-  "version": "0.1.71",
+  "version": "0.1.72",
   "private": true,
   "type": "module",
   "scripts": {
@@ -18,10 +18,8 @@
     "clsx": "^2.1.1",
     "jotai": "^2.17.1",
     "lucide-react": "^0.460.0",
-    "pdfjs-dist": "5.4.296",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-pdf": "^10.4.1",
     "tailwind-merge": "^2.5.5"
   },
   "devDependencies": {
