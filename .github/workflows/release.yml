@@ -70,17 +70,27 @@ jobs:
         working-directory: .
 
       # 打包并发布到 GitHub Releases
-      - name: 打包并发布 (macOS)
+      # macOS 临时包使用 ad-hoc 签名，不依赖 Apple Developer ID 证书或公证。
+      - name: 打包并发布 (macOS 临时 ad-hoc)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           FOODISM_MAC_ADHOC_SIGN: "true"
         run: |
           for i in 1 2 3; do
-            npx electron-builder --mac --arm64 --publish always && break
-            echo "Attempt $i failed, retrying in 10s..."
-            sleep 10
+            if npx electron-builder --mac --arm64 --publish always; then
+              exit 0
+            fi
+
+            echo "Attempt $i failed."
+            if [ "$i" -lt 3 ]; then
+              echo "Retrying in 10s..."
+              sleep 10
+            fi
           done
+
+          echo "macOS 临时 ad-hoc 打包发布失败。"
+          exit 1
         working-directory: apps/electron
 
   build-windows-x64:
